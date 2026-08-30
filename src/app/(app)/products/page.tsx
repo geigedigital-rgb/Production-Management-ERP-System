@@ -1,0 +1,242 @@
+import { redirect } from "next/navigation";
+import { auth } from "@/server/auth";
+import {
+  listProductsByIds,
+  listProductsSummary,
+  listSizes,
+} from "@/server/domains/products/service";
+import { listMaterials, listUnits } from "@/server/domains/catalog/materials";
+import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
+import { buildCalcFromProduct, getPricingDefaults } from "@/server/domains/calculation/from-entities";
+import { commercialPriceTiersFromProduct, resolveCommercialPricePerUnit } from "@/lib/commercial-price";
+import { getCatalogHealth, tipsForPage } from "@/server/domains/catalog/health";
+import { PageHeader } from "@/components/ui/Page";
+import { Banner } from "@/components/ui/Banner";
+import { TableCard, TableToolbar } from "@/components/ui/Table";
+import { SearchField, FilterChips, ResetFilters } from "@/components/ui/Filters";
+import { ProductCreatePanel } from "@/components/products/ProductCreatePanel";
+import { ProductsTable, type ProductsTableRow } from "@/components/products/ProductsTable";
+import { CatalogHealthBanner } from "@/components/catalog/CatalogHealthBanner";
+import { accessHas, getCurrentUserAccess } from "@/server/auth/access";
+
+const PRICE_TIERS = [50, 100, 500];
+
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; state?: string }>;
+}) {
+  const access = await getCurrentUserAccess();
+  if (!access) redirect("/login");
+
+  const { q, state } = await searchParams;
+  const canDelete = accessHas(access, "archiveRecords");
+
+  let summaries: Awaited<ReturnType<typeof listProductsSummary>> = [];
+  let healthTips: Awaited<ReturnType<typeof getCatalogHealth>>["tips"] = [];
+  let dbError = false;
+  let loadError: string | null = null;
+
+  const [pricing, sizes, materials, operations, decorations, units, health] = await Promise.all([
+    getPricingDefaults().catch(() => ({
+      pricingMethod: "MARGIN" as const,
+      targetRatePercent: 30,
+      minimumMarginPercent: 15,
+      roundingDecimals: 2,
+    })),
+    listSizes().catch(() => []),
+    listMaterials().catch(() => []),
+    listOperations().catch(() => []),
+    listDecorations().catch(() => []),
+    listUnits().catch(() => []),
+    getCatalogHealth().catch(() => null),
+  ]);
+
+  if (health) {
+    healthTips = tipsForPage(health.tips, "products");
+  }
+
+  const detailById = new Map<
+    string,
+    Awaited<ReturnType<typeof listProductsByIds>>[number]
+  >();
+
+  try {
+    summaries = await listProductsSummary();
+    const readyIds = summaries
+      .filter((row) => row._count.materials > 0 && row._count.operations > 0)
+      .map((row) => row.id);
+    const details = await listProductsByIds(readyIds);
+    for (const product of details) detailById.set(product.id, product);
+  } catch (error) {
+    dbError = true;
+    loadError = error instanceof Error ? error.message : "Невідома помилка завантаження";
+    console.error("[products] list failed:", error);
+  }
+
+  const isReady = (row: (typeof summaries)[number]) =>
+    row._count.materials > 0 && row._count.operations > 0;
+
+  const term = q?.toLowerCase().trim();
+  const filtered = summaries.filter((product) => {
+    const matchesTerm = term
+      ? [product.nameUk, product.internalCode].filter(Boolean).some((value) =>
+          String(value).toLowerCase().includes(term),
+        )
+      : true;
+    const matchesState =
+      state === "ready" ? isReady(product) : state === "draft" ? !isReady(product) : true;
+    return matchesTerm && matchesState;
+  });
+
+  const readyCount = summaries.filter(isReady).length;
+  const sizeOptions = sizes.map((size) => ({
+    id: size.id,
+    label: size.nameUk,
+    code: size.code,
+  }));
+  const unitOptions = units.map((unit) => ({
+    id: unit.id,
+    label: `${unit.nameUk} (${unit.code})`,
+  }));
+  const materialCatalog = materials.map((material) => ({
+    id: material.id,
+    label: `${material.nameUk} (${material.unitOfMeasure.code})`,
+    unit: material.unitOfMeasure.code,
+    price: Number(material.purchasePrice),
+    defaultWaste: Number(material.defaultWastePercent),
+    name: material.nameUk,
+  }));
+  const operationCatalog = operations.map((operation) => ({
+    id: operation.id,
+    label: operation.nameUk,
+    method: operation.calculationMethod,
+    unitRate: operation.baseRate != null ? Number(operation.baseRate) : null,
+    shiftCost: operation.shiftCost != null ? Number(operation.shiftCost) : null,
+    standardOutput:
+      operation.standardOutputPerShift != null
+        ? Number(operation.standardOutputPerShift)
+        : null,
+  }));
+  const decorationCatalog = decorations.map((decoration) => ({
+    id: decoration.id,
+    label: decoration.nameUk,
+    setupCost: Number(decoration.setupCost),
+    unitRate: Number(decoration.unitRate),
+  }));
+
+  const rows: ProductsTableRow[] = filtered.map((product) => {
+    const ready = isReady(product);
+    const detail = detailById.get(product.id);
+    const commercialTiers = detail ? commercialPriceTiersFromProduct(detail) : [];
+    const tierQtys =
+      commercialTiers.length > 0 ? commercialTiers.map((tier) => tier.minQuantity) : PRICE_TIERS;
+    return {
+      id: product.id,
+      nameUk: product.nameUk,
+      internalCode: product.internalCode,
+      isBaseModel: product.isBaseModel,
+      materialsCount: product._count.materials,
+      operationsCount: product._count.operations,
+      decorationsCount: product._count.decorations,
+      ready,
+      priceTiers: tierQtys,
+      prices: tierQtys.map((qty) => {
+        if (!ready || !detail) return null;
+        if (commercialTiers.length > 0) {
+          return resolveCommercialPricePerUnit({ quantity: qty, tiers: commercialTiers });
+        }
+        return Number(buildCalcFromProduct(detail, qty, pricing).sellingPricePerUnit);
+      }),
+    };
+  });
+
+  return (
+    <div>
+      <PageHeader
+        title="Вироби"
+        description="Комерційний прайс — фіксовані ціни за тиражем для базових моделей. Без прайсу — розрахунковий орієнтир з собівартості."
+        actions={
+          <ProductCreatePanel
+            sizes={sizeOptions}
+            materialCatalog={materialCatalog}
+            operationCatalog={operationCatalog}
+            decorationCatalog={decorationCatalog}
+            unitOptions={unitOptions}
+            variant="primary"
+            size="md"
+            triggerLabel="Новий виріб"
+          />
+        }
+      />
+
+      {dbError ? (
+        <Banner tone="danger" title="Не вдалося завантажити вироби" className="mb-4">
+          База може бути доступна, але запит списку впав. Перезапустіть{" "}
+          <code>next dev</code> після міграцій Prisma.{" "}
+          {loadError ? (
+            <span className="mt-1 block text-[12.5px] opacity-80">{loadError}</span>
+          ) : null}
+        </Banner>
+      ) : (
+        <CatalogHealthBanner tips={healthTips} className="mb-4" />
+      )}
+
+      <TableCard>
+        <TableToolbar
+          left={
+            <span className="type-caption tabular">
+              {filtered.length} з {summaries.length}
+            </span>
+          }
+          filters={
+            <>
+              <SearchField placeholder="Пошук за назвою або кодом" className="w-64" />
+              <FilterChips
+                paramKey="state"
+                options={[
+                  { value: "ready", label: "Готові до замовлення", count: readyCount },
+                  {
+                    value: "draft",
+                    label: "Потребують комплектації",
+                    count: summaries.length - readyCount,
+                  },
+                ]}
+              />
+              <ResetFilters keys={["q", "state"]} />
+            </>
+          }
+        />
+
+        <ProductsTable
+          rows={rows}
+          canDelete={canDelete}
+          empty={{
+            title: dbError
+              ? "Дані недоступні"
+              : term || state
+                ? "Нічого не знайдено"
+                : "Виробів ще немає",
+            description: dbError
+              ? undefined
+              : term || state
+                ? "Змініть запит або скиньте фільтри."
+                : "Створіть виріб з фото, розмірами та комплектацією — він стане еталоном для замовлень.",
+            action: !dbError ? (
+              <ProductCreatePanel
+                sizes={sizeOptions}
+                materialCatalog={materialCatalog}
+                operationCatalog={operationCatalog}
+                decorationCatalog={decorationCatalog}
+                unitOptions={unitOptions}
+                variant="primary"
+                size="sm"
+                triggerLabel="Новий виріб"
+              />
+            ) : undefined,
+          }}
+        />
+      </TableCard>
+    </div>
+  );
+}

@@ -1,0 +1,426 @@
+@import "tailwindcss";
+
+:root {
+  /* Soft cool canvas — not flat white, not green wash */
+  --color-app-bg: #f2f4f6;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f0f2f4;
+  --color-surface-hover: #e9edf0;
+  --color-surface-tint: #eef3f0;
+
+  --color-text-primary: #0f1720;
+  --color-text-secondary: #5a6570;
+  --color-text-tertiary: #8b949e;
+  --color-text-disabled: #a8b0b8;
+  --color-text-quiet: #9aa3ad;
+
+  --color-border: #e6eaee;
+  --color-border-strong: #d0d6dd;
+  --color-divider: #f0f2f4;
+
+  /* Primary: deep enough for white labels (WCAG AA+) */
+  --color-primary-50: #eef6f1;
+  --color-primary-100: #d8ebe0;
+  --color-primary-200: #b3d7c4;
+  --color-primary-300: #7fba99;
+  --color-primary-400: #4a9a72;
+  --color-primary-500: #2a7d56;
+  --color-primary-600: #0c5a3a;
+  --color-primary-700: #094830;
+  --color-primary-800: #073828;
+  --color-primary-900: #05291d;
+  --color-on-primary: #ffffff;
+
+  /* Equal-brightness soft tints for important chrome only */
+  --color-tint-sage: #eef6f1;
+  --color-tint-sky: #eef3f9;
+  --color-tint-amber: #faf4eb;
+  --color-tint-rose: #faf0f0;
+  --color-tint-slate: #eef1f4;
+
+  --color-table-section-bg: #f8faf9;
+  --color-table-section-text: #728780;
+  --color-table-section-border: #e8eeea;
+  --color-table-subtotal-bg: var(--color-surface-subtle);
+
+  --color-success-bg: var(--color-tint-sage);
+  --color-success-text: #166534;
+  --color-warning-bg: var(--color-tint-amber);
+  --color-warning-text: #9a6700;
+  --color-danger-bg: var(--color-tint-rose);
+  --color-danger-text: #b42318;
+  --color-info-bg: var(--color-tint-sky);
+  --color-info-text: #1d4ed8;
+
+  --color-focus-ring: rgba(12, 90, 58, 0.32);
+  --color-overlay: rgba(15, 23, 32, 0.42);
+
+  /* Contrasting sidebar */
+  --color-sidebar-bg: #162822;
+  --color-sidebar-border: rgba(255, 255, 255, 0.08);
+  --color-sidebar-text: #c5d2cb;
+  --color-sidebar-text-muted: #8a9a92;
+  --color-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-active: rgba(61, 168, 120, 0.16);
+  --color-sidebar-active-text: #f3faf6;
+  --color-sidebar-accent: #3da878;
+
+  --radius-control: 8px;
+  --radius-surface: 12px;
+  --radius-badge: 6px;
+
+  --shadow-float: 0 8px 24px rgba(15, 23, 32, 0.08);
+  --shadow-panel: 0 12px 32px rgba(15, 23, 32, 0.1);
+  --shadow-card: 0 1px 2px rgba(15, 23, 32, 0.04), 0 0 0 1px rgba(15, 23, 32, 0.03);
+
+  --sidebar-width: 232px;
+  --sidebar-width-expanded: 232px;
+  --sidebar-width-collapsed: 56px;
+  --topbar-height: 56px;
+  --summary-width: 320px;
+
+  --font-display: var(--font-manrope), "Manrope", system-ui, sans-serif;
+  --font-body: var(--font-inter), "Inter", system-ui, sans-serif;
+
+  /* Compatibility aliases */
+  --bg: var(--color-app-bg);
+  --surface: var(--color-surface);
+  --surface-muted: var(--color-surface-subtle);
+  --text: var(--color-text-primary);
+  --text-secondary: var(--color-text-secondary);
+  --text-muted: var(--color-text-tertiary);
+  --border: var(--color-border);
+  --border-strong: var(--color-border-strong);
+  --accent: var(--color-primary-600);
+  --accent-hover: var(--color-primary-700);
+  --accent-soft: var(--color-primary-50);
+  --success: var(--color-success-text);
+  --success-soft: var(--color-success-bg);
+  --danger: var(--color-danger-text);
+  --danger-soft: var(--color-danger-bg);
+  --warning: var(--color-warning-text);
+  --warning-soft: var(--color-warning-bg);
+}
+
+@theme inline {
+  --color-background: var(--color-app-bg);
+  --color-foreground: var(--color-text-primary);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-manrope);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-app-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 450;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 1;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Shared primary CTA — always white label on deep green */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2.5rem;
+  padding-inline: 0.875rem;
+  border-radius: var(--radius-control);
+  background: var(--color-primary-600);
+  color: var(--color-on-primary) !important;
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: background-color 150ms ease;
+}
+
+.btn-primary:hover {
+  background: var(--color-primary-700);
+}
+
+.btn-primary-sm {
+  height: 2.25rem;
+  padding-inline: 0.75rem;
+  font-size: 13px;
+}
+
+/* Quiet CTA — for secondary / not-yet-ready actions */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2.5rem;
+  padding-inline: 0.875rem;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.btn-secondary:hover {
+  background: var(--color-surface-subtle);
+}
+
+/* Typography utilities */
+.type-page-title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 32px;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+}
+
+.type-object-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 26px;
+  letter-spacing: -0.015em;
+  color: var(--color-text-primary);
+}
+
+.type-section-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 24px;
+  color: var(--color-text-primary);
+}
+
+.type-subsection {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--color-text-primary);
+}
+
+.type-body {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 21px;
+  color: var(--color-text-primary);
+}
+
+.type-body-secondary {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 19px;
+  color: var(--color-text-secondary);
+}
+
+.type-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--color-text-tertiary);
+}
+
+.type-caption {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--color-text-quiet);
+}
+
+.type-total {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 28px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.type-hero-value {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 34px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.type-table {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--color-text-secondary);
+}
+
+.type-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-quiet);
+}
+
+/** In-table section labels (Матеріали, Операції, …). */
+.table-section-header {
+  background: var(--color-table-section-bg);
+  color: var(--color-table-section-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.table-section-subtotal {
+  background: var(--color-table-subtotal-bg);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.erp-table thead th {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-quiet);
+}
+
+/** Demote chrome that is not the main decision (counts, hints, side links). */
+.text-quiet {
+  color: var(--color-text-quiet);
+  font-weight: 400;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Overlay motion */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.anim-overlay {
+  animation: overlay-in 140ms ease-out;
+}
+
+.anim-panel {
+  animation: panel-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.anim-modal {
+  animation: modal-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pinned-column-shadow {
+  from {
+    box-shadow: none;
+  }
+  to {
+    box-shadow: -8px 0 8px -8px rgba(15, 23, 32, 0.16);
+  }
+}
+
+@supports (animation-timeline: scroll(self inline)) {
+  .table-scroll {
+    scroll-timeline: --table-scroll-x inline;
+  }
+
+  .table-scroll .is-pinned-right {
+    animation: pinned-column-shadow linear both;
+    animation-timeline: --table-scroll-x;
+    animation-range: 0 4px;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 10mm 18mm;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background: #ffffff !important;
+    color: #1c2420;
+    font-size: 10pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

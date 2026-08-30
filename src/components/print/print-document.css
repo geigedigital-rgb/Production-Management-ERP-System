@@ -1,0 +1,372 @@
+/* A4 print documents — КП, специфікації */
+
+.print-layout {
+  min-height: 100vh;
+  background: var(--color-app-bg);
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+@media print {
+  .print-layout {
+    min-height: auto;
+    background: #ffffff;
+    padding: 0;
+  }
+}
+
+/* Screen: A4 sheet preview (210 × 297 mm) */
+.print-doc {
+  box-sizing: border-box;
+  width: 210mm;
+  max-width: 100%;
+  min-height: 297mm;
+  margin-inline: auto;
+  padding: 14mm 12mm 16mm;
+  background: #ffffff;
+  color: #1c2420;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  box-shadow: var(--shadow-float);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+}
+
+@media print {
+  .print-doc {
+    width: auto;
+    max-width: none;
+    min-height: auto;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+    border-radius: 0;
+    font-size: 10pt;
+  }
+}
+
+/* Header */
+.print-doc-header {
+  padding-bottom: 5mm;
+  margin-bottom: 5mm;
+  border-bottom: 0.75pt solid #333333;
+}
+
+.print-doc-header-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8mm;
+  align-items: start;
+}
+
+.print-doc-header-aside {
+  text-align: right;
+  min-width: 42mm;
+}
+
+.print-doc-company {
+  margin: 0;
+  font-family: var(--font-manrope), system-ui, sans-serif;
+  font-size: 14pt;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.print-doc-doc-type {
+  margin: 0;
+  font-size: 8pt;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5a6560;
+}
+
+.print-doc-doc-number {
+  margin: 1mm 0 0;
+  font-size: 13pt;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.print-doc-doc-meta {
+  margin: 1mm 0 0;
+  font-size: 9pt;
+  color: #5a6560;
+}
+
+.print-doc-company-meta {
+  margin: 1.5mm 0 0;
+  font-size: 9pt;
+  color: #5a6560;
+  line-height: 1.4;
+}
+
+/* Meta blocks (client, terms) */
+.print-doc-meta {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6mm;
+  padding-bottom: 5mm;
+  margin-bottom: 5mm;
+  border-bottom: 0.5pt solid #cccccc;
+}
+
+.print-doc-meta--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.print-doc-label {
+  margin: 0 0 1.5mm;
+  font-size: 8pt;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5a6560;
+}
+
+.print-doc-meta-body {
+  font-size: 10pt;
+}
+
+.print-doc-meta-body p {
+  margin: 0.5mm 0 0;
+}
+
+.print-doc-meta-body p:first-child {
+  margin-top: 0;
+}
+
+.print-doc-meta-muted {
+  font-size: 9pt;
+  color: #5a6560;
+}
+
+/* Sections */
+.print-doc-section {
+  margin-bottom: 5mm;
+  break-inside: avoid-page;
+  page-break-inside: avoid;
+}
+
+.print-doc-section--breakable {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+
+.print-doc-section-title {
+  margin: 0 0 2.5mm;
+  font-size: 8pt;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5a6560;
+}
+
+/* Tables */
+.print-doc-table-wrap {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+
+.print-doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9.5pt;
+}
+
+.print-doc-table thead {
+  display: table-header-group;
+}
+
+.print-doc-table tfoot {
+  display: table-footer-group;
+}
+
+.print-doc-table th,
+.print-doc-table td {
+  padding: 2mm 2.5mm;
+  vertical-align: top;
+  border-bottom: 0.5pt solid #dddddd;
+  text-align: left;
+}
+
+.print-doc-table th {
+  font-size: 8.5pt;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #333333;
+  border-bottom: 0.75pt solid #333333;
+  background: #f7f9f8;
+}
+
+@media print {
+  .print-doc-table th {
+    background: #f0f0f0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+.print-doc-table td.num,
+.print-doc-table th.num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.print-doc-table tbody tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-doc-table tfoot td {
+  border-bottom: none;
+  border-top: 0.75pt solid #333333;
+  font-weight: 600;
+  padding-top: 3mm;
+}
+
+.print-doc-table tfoot .print-doc-total-value {
+  font-size: 11pt;
+  font-weight: 700;
+}
+
+.print-doc-item-sub {
+  display: block;
+  margin-top: 0.5mm;
+  font-size: 8.5pt;
+  color: #5a6560;
+  line-height: 1.35;
+}
+
+/* Size chips */
+.print-doc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2mm;
+}
+
+.print-doc-chip {
+  display: inline-block;
+  padding: 1mm 2.5mm;
+  border: 0.5pt solid #cccccc;
+  border-radius: 1.5mm;
+  font-size: 9pt;
+}
+
+/* Two-column lists (operations / decorations) */
+.print-doc-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6mm;
+}
+
+.print-doc-list {
+  margin: 0;
+  padding-left: 4mm;
+  font-size: 9.5pt;
+}
+
+.print-doc-list li {
+  margin-bottom: 1mm;
+}
+
+.print-doc-list-plain {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.print-doc-list-plain li {
+  margin-bottom: 1mm;
+  padding-left: 3mm;
+  position: relative;
+}
+
+.print-doc-list-plain li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: #888888;
+}
+
+/* Notes & footer */
+.print-doc-notes {
+  padding-top: 4mm;
+  margin-top: 2mm;
+  border-top: 0.5pt solid #cccccc;
+  font-size: 9.5pt;
+  white-space: pre-wrap;
+}
+
+.print-doc-footer {
+  margin-top: 6mm;
+  padding-top: 4mm;
+  border-top: 0.5pt solid #cccccc;
+  font-size: 8.5pt;
+  color: #5a6560;
+  line-height: 1.45;
+}
+
+/* Signatures */
+.print-doc-signatures {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12mm;
+  margin-top: 8mm;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-doc-signature {
+  text-align: center;
+  min-width: 45mm;
+}
+
+.print-doc-signature-line {
+  height: 8mm;
+  border-bottom: 0.5pt solid #888888;
+  margin-bottom: 1.5mm;
+}
+
+.print-doc-signature-label {
+  font-size: 8.5pt;
+  color: #5a6560;
+}
+
+/* Summary row (spec cost) */
+.print-doc-summary {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 6mm;
+  align-items: end;
+}
+
+.print-doc-summary-value {
+  margin: 0.5mm 0 0;
+  font-size: 11pt;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Running footer — doc title on every printed page */
+.print-doc-running-footer {
+  display: none;
+}
+
+@media print {
+  .print-doc-running-footer {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 2mm 12mm 0;
+    border-top: 0.5pt solid #dddddd;
+    font-size: 7.5pt;
+    color: #888888;
+    text-align: center;
+    background: #ffffff;
+  }
+}

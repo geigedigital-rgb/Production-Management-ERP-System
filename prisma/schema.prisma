@@ -1,0 +1,752 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMINISTRATOR
+  MANAGER
+}
+
+enum RecordStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum MaterialType {
+  FABRIC
+  OTHER_MATERIAL
+  TRIM
+}
+
+enum OperationCalcMethod {
+  UNIT_RATE
+  SHIFT_OUTPUT
+  QUANTITY_TIER
+}
+
+enum PricingMethod {
+  MARGIN
+  MARKUP
+}
+
+/// How input VAT enters material cost (COGS) for calculations.
+enum MaterialCostVatMode {
+  NET
+  GROSS
+}
+
+enum OrderStatus {
+  DRAFT
+  CALCULATION
+  PENDING_APPROVAL
+  APPROVED
+  HANDED_TO_PRODUCTION
+  CLOSED
+  CANCELLED
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  login        String?   @unique
+  name         String
+  passwordHash String
+  role         UserRole  @default(MANAGER)
+  /// Explicit permission keys; administrators always have full access.
+  permissions  String[]  @default([])
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  managedOrders Order[]         @relation("OrderManager")
+  activityEvents ActivityEvent[]
+  calculationVersions CalculationVersion[] @relation("VersionAuthor")
+
+  @@map("users")
+}
+
+model UnitOfMeasure {
+  id        String       @id @default(cuid())
+  code      String       @unique
+  nameUk    String
+  status    RecordStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  materials Material[]
+
+  @@map("units_of_measure")
+}
+
+model Category {
+  id        String       @id @default(cuid())
+  nameUk    String
+  kind      String
+  status    RecordStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  materials Material[]
+  products  Product[]
+  operations Operation[]
+
+  @@unique([kind, nameUk])
+  @@map("categories")
+}
+
+model Size {
+  id        String       @id @default(cuid())
+  code      String       @unique
+  nameUk    String
+  sortOrder Int          @default(0)
+  status    RecordStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  productSizes ProductSize[]
+  materialSizeNorms ProductMaterialSizeNorm[]
+  materialSizeScopes ProductMaterialSizeScope[]
+  operationSizeScopes ProductOperationSizeScope[]
+
+  @@map("sizes")
+}
+
+model Material {
+  id                 String       @id @default(cuid())
+  nameUk             String
+  type               MaterialType
+  categoryId         String?
+  unitOfMeasureId    String
+  /// Active cost for calc engine (₴ / unit), synced from fabric VAT policy.
+  purchasePrice      Decimal      @db.Decimal(14, 4)
+  defaultWastePercent Decimal     @default(0) @db.Decimal(8, 4)
+  supplierCode       String?
+  colorOrAttribute   String?
+  priceEffectiveDate DateTime?
+  note               String?
+  status             RecordStatus @default(ACTIVE)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  createdById        String?
+  updatedById        String?
+
+  /// Fabric CRM fields (null for trims / other).
+  densityGsm           String?
+  composition          String?
+  metersPerKg          Decimal?  @db.Decimal(14, 4)
+  priceKgUsd           Decimal?  @db.Decimal(14, 4)
+  priceKgUsdCargo      Decimal?  @db.Decimal(14, 4)
+  priceKgUsdVat        Decimal?  @db.Decimal(14, 4)
+  priceMeterUahNoVat   Decimal?  @db.Decimal(14, 4)
+  priceMeterUahVat     Decimal?  @db.Decimal(14, 4)
+  priceMeterUahCutVat  Decimal?  @db.Decimal(14, 4)
+  /// CRM «Тип тканини»: Трикотаж / Саржеві / Плащовка / …
+  fabricKindUk         String?
+  widthCm              String?
+  wholesaleNote        String?
+  rollWeightKg         Decimal?  @db.Decimal(14, 4)
+  metersPerRoll        Decimal?  @db.Decimal(14, 4)
+  /// Min meters for wholesale price; null → fall back to metersPerRoll.
+  minWholesaleMeters   Decimal?  @db.Decimal(14, 4)
+  /// null = follow company PricingSettings.materialCostVatMode
+  costVatOverride      MaterialCostVatMode?
+
+  category      Category?      @relation(fields: [categoryId], references: [id])
+  unitOfMeasure UnitOfMeasure  @relation(fields: [unitOfMeasureId], references: [id])
+  productMaterials ProductMaterial[]
+  orderItemMaterials OrderItemMaterial[]
+  supplierOffers MaterialSupplier[]
+
+  @@index([nameUk])
+  @@index([status])
+  @@index([composition])
+  @@index([fabricKindUk])
+  @@map("materials")
+}
+
+model Supplier {
+  id                   String       @id @default(cuid())
+  nameUk               String
+  defaultCargoUsdPerKg Decimal?     @db.Decimal(14, 4)
+  note                 String?
+  status               RecordStatus @default(ACTIVE)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  materialOffers MaterialSupplier[]
+  orderItemMaterials OrderItemMaterial[]
+
+  @@unique([nameUk])
+  @@index([status])
+  @@map("suppliers")
+}
+
+/// Per-supplier purchase terms for a material (fabric). Primary drives Material.purchasePrice.
+model MaterialSupplier {
+  id                   String   @id @default(cuid())
+  materialId           String
+  supplierId           String
+  isPrimary            Boolean  @default(false)
+  metersPerKg          Decimal? @db.Decimal(14, 4)
+  /// Override company/supplier default cargo; null = use supplier then company.
+  cargoUsdPerKg        Decimal? @db.Decimal(14, 4)
+  priceKgUsd           Decimal? @db.Decimal(14, 4)
+  priceKgUsdCargo      Decimal? @db.Decimal(14, 4)
+  priceKgUsdVat        Decimal? @db.Decimal(14, 4)
+  priceMeterUahNoVat   Decimal? @db.Decimal(14, 4)
+  priceMeterUahVat     Decimal? @db.Decimal(14, 4)
+  priceMeterUahCutVat  Decimal? @db.Decimal(14, 4)
+  rollWeightKg         Decimal? @db.Decimal(14, 4)
+  metersPerRoll        Decimal? @db.Decimal(14, 4)
+  minWholesaleMeters   Decimal? @db.Decimal(14, 4)
+  wholesaleNote        String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@unique([materialId, supplierId])
+  @@index([supplierId])
+  @@index([materialId, isPrimary])
+  @@map("material_suppliers")
+}
+
+model Operation {
+  id                   String              @id @default(cuid())
+  nameUk               String
+  categoryId           String?
+  calculationMethod    OperationCalcMethod @default(UNIT_RATE)
+  baseRate             Decimal?            @db.Decimal(14, 4)
+  shiftCost            Decimal?            @db.Decimal(14, 4)
+  standardOutputPerShift Decimal?          @db.Decimal(14, 4)
+  note                 String?
+  status               RecordStatus        @default(ACTIVE)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  category Category? @relation(fields: [categoryId], references: [id])
+  productOperations ProductOperation[]
+  orderItemOperations OrderItemOperation[]
+
+  @@index([nameUk])
+  @@map("operations")
+}
+
+model DecorationMethod {
+  id           String       @id @default(cuid())
+  nameUk       String
+  calculationUnit String
+  setupCost    Decimal      @default(0) @db.Decimal(14, 4)
+  unitRate     Decimal      @default(0) @db.Decimal(14, 4)
+  note         String?
+  status       RecordStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  quantityTiers DecorationQuantityTier[]
+  productDecorations ProductDecoration[]
+  orderItemDecorations OrderItemDecoration[]
+
+  @@index([nameUk])
+  @@map("decoration_methods")
+}
+
+model DecorationQuantityTier {
+  id                 String   @id @default(cuid())
+  decorationMethodId String
+  minQuantity        Int
+  maxQuantity        Int?
+  unitRate           Decimal  @db.Decimal(14, 4)
+
+  decorationMethod DecorationMethod @relation(fields: [decorationMethodId], references: [id], onDelete: Cascade)
+
+  @@index([decorationMethodId])
+  @@map("decoration_quantity_tiers")
+}
+
+model Product {
+  id          String       @id @default(cuid())
+  nameUk      String
+  internalCode String?     @unique
+  categoryId  String?
+  description String?
+  imageUrl    String?
+  /// Owner rule: cut rate stops decreasing once quantity reaches this run size.
+  optimalQty  Int?
+  /// Base catalog model with fixed commercial price tiers (comment 2).
+  isBaseModel Boolean      @default(false) @map("is_base_model")
+  status      RecordStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  category  Category? @relation(fields: [categoryId], references: [id])
+  sizes     ProductSize[]
+  materials ProductMaterial[]
+  operations ProductOperation[]
+  decorations ProductDecoration[]
+  additionalCosts ProductAdditionalCost[]
+  cutRateTiers ProductCutRateTier[]
+  commercialPriceTiers ProductCommercialPriceTier[]
+  orderItems OrderItem[]
+
+  @@index([nameUk])
+  @@map("products")
+}
+
+/// Cut cost ladder: rate applies when order qty >= minQuantity (and below next tier).
+/// Quantities above Product.optimalQty use the rate at optimalQty (owner rule).
+model ProductCutRateTier {
+  id           String  @id @default(cuid())
+  productId    String
+  minQuantity  Int
+  ratePerUnit  Decimal @db.Decimal(14, 4)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, minQuantity])
+  @@index([productId])
+  @@map("product_cut_rate_tiers")
+}
+
+/// Fixed client price ladder: price applies when order qty >= minQuantity (until next tier).
+model ProductCommercialPriceTier {
+  id           String  @id @default(cuid())
+  productId    String
+  minQuantity  Int
+  pricePerUnit Decimal @db.Decimal(14, 4)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, minQuantity])
+  @@index([productId])
+  @@map("product_commercial_price_tiers")
+}
+
+model ProductSize {
+  id        String @id @default(cuid())
+  productId String
+  sizeId    String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size    Size    @relation(fields: [sizeId], references: [id])
+
+  @@unique([productId, sizeId])
+  @@map("product_sizes")
+}
+
+model ProductMaterial {
+  id                 String  @id @default(cuid())
+  productId          String
+  materialId         String
+  consumptionPerUnit Decimal @db.Decimal(14, 6)
+  wastePercent       Decimal? @db.Decimal(8, 4)
+  note               String?
+
+  product    Product                    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  material   Material                   @relation(fields: [materialId], references: [id])
+  sizeNorms  ProductMaterialSizeNorm[]
+  sizeScopes ProductMaterialSizeScope[]
+
+  @@index([productId])
+  @@map("product_materials")
+}
+
+/// Per-size consumption override. Missing size uses ProductMaterial.consumptionPerUnit.
+model ProductMaterialSizeNorm {
+  id                 String  @id @default(cuid())
+  productMaterialId  String
+  sizeId             String
+  consumptionPerUnit Decimal @db.Decimal(14, 6)
+
+  productMaterial ProductMaterial @relation(fields: [productMaterialId], references: [id], onDelete: Cascade)
+  size            Size            @relation(fields: [sizeId], references: [id])
+
+  @@unique([productMaterialId, sizeId])
+  @@map("product_material_size_norms")
+}
+
+/// If a material has no scope rows, it applies to every size of the product.
+model ProductMaterialSizeScope {
+  id                String @id @default(cuid())
+  productMaterialId String
+  sizeId            String
+
+  productMaterial ProductMaterial @relation(fields: [productMaterialId], references: [id], onDelete: Cascade)
+  size            Size            @relation(fields: [sizeId], references: [id])
+
+  @@unique([productMaterialId, sizeId])
+  @@map("product_material_size_scopes")
+}
+
+model ProductOperation {
+  id               String  @id @default(cuid())
+  productId        String
+  operationId      String
+  rateOverride     Decimal? @db.Decimal(14, 4)
+  standardOverride Decimal? @db.Decimal(14, 4)
+  note             String?
+
+  product    Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  operation  Operation                   @relation(fields: [operationId], references: [id])
+  sizeScopes ProductOperationSizeScope[]
+
+  @@index([productId])
+  @@map("product_operations")
+}
+
+/// If an operation has no scope rows, it applies to every size of the product.
+model ProductOperationSizeScope {
+  id                String @id @default(cuid())
+  productOperationId String
+  sizeId             String
+
+  productOperation ProductOperation @relation(fields: [productOperationId], references: [id], onDelete: Cascade)
+  size             Size             @relation(fields: [sizeId], references: [id])
+
+  @@unique([productOperationId, sizeId])
+  @@map("product_operation_size_scopes")
+}
+
+model ProductDecoration {
+  id                 String @id @default(cuid())
+  productId          String
+  decorationMethodId String
+  note               String?
+
+  product          Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  decorationMethod DecorationMethod @relation(fields: [decorationMethodId], references: [id])
+
+  @@index([productId])
+  @@map("product_decorations")
+}
+
+model ProductAdditionalCost {
+  id          String  @id @default(cuid())
+  productId   String
+  nameUk      String
+  amount      Decimal @db.Decimal(14, 4)
+  isPerUnit   Boolean @default(true)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_additional_costs")
+}
+
+model Client {
+  id            String       @id @default(cuid())
+  companyName   String
+  contactPerson String?
+  phone         String?
+  email         String?
+  legalDetails  String?
+  note          String?
+  status        RecordStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  orders Order[]
+  files  FileAsset[]
+
+  @@index([companyName])
+  @@map("clients")
+}
+
+model Order {
+  id               String      @id @default(cuid())
+  number           String      @unique
+  clientId         String
+  managerId        String
+  title            String?
+  status           OrderStatus @default(DRAFT)
+  requestedDate    DateTime?
+  approvedDate     DateTime?
+  deadline         DateTime?
+  comment          String?
+  /// Order-level target margin/markup override. Null = use project PricingSettings.
+  targetMarginPercent Decimal? @db.Decimal(8, 4)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  client  Client @relation(fields: [clientId], references: [id])
+  manager User   @relation("OrderManager", fields: [managerId], references: [id])
+  items   OrderItem[]
+  files   FileAsset[]
+
+  @@index([status])
+  @@index([deadline])
+  @@index([clientId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                String   @id @default(cuid())
+  orderId           String
+  productId         String?
+  nameUk            String
+  totalQuantity     Int      @default(0)
+  sourceProductId   String?
+  comment           String?
+  /// Preliminary fabric delivery cost (₴), separate from material COGS.
+  fabricDeliveryAmount   Decimal  @default(0) @db.Decimal(14, 4)
+  fabricDeliveryComputed Decimal? @db.Decimal(14, 4)
+  fabricDeliveryManual   Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id])
+  sizes   OrderItemSize[]
+  materials OrderItemMaterial[]
+  operations OrderItemOperation[]
+  decorations OrderItemDecoration[]
+  additionalCosts OrderItemAdditionalCost[]
+  versions CalculationVersion[]
+  specification ProductionSpecification?
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderItemSize {
+  id          String @id @default(cuid())
+  orderItemId String
+  sizeCode    String
+  sizeNameUk  String
+  quantity    Int
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@map("order_item_sizes")
+}
+
+model OrderItemMaterial {
+  id                 String  @id @default(cuid())
+  orderItemId        String
+  materialId         String?
+  nameSnapshot       String
+  unitCodeSnapshot   String
+  consumptionPerUnit Decimal @db.Decimal(14, 6)
+  wastePercent       Decimal @default(0) @db.Decimal(8, 4)
+  purchasePrice      Decimal @db.Decimal(14, 4)
+  /// Optional actual purchase cost after ordering materials (does not change client price).
+  actualPurchasePrice Decimal? @db.Decimal(14, 4)
+  /// Selected supplier for this order line (null = catalog primary).
+  supplierId             String?
+  supplierNameSnapshot   String?
+  /// Override cargo $/kg for delivery on this line only.
+  cargoUsdPerKg          Decimal? @db.Decimal(14, 4)
+  /// Override USD/UAH rate for delivery on this line only.
+  usdUahRate             Decimal? @db.Decimal(14, 4)
+  /// null = company policy; NET/GROSS for purchase price on this line.
+  costVatOverride        MaterialCostVatMode?
+  fabricDeliveryAmount   Decimal  @default(0) @db.Decimal(14, 4)
+  fabricDeliveryComputed Decimal? @db.Decimal(14, 4)
+  fabricDeliveryManual   Boolean  @default(false)
+  sortOrder          Int     @default(0)
+  /// Null = every size on this line. Set = only this size code.
+  sizeCode           String?
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  material  Material? @relation(fields: [materialId], references: [id])
+  supplier  Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@index([orderItemId, sizeCode])
+  @@index([supplierId])
+  @@map("order_item_materials")
+}
+
+model OrderItemOperation {
+  id                String               @id @default(cuid())
+  orderItemId       String
+  operationId       String?
+  nameSnapshot      String
+  calculationMethod OperationCalcMethod
+  unitRate          Decimal?             @db.Decimal(14, 4)
+  shiftCost         Decimal?             @db.Decimal(14, 4)
+  standardOutput    Decimal?             @db.Decimal(14, 4)
+  sortOrder         Int                  @default(0)
+  /// Null = every size on this line. Set = only this size code.
+  sizeCode          String?
+
+  orderItem OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  operation Operation? @relation(fields: [operationId], references: [id])
+
+  @@index([orderItemId, sizeCode])
+  @@map("order_item_operations")
+}
+
+model OrderItemDecoration {
+  id                 String  @id @default(cuid())
+  orderItemId        String
+  decorationMethodId String?
+  nameSnapshot       String
+  setupCost          Decimal @db.Decimal(14, 4)
+  unitRate           Decimal @db.Decimal(14, 4)
+  sortOrder          Int     @default(0)
+
+  orderItem        OrderItem         @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  decorationMethod DecorationMethod? @relation(fields: [decorationMethodId], references: [id])
+
+  @@map("order_item_decorations")
+}
+
+model OrderItemAdditionalCost {
+  id          String  @id @default(cuid())
+  orderItemId String
+  nameUk      String
+  amount      Decimal @db.Decimal(14, 4)
+  isPerUnit   Boolean @default(true)
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@map("order_item_additional_costs")
+}
+
+model CalculationVersion {
+  id              String   @id @default(cuid())
+  orderItemId     String
+  versionNumber   Int
+  label           String?
+  comment         String?
+  proposalRevision Int?    @map("proposal_revision")
+  proposalLabel   String?  @map("proposal_label")
+  isApproved      Boolean  @default(false)
+  snapshotJson    Json
+  costPerUnit     Decimal  @db.Decimal(14, 4)
+  totalCost       Decimal  @db.Decimal(14, 4)
+  sellingPricePerUnit Decimal @db.Decimal(14, 4)
+  totalSellingValue Decimal @db.Decimal(14, 4)
+  profitAmount    Decimal  @db.Decimal(14, 4)
+  marginPercent   Decimal  @db.Decimal(8, 4)
+  authorId        String
+  createdAt       DateTime @default(now())
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  author    User      @relation("VersionAuthor", fields: [authorId], references: [id])
+  quotation Quotation?
+  specification ProductionSpecification?
+
+  @@unique([orderItemId, versionNumber])
+  @@map("calculation_versions")
+}
+
+model Quotation {
+  id                    String   @id @default(cuid())
+  calculationVersionId  String   @unique
+  number                String   @unique
+  issuedAt              DateTime @default(now())
+  pdfPath               String?
+  createdAt             DateTime @default(now())
+
+  calculationVersion CalculationVersion @relation(fields: [calculationVersionId], references: [id])
+
+  @@map("quotations")
+}
+
+model ProductionSpecification {
+  id                   String   @id @default(cuid())
+  orderItemId          String   @unique
+  calculationVersionId String   @unique
+  lockedAt             DateTime @default(now())
+  snapshotJson         Json
+
+  orderItem          OrderItem          @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  calculationVersion CalculationVersion @relation(fields: [calculationVersionId], references: [id])
+
+  @@map("production_specifications")
+}
+
+model PricingSettings {
+  id                    String        @id @default(cuid())
+  pricingMethod         PricingMethod @default(MARGIN)
+  targetMarginPercent   Decimal       @db.Decimal(8, 4)
+  minimumMarginPercent  Decimal       @db.Decimal(8, 4)
+  managerMaxDiscountPercent Decimal   @default(0) @db.Decimal(8, 4)
+  roundingRule          String        @default("ROUND_2")
+  /// USD → UAH for fabric sheet formulas
+  usdUahRate            Decimal       @default(45) @db.Decimal(14, 4)
+  /// Added to $/kg for cargo (not multiplied)
+  fabricCargoUsdPerKg   Decimal       @default(1.7) @db.Decimal(14, 4)
+  /// Reference rate for hints (UA standard 20)
+  inputVatRatePercent   Decimal       @default(20) @db.Decimal(8, 4)
+  /// NET = COGS without recoverable VAT; GROSS = full price with VAT
+  materialCostVatMode   MaterialCostVatMode @default(NET)
+  updatedAt             DateTime      @updatedAt
+
+  @@map("pricing_settings")
+}
+
+model QuantityTierRule {
+  id          String  @id @default(cuid())
+  nameUk      String
+  scope       String
+  scopeRefId  String?
+  minQuantity Int
+  maxQuantity Int?
+  coefficient Decimal @db.Decimal(10, 6)
+  status      RecordStatus @default(ACTIVE)
+
+  @@map("quantity_tier_rules")
+}
+
+model SizeRule {
+  id                String  @id @default(cuid())
+  sizeCode          String
+  materialCoeff     Decimal @default(1) @db.Decimal(10, 6)
+  operationCoeff    Decimal @default(1) @db.Decimal(10, 6)
+  surchargePercent  Decimal @default(0) @db.Decimal(8, 4)
+  appliesTo         String  @default("SELECTED")
+  status            RecordStatus @default(ACTIVE)
+
+  @@map("size_rules")
+}
+
+model CompanySettings {
+  id           String   @id @default(cuid())
+  legalName    String
+  address      String?
+  phone        String?
+  email        String?
+  taxId        String?
+  logoUrl      String?
+  quotationFooter String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("company_settings")
+}
+
+model FileAsset {
+  id        String   @id @default(cuid())
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  storageKey String
+  clientId  String?
+  orderId   String?
+  createdAt DateTime @default(now())
+
+  client Client? @relation(fields: [clientId], references: [id])
+  order  Order?  @relation(fields: [orderId], references: [id])
+
+  @@map("file_assets")
+}
+
+model ActivityEvent {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  userId     String?
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("activity_events")
+}

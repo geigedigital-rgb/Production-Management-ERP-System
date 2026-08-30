@@ -1,0 +1,116 @@
+{
+  "app": {
+    "name": "Виробництво",
+    "tagline": "Калькуляція, замовлення та підготовка до виробництва"
+  },
+  "nav": {
+    "overview": "Огляд",
+    "orders": "Замовлення",
+    "clients": "Клієнти",
+    "products": "Вироби",
+    "settings": "Налаштування",
+    "materials": "Матеріали",
+    "operations": "Операції",
+    "applications": "Нанесення",
+    "pricing": "Ціноутворення",
+    "users": "Користувачі",
+    "company": "Компанія",
+    "guide": "Інструкція",
+    "logout": "Вийти",
+    "operational": "Робоча зона",
+    "catalogsGroup": "Довідники",
+    "settingsGroup": "Налаштування",
+    "newOrder": "Нове замовлення"
+  },
+  "auth": {
+    "loginTitle": "Вхід до системи",
+    "emailOrLogin": "Email або логін",
+    "password": "Пароль",
+    "submit": "Увійти",
+    "invalidCredentials": "Невірний логін або пароль",
+    "sessionExpired": "Сесію завершено. Увійдіть знову."
+  },
+  "overview": {
+    "title": "Огляд",
+    "activeOrders": "Активні замовлення",
+    "createOrder": "Створити замовлення",
+    "createProduct": "Створити виріб",
+    "empty": "Поки немає активних замовлень",
+    "deadlines": "Дедлайни",
+    "byStatus": "За статусами"
+  },
+  "orders": {
+    "title": "Замовлення",
+    "searchPlaceholder": "Пошук за номером, клієнтом або виробом",
+    "new": "Нове замовлення",
+    "number": "Номер",
+    "client": "Клієнт",
+    "product": "Виріб",
+    "manager": "Менеджер",
+    "status": "Статус",
+    "deadline": "Дедлайн",
+    "empty": "Замовлень ще немає"
+  },
+  "clients": {
+    "title": "Клієнти",
+    "new": "Новий клієнт",
+    "companyName": "Назва компанії",
+    "contactPerson": "Контактна особа",
+    "phone": "Телефон",
+    "email": "Email",
+    "empty": "Клієнтів ще немає"
+  },
+  "products": {
+    "title": "Вироби",
+    "new": "Створити виріб",
+    "name": "Назва",
+    "code": "Код",
+    "category": "Категорія",
+    "status": "Статус",
+    "empty": "Стандартних виробів ще немає",
+    "basePriceList": "Розрахунковий прайс"
+  },
+  "settings": {
+    "materialsTitle": "Матеріали та фурнітура",
+    "operationsTitle": "Операції",
+    "applicationsTitle": "Нанесення",
+    "pricingTitle": "Правила калькуляції",
+    "usersTitle": "Користувачі",
+    "companyTitle": "Компанія та документи",
+    "add": "Додати",
+    "edit": "Редагувати",
+    "archive": "Архівувати",
+    "save": "Зберегти",
+    "cancel": "Скасувати",
+    "search": "Пошук",
+    "comingSoon": "Розділ буде доступний після налаштування довідників."
+  },
+  "orderStatus": {
+    "DRAFT": "Чернетка",
+    "CALCULATION": "Розрахунок",
+    "PENDING_APPROVAL": "На погодженні",
+    "APPROVED": "Погоджено",
+    "HANDED_TO_PRODUCTION": "Передано у виробництво",
+    "CLOSED": "Закрито",
+    "CANCELLED": "Скасовано"
+  },
+  "common": {
+    "actions": "Дії",
+    "loading": "Завантаження…",
+    "save": "Зберегти",
+    "cancel": "Скасувати",
+    "addNew": "+ Додати новий",
+    "back": "Назад",
+    "filters": "Фільтри",
+    "resetFilters": "Скинути",
+    "noResults": "Нічого не знайдено",
+    "required": "Обовʼязкове поле",
+    "currency": "₴"
+  },
+  "orderTabs": {
+    "configuration": "Комплектація",
+    "calculation": "Калькуляція",
+    "versions": "Версії",
+    "files": "Файли"
+  }
+}
