@@ -8,7 +8,7 @@
   "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "prisma generate && next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build --webpack",
     "start": "prisma migrate deploy && next start",
     "postinstall": "prisma generate",
     "lint": "eslint",
