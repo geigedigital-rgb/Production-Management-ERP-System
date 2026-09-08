@@ -1,15 +1,22 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/server/auth";
 import { getOrder, refreshOrderItemFabricPricing } from "@/server/domains/orders/service";
 import { listMaterials, listUnits, getFabricPricingGlobals } from "@/server/domains/catalog/materials";
 import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
-import { buildCalcFromOrderItem, cutRateContextFromProduct, getPricingDefaults, getPricingForOrder, resolveOrderOperationUnitRate } from "@/server/domains/calculation/from-entities";
+import { buildCalcFromOrderItem, calcOptionsFromProduct, getPricingDefaults, getPricingForOrder, resolveOrderOperationUnitRate } from "@/server/domains/calculation/from-entities";
 import { draftLineFromItem } from "@/lib/order-item-commercial";
 import { Breadcrumbs, QuickAction, QuickActions } from "@/components/ui/ObjectHeader";
-import { SegmentedTabs } from "@/components/ui/Tabs";
+import { Banner } from "@/components/ui/Banner";
+import { ViewTabs } from "@/components/ui/Tabs";
+import {
+  OrderChevronPipeline,
+  OrderFactsStrip,
+  OrderWorkspaceHeader,
+  OrderWorkspacePanel,
+  OrderWorkspaceShell,
+} from "@/components/orders/OrderWorkspaceLayout";
 import { CostStructure } from "@/components/calc/CostSummary";
-import { OrderPipeline } from "@/components/orders/OrderPipeline";
 import {
   IconCalc,
   IconClients,
@@ -19,10 +26,16 @@ import {
   IconSpec,
   IconVersions,
 } from "@/components/ui/Icons";
-import { formatDateUk, formatMoneyUah, formatUnit, cn } from "@/lib/utils";
+import { formatDateUk, formatMoneyUah, formatUnit } from "@/lib/utils";
 import { formatSizeRun, lineCostOnSizes, uniqueBomCount } from "@/lib/size-bom";
 import { fabricMetersNeeded } from "@/lib/fabric-pricing";
-import { accessHas, getCurrentUserAccess } from "@/server/auth/access";
+import {
+  accessHas,
+  canEditOrderComposition,
+  canViewOrderCosts,
+  getCurrentUserAccess,
+} from "@/server/auth/access";
+import { SubmitForCalculationButton } from "@/components/orders/SubmitForCalculationButton";
 import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
 import { corridorFor, corridorHref, itemNeed } from "@/lib/order-corridor";
 import {
@@ -51,7 +64,7 @@ export default async function OrderDetailPage({
 }) {
   const { id } = await params;
   const { tab, item: itemParam, action: actionParam } = await searchParams;
-  const activeTab = tab || "configuration";
+  let activeTab = tab || "configuration";
 
   const access = await getCurrentUserAccess();
   const session = await auth();
@@ -88,13 +101,22 @@ export default async function OrderDetailPage({
       listProducts(),
     ]);
 
-  const calc = buildCalcFromOrderItem(item, pricing, {
-    cutRate: cutRateContextFromProduct(item.product),
-  });
+  const calc = buildCalcFromOrderItem(item, pricing, calcOptionsFromProduct(item.product));
   const totalQuantity = item.totalQuantity;
   const orderQuantity = order.items.reduce((sum, row) => sum + row.totalQuantity, 0);
   const locked = order.status === "HANDED_TO_PRODUCTION" || order.status === "CLOSED";
   const canApprove = accessHas(access, "changeOrderStatus");
+  const canViewCosts = canViewOrderCosts(access);
+  const canRunCalc = accessHas(access, "saveVersions");
+  const canEditComposition = canEditOrderComposition(access, order.status);
+  const canCreateCatalog = accessHas(access, "createInlineCatalog");
+  const compositionLocked = locked || !canEditComposition;
+
+  if (!canViewCosts && (activeTab === "calculation" || activeTab === "versions")) {
+    redirect(
+      `/orders/${id}?tab=configuration${itemParam ? `&item=${itemParam}` : ""}`,
+    );
+  }
 
   const fabricGlobals = await getFabricPricingGlobals();
   const quantitiesBySize = Object.fromEntries(
@@ -157,7 +179,7 @@ export default async function OrderDetailPage({
     };
   });
 
-  const itemCutRate = cutRateContextFromProduct(item.product);
+  const itemCalcOptions = calcOptionsFromProduct(item.product);
 
   const operationRows = item.operations.map((row) => {
     const unitCost =
@@ -165,7 +187,7 @@ export default async function OrderDetailPage({
         ? Number(row.standardOutput ?? 0) > 0
           ? Number(row.shiftCost ?? 0) / Number(row.standardOutput)
           : 0
-        : resolveOrderOperationUnitRate(row, totalQuantity, itemCutRate) ?? 0;
+        : resolveOrderOperationUnitRate(row, totalQuantity, itemCalcOptions) ?? 0;
     const qtyForRow = item.sizes
       .filter((size) => !row.sizeCode || row.sizeCode === size.sizeCode)
       .reduce((sum, size) => sum + size.quantity, 0);
@@ -262,7 +284,7 @@ export default async function OrderDetailPage({
   const approvedProposalGroup = approvedProposal(proposalItems);
   const draftLines = order.items.map((row) => {
     const lineCalc = buildCalcFromOrderItem(row, pricing, {
-      cutRate: cutRateContextFromProduct(row.product),
+      ...calcOptionsFromProduct(row.product),
     });
     const draft = draftLineFromItem(row, lineCalc);
     return {
@@ -352,19 +374,23 @@ export default async function OrderDetailPage({
       icon: <IconProducts size={15} />,
       count: materialRows.length + operationRows.length + decorationRows.length,
     },
-    {
-      key: "calculation",
-      label: "Калькуляція",
-      href: tabHref("calculation"),
-      icon: <IconCalc size={15} />,
-    },
-    {
-      key: "versions",
-      label: "Пропозиції",
-      href: tabHref("versions"),
-      icon: <IconVersions size={15} />,
-      count: proposals.length,
-    },
+    ...(canViewCosts
+      ? [
+          {
+            key: "calculation",
+            label: "Калькуляція",
+            href: tabHref("calculation"),
+            icon: <IconCalc size={15} />,
+          },
+          {
+            key: "versions",
+            label: "Пропозиції",
+            href: tabHref("versions"),
+            icon: <IconVersions size={15} />,
+            count: proposals.length,
+          },
+        ]
+      : []),
     {
       key: "files",
       label: "Документи",
@@ -402,10 +428,10 @@ export default async function OrderDetailPage({
     !(action.key === "artwork" && onNextTab) &&
     !(action.key === "closed" && !action.specificationReady);
   const headerPrimary = action.key !== "handover" || handoverReady;
-  const withRail = activeTab !== "configuration";
+  const withRail = canViewCosts && activeTab !== "configuration";
   const itemRows = order.items.map((row) => {
     const lineCalc = buildCalcFromOrderItem(row, pricing, {
-      cutRate: cutRateContextFromProduct(row.product),
+      ...calcOptionsFromProduct(row.product),
     });
     const draft = draftLineFromItem(row, lineCalc);
     return {
@@ -433,7 +459,7 @@ export default async function OrderDetailPage({
           : row.versions[0]
             ? `v${row.versions[0].versionNumber}`
             : "немає",
-      unitPrice: row.totalQuantity > 0 ? draft.sellingPricePerUnit : null,
+      unitPrice: canViewCosts && row.totalQuantity > 0 ? draft.sellingPricePerUnit : null,
       need: itemNeed(
         {
           id: row.id,
@@ -475,13 +501,30 @@ export default async function OrderDetailPage({
           {order.client.companyName}
         </Link>
       ),
+      hint: order.client.contactPerson ?? undefined,
     },
     { label: "Менеджер", value: order.manager.name },
     { label: "Дедлайн", value: formatDateUk(order.deadline) },
     { label: "Кількість", value: `${orderQuantity} шт` },
+    {
+      label: "Позиції",
+      value: String(order.items.length),
+      hint: order.items.length > 1 ? "у замовленні" : undefined,
+    },
+    ...(canViewCosts
+      ? [
+          {
+            label: "Сума",
+            value: formatMoneyUah(orderApprovedTotal),
+            hint: approvedProposalGroup
+              ? `пропозиція v${approvedProposalGroup.revision}`
+              : "чернетка",
+          },
+        ]
+      : []),
   ];
 
-  const marginControl = (
+  const marginControl = canViewCosts ? (
     <OrderMarginControl
       orderId={order.id}
       locked={locked}
@@ -493,11 +536,11 @@ export default async function OrderDetailPage({
       totalQuantity={totalQuantity}
       layout={withRail ? "panel" : "strip"}
     />
-  );
+  ) : null;
 
   const activeDraft = draftLines.find((line) => line.orderItemId === item.id);
 
-  const moneyRail = (
+  const moneyRail = canViewCosts ? (
     <aside className="space-y-3 xl:sticky xl:top-[72px] xl:h-fit">
       {marginControl}
       {activeDraft?.fromPriceList ? (
@@ -529,129 +572,175 @@ export default async function OrderDetailPage({
         ) : null}
       </div>
     </aside>
-  );
+  ) : null;
 
   return (
     <div className="space-y-4">
-      <header className="space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <Breadcrumbs items={[{ label: "Замовлення", href: "/orders" }, { label: order.number }]} />
-            <div className="mt-2 flex flex-wrap items-center gap-2.5">
-              <h1 className="type-page-title">{order.number}</h1>
-              <OrderStatusBadge status={order.status} />
-            </div>
-            <p className="type-body-secondary mt-1">
-              {order.title && order.title !== item.nameUk ? order.title : item.nameUk}
-              {order.items.length > 1 ? ` · ${order.items.length} позиції` : ""}
-            </p>
-          </div>
+      <Breadcrumbs items={[{ label: "Замовлення", href: "/orders" }, { label: order.number }]} />
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <QuickActions>
-              <QuickAction
-                icon={<IconClients size={15} />}
-                href={`/clients/${order.clientId}`}
-                hint="orderClientCard"
-              >
-                Клієнт
-              </QuickAction>
-              {action.quotationReady ? (
-                <QuickAction
-                  icon={<IconQuote size={15} />}
-                  href={`/orders/${order.id}/quotation`}
-                  hint="orderQuotation"
+      <OrderWorkspaceShell
+        header={
+          <OrderWorkspaceHeader
+            title={order.number}
+            badge={<OrderStatusBadge status={order.status} dot />}
+            subtitle={
+              <>
+                {order.title && order.title !== item.nameUk ? (
+                  <span>{order.title}</span>
+                ) : (
+                  <span>{item.nameUk}</span>
+                )}
+                {order.items.length > 1 ? (
+                  <span className="text-[var(--color-text-tertiary)]">
+                    {" "}
+                    · {order.items.length} позиції
+                  </span>
+                ) : null}
+              </>
+            }
+            meta={
+              <p className="text-[13px] text-[var(--color-primary-700)]">
+                <Link
+                  href={`/clients/${order.clientId}`}
+                  className="hover:underline"
                 >
-                  КП
-                </QuickAction>
-              ) : null}
-              {action.specificationReady ? (
-                <QuickAction
-                  icon={<IconSpec size={15} />}
-                  href={`/orders/${order.id}/specification`}
-                  hint="orderSpecification"
-                >
-                  Специфікація
-                </QuickAction>
-              ) : null}
-            </QuickActions>
-            {showHeaderCta ? (
+                  {order.client.companyName}
+                </Link>
+                {order.client.contactPerson ? ` · ${order.client.contactPerson}` : ""}
+              </p>
+            }
+            actions={
+              <>
+                <QuickActions>
+                  <QuickAction
+                    icon={<IconClients size={15} />}
+                    href={`/clients/${order.clientId}`}
+                    hint="orderClientCard"
+                  >
+                    Клієнт
+                  </QuickAction>
+                  {action.quotationReady && accessHas(access, "generateQuotations") ? (
+                    <QuickAction
+                      icon={<IconQuote size={15} />}
+                      href={`/orders/${order.id}/quotation`}
+                      hint="orderQuotation"
+                    >
+                      КП
+                    </QuickAction>
+                  ) : null}
+                  {action.specificationReady ? (
+                    <QuickAction
+                      icon={<IconSpec size={15} />}
+                      href={`/orders/${order.id}/specification`}
+                      hint="orderSpecification"
+                    >
+                      Специфікація
+                    </QuickAction>
+                  ) : null}
+                </QuickActions>
+                {order.status === "DRAFT" && accessHas(access, "manageOrders") ? (
+                  <SubmitForCalculationButton
+                    orderId={order.id}
+                    disabled={
+                      !order.items.every(
+                        (row) =>
+                          row.totalQuantity > 0 &&
+                          row.materials.length > 0 &&
+                          row.operations.length > 0,
+                      )
+                    }
+                    disabledReason="Заповніть кількості, матеріали та операції по всіх позиціях."
+                  />
+                ) : showHeaderCta && (canRunCalc || canApprove || action.key === "spec" || action.key === "closed") ? (
+                  <Link
+                    href={
+                      action.key === "spec" || action.key === "closed"
+                        ? `/orders/${order.id}/specification`
+                        : nextHref
+                    }
+                    className={headerPrimary ? "btn-primary" : "btn-secondary"}
+                    target={action.key === "spec" || action.key === "closed" ? "_blank" : undefined}
+                  >
+                    {action.label}
+                  </Link>
+                ) : null}
+              </>
+            }
+          />
+        }
+        facts={<OrderFactsStrip facts={facts} />}
+        pipeline={
+          <OrderChevronPipeline
+            status={order.status}
+            nextTitle={`${action.index}/${action.of} · ${action.detail}`}
+          />
+        }
+        footer={
+          <p className="type-caption flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span>
+              <span className="text-[var(--color-text-tertiary)]">Коментар: </span>
+              {order.comment?.trim() || "—"}
+            </span>
+            {!locked ? (
               <Link
-                href={
-                  action.key === "spec" || action.key === "closed"
-                    ? `/orders/${order.id}/specification`
-                    : nextHref
-                }
-                className={headerPrimary ? "btn-primary" : "btn-secondary"}
-                target={action.key === "spec" || action.key === "closed" ? "_blank" : undefined}
+                href={tabHref("configuration")}
+                className="font-medium text-[var(--color-primary-700)] hover:underline"
               >
-                {action.label}
+                Змінити
               </Link>
             ) : null}
-          </div>
-        </div>
-
-        <div className="overflow-hidden rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(260px,380px)]">
-            <dl className="grid grid-cols-2 sm:grid-cols-4">
-              {facts.map((fact, index) => (
-                <div
-                  key={fact.label}
-                  className={cn(
-                    "px-3.5 py-2.5 sm:px-4",
-                    index < facts.length - 1 && "sm:border-r sm:border-[var(--color-divider)]",
-                    index < 2 && "border-b border-[var(--color-divider)] sm:border-b-0",
-                  )}
-                >
-                  <dt className="type-caption">{fact.label}</dt>
-                  <dd className="mt-0.5 truncate text-[13.5px] font-medium">{fact.value}</dd>
-                </div>
-              ))}
-            </dl>
-            <div className="border-t border-[var(--color-divider)] px-3.5 py-2.5 lg:border-t-0 lg:border-l">
-              <OrderPipeline status={order.status} nextTitle={`${action.index}/${action.of} · ${action.detail}`} />
-            </div>
-          </div>
-          {order.comment ? (
-            <p className="border-t border-[var(--color-divider)] px-4 py-2 type-caption">
-              <span className="text-[var(--color-text-tertiary)]">Коментар: </span>
-              {order.comment}
-            </p>
-          ) : null}
-        </div>
-      </header>
+          </p>
+        }
+      />
 
       <OrderItemsTable
         orderId={order.id}
         activeTab={activeTab}
         selectedId={item.id}
-        locked={locked}
+        locked={compositionLocked}
         handedOver={order.status === "HANDED_TO_PRODUCTION" || order.status === "CLOSED"}
         rows={itemRows}
         catalog={catalog}
+        showPrices={canViewCosts}
       />
 
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="type-caption">Працюєте з позицією</p>
-          <p className="text-[14px] font-semibold tracking-[-0.01em]">
-            {item.nameUk}
-            <span className="ml-2 font-normal text-[var(--color-text-tertiary)]">
-              {item.totalQuantity} шт
-              {item.comment ? ` · ${item.comment}` : ""}
-            </span>
-          </p>
-        </div>
-        <SegmentedTabs items={tabs} active={activeTab} />
-      </div>
-
-      {activeTab === "configuration" ? (
-        <div className="space-y-3">
-          {marginControl}
-          <ConfigurationTab
+      <OrderWorkspacePanel
+        tabs={
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <p className="type-caption">Позиція</p>
+              <p className="text-[14px] font-semibold tracking-[-0.01em]">
+                {item.nameUk}
+                <span className="ml-2 font-normal text-[var(--color-text-tertiary)]">
+                  {item.totalQuantity} шт
+                  {item.comment ? ` · ${item.comment}` : ""}
+                </span>
+              </p>
+            </div>
+            <ViewTabs items={tabs} active={activeTab} className="border-b-0" />
+          </div>
+        }
+      >
+        {activeTab === "configuration" ? (
+          <div className="space-y-3">
+            {order.status === "DRAFT" && !canRunCalc ? (
+              <Banner tone="info" title="Комплектація для менеджера">
+                Зберіть склад і кількості, потім натисніть «На розрахунок адміну». Калькуляцію й ціни
+                робить адміністратор.
+              </Banner>
+            ) : null}
+            {order.status !== "DRAFT" && !canEditComposition ? (
+              <Banner tone="info" title="На розрахунку в адміністратора">
+                Комплектацію передано. Зміни складу та калькуляція доступні адміністратору.
+              </Banner>
+            ) : null}
+            {marginControl}
+            <ConfigurationTab
             orderId={order.id}
             itemId={item.id}
-            locked={locked}
+            locked={compositionLocked}
+            hideCosts={!canViewCosts}
+            canCreateCatalog={canCreateCatalog}
             productName={item.nameUk}
             comment={item.comment}
             sizes={item.sizes.map((size) => ({
@@ -666,6 +755,7 @@ export default async function OrderDetailPage({
             materialOptions={materials.map((material) => ({
               id: material.id,
               label: `${material.nameUk} (${formatUnit(material.unitOfMeasure.code)})`,
+              composition: material.composition?.trim() || null,
             }))}
             operationOptions={operationsCatalog.map((operation) => ({
               id: operation.id,
@@ -688,13 +778,13 @@ export default async function OrderDetailPage({
                     ? { title: action.title, detail: action.detail }
                     : null
             }
-          />
-        </div>
-      ) : (
-        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
-          <div className="min-w-0">
-            {activeTab === "calculation" ? (
-              <CalculationTab
+            />
+          </div>
+        ) : (
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
+            <div className="min-w-0">
+              {activeTab === "calculation" ? (
+                <CalculationTab
                 calc={calc}
                 totalQuantity={totalQuantity}
                 materials={materialRows}
@@ -702,6 +792,10 @@ export default async function OrderDetailPage({
                 decorations={decorationRows}
                 fabricDeliveryLines={fabricDeliveryRows}
                 fabricDeliveryAmount={fabricDeliveryAmount}
+                sizeQuantities={item.sizes.map((size) => ({
+                  sizeCode: size.sizeCode,
+                  quantity: size.quantity,
+                }))}
                 pricingMethod={pricing.pricingMethod}
                 targetRatePercent={pricing.targetRatePercent}
                 minimumMarginPercent={pricing.minimumMarginPercent}
@@ -766,7 +860,8 @@ export default async function OrderDetailPage({
           </div>
           {moneyRail}
         </div>
-      )}
+        )}
+      </OrderWorkspacePanel>
 
       <ActivityTimeline
         events={mapActivityEvents(activityEvents)}

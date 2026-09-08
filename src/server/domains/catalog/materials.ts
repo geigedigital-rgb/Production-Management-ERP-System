@@ -144,6 +144,7 @@ export async function createMaterial(raw: MaterialFormValues) {
       defaultWastePercent: data.defaultWastePercent,
       supplierCode: data.supplierCode || null,
       colorOrAttribute: data.colorOrAttribute || null,
+      availableColors: data.availableColors ?? [],
       note: data.note || null,
       densityGsm: fabric.densityGsm,
       composition: fabric.composition,
@@ -198,10 +199,15 @@ export async function createMaterial(raw: MaterialFormValues) {
   return { material, duplicates };
 }
 
-export async function updateMaterial(id: string, raw: MaterialFormValues) {
+export async function updateMaterial(
+  id: string,
+  raw: MaterialFormValues,
+  options?: { preservePurchaseTerms?: boolean },
+) {
   const data = materialFormSchema.parse(raw);
   const globals = await getFabricPricingGlobals();
   const fabric = fabricDataFromForm(data, globals);
+  const preserve = options?.preservePurchaseTerms === true && data.type === "FABRIC";
 
   const duplicates = await findLikelyMaterialDuplicates({
     nameUk: data.nameUk,
@@ -216,27 +222,32 @@ export async function updateMaterial(id: string, raw: MaterialFormValues) {
       type: data.type as MaterialType,
       categoryId: data.categoryId || null,
       unitOfMeasureId: data.unitOfMeasureId,
-      purchasePrice: fabric.purchasePrice,
       defaultWastePercent: data.defaultWastePercent,
-      supplierCode: data.supplierCode || null,
       colorOrAttribute: data.colorOrAttribute || null,
+      availableColors: data.availableColors ?? [],
       note: data.note || null,
       densityGsm: fabric.densityGsm,
       composition: fabric.composition,
       metersPerKg: fabric.metersPerKg,
-      priceKgUsd: fabric.priceKgUsd,
-      priceKgUsdCargo: fabric.priceKgUsdCargo,
-      priceKgUsdVat: fabric.priceKgUsdVat,
-      priceMeterUahNoVat: fabric.priceMeterUahNoVat,
-      priceMeterUahVat: fabric.priceMeterUahVat,
-      priceMeterUahCutVat: fabric.priceMeterUahCutVat,
       fabricKindUk: fabric.fabricKindUk,
       widthCm: fabric.widthCm,
-      wholesaleNote: fabric.wholesaleNote,
       rollWeightKg: fabric.rollWeightKg,
       metersPerRoll: fabric.metersPerRoll,
       minWholesaleMeters: fabric.minWholesaleMeters,
       costVatOverride: fabric.costVatOverride,
+      ...(preserve
+        ? {}
+        : {
+            purchasePrice: fabric.purchasePrice,
+            supplierCode: data.supplierCode || null,
+            priceKgUsd: fabric.priceKgUsd,
+            priceKgUsdCargo: fabric.priceKgUsdCargo,
+            priceKgUsdVat: fabric.priceKgUsdVat,
+            priceMeterUahNoVat: fabric.priceMeterUahNoVat,
+            priceMeterUahVat: fabric.priceMeterUahVat,
+            priceMeterUahCutVat: fabric.priceMeterUahCutVat,
+            wholesaleNote: fabric.wholesaleNote,
+          }),
     },
     include: {
       unitOfMeasure: true,
@@ -244,7 +255,7 @@ export async function updateMaterial(id: string, raw: MaterialFormValues) {
     },
   });
 
-  if (data.type === "FABRIC" && data.supplierCode) {
+  if (!preserve && data.type === "FABRIC" && data.supplierCode) {
     const { syncPrimarySupplierOfferFromMaterial } = await import(
       "@/server/domains/catalog/suppliers"
     );
@@ -272,6 +283,16 @@ export async function updateMaterial(id: string, raw: MaterialFormValues) {
   }
 
   return { material, duplicates };
+}
+
+export async function updateMaterialAvailableColors(id: string, colors: string[]) {
+  const { mergeColorLists } = await import("@/lib/trim-colors");
+  const availableColors = mergeColorLists(colors);
+  return prisma.material.update({
+    where: { id },
+    data: { availableColors },
+    select: { id: true, availableColors: true },
+  });
 }
 
 /** Recompute purchasePrice for all fabrics after company VAT policy / rate change. */

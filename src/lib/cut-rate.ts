@@ -41,6 +41,55 @@ export function isCutOperationName(nameUk: string | null | undefined) {
   return (nameUk ?? "").trim().toLowerCase() === "розкрій";
 }
 
+export const CUT_OPERATION_METHOD_LABEL = "Крій за тиражем";
+export const CUT_RATES_TAB_HINT = "Налаштування — вкладка «Прайс і крій»";
+
+/** How to show «Розкрій» in BOM tables — rate comes from cut tiers, not catalog baseRate. */
+export function summarizeCutOperationDisplay(args: {
+  optimalQty?: number | null;
+  tiers: CutRateTier[];
+  fallbackRate: number;
+  previewQty?: number;
+}): {
+  methodLabel: string;
+  configured: boolean;
+  minRate: number | null;
+  maxRate: number | null;
+  previewQty: number;
+  previewRate: number | null;
+} {
+  const previewQty = args.previewQty ?? 100;
+  const tiers = [...args.tiers]
+    .filter((tier) => tier.minQuantity > 0 && Number.isFinite(tier.ratePerUnit))
+    .sort((a, b) => a.minQuantity - b.minQuantity);
+
+  if (tiers.length === 0) {
+    return {
+      methodLabel: CUT_OPERATION_METHOD_LABEL,
+      configured: false,
+      minRate: null,
+      maxRate: null,
+      previewQty,
+      previewRate: null,
+    };
+  }
+
+  const rates = tiers.map((tier) => tier.ratePerUnit);
+  return {
+    methodLabel: CUT_OPERATION_METHOD_LABEL,
+    configured: true,
+    minRate: Math.min(...rates),
+    maxRate: Math.max(...rates),
+    previewQty,
+    previewRate: resolveCutRatePerUnit({
+      quantity: previewQty,
+      optimalQty: args.optimalQty,
+      tiers,
+      fallbackRate: args.fallbackRate,
+    }),
+  };
+}
+
 export type CutRateProduct = {
   optimalQty: number | null;
   cutRateTiers: Array<{ minQuantity: number; ratePerUnit: unknown }>;

@@ -17,13 +17,20 @@ import {
   removeProductMaterialFromSize,
   removeProductOperationFromSize,
   removeProductDecoration,
+  setProductDecorationSetupCost,
   setProductMaterialConsumption,
   setProductMaterialWaste,
   setProductMaterialSizeNorm,
+  setProductMaterialSizeWaste,
+  setProductMaterialSupplierColor,
   setProductCutRates,
   setProductCommercialPrices,
+  setProductImageUrl,
+  setProductOperationRateTiers,
   parseCommercialPriceTiersInput,
   toCompositionTemplate,
+  duplicateProduct,
+  setProductSizes,
 } from "@/server/domains/products/service";
 
 export async function createProductAction(formData: FormData) {
@@ -160,28 +167,38 @@ export async function uploadProductImageAction(formData: FormData) {
   if (file.size > 5 * 1024 * 1024) {
     return { ok: false as const, error: "TOO_LARGE" as const };
   }
-  if (!file.type.startsWith("image/")) {
+
+  const { isImageUpload, storeProductImage } = await import("@/lib/uploads");
+  if (!isImageUpload(file)) {
     return { ok: false as const, error: "TYPE" as const };
   }
 
-  try {
-    const { getSupabaseAdmin, UPLOADS_BUCKET } = await import("@/lib/supabase/client");
-    const supabase = getSupabaseAdmin();
-    const ext = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
-    const path = `products/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const { error } = await supabase.storage.from(UPLOADS_BUCKET).upload(path, buffer, {
-      contentType: file.type,
-      upsert: false,
-    });
-    if (error) {
-      return { ok: false as const, error: "UPLOAD" as const, message: error.message };
-    }
-    const { data } = supabase.storage.from(UPLOADS_BUCKET).getPublicUrl(path);
-    return { ok: true as const, url: data.publicUrl };
-  } catch {
-    return { ok: false as const, error: "UPLOAD" as const };
+  const stored = await storeProductImage(file);
+  if (!stored.ok) {
+    return { ok: false as const, error: "UPLOAD" as const, message: stored.message };
   }
+  return { ok: true as const, url: stored.url };
+}
+
+export async function updateProductImageAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(formData.get("productId") ?? "");
+  const imageUrlRaw = String(formData.get("imageUrl") ?? "").trim();
+  if (!productId) return { ok: false as const, error: "VALIDATION" as const };
+
+  try {
+    await setProductImageUrl(productId, imageUrlRaw || null);
+  } catch {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/products");
+  revalidatePath("/orders/new");
+  return { ok: true as const, imageUrl: imageUrlRaw || null };
 }
 
 export async function addProductMaterialAction(formData: FormData) {
@@ -248,6 +265,24 @@ export async function addProductDecorationAction(formData: FormData) {
   return { ok: true as const };
 }
 
+export async function updateProductDecorationSetupCostAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(formData.get("productId") ?? "");
+  const id = String(formData.get("id") ?? "");
+  const setupCost = Number(formData.get("setupCost"));
+
+  if (!id || Number.isNaN(setupCost) || setupCost < 0) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  await setProductDecorationSetupCost(id, setupCost);
+  revalidatePath(`/products/${productId}`);
+  return { ok: true as const };
+}
+
 export async function updateProductMaterialConsumptionAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
@@ -283,13 +318,46 @@ export async function updateProductMaterialWasteAction(formData: FormData) {
   const productId = String(formData.get("productId") ?? "");
   const id = String(formData.get("id") ?? "");
   const wastePercent = Number(formData.get("wastePercent"));
+  const sizeId = String(formData.get("sizeId") ?? "").trim() || null;
 
   if (!id || Number.isNaN(wastePercent) || wastePercent < 0) {
     return { ok: false as const, error: "VALIDATION" as const };
   }
 
-  await setProductMaterialWaste(id, wastePercent);
+  if (sizeId) {
+    await setProductMaterialSizeWaste({
+      productMaterialId: id,
+      sizeId,
+      wastePercent,
+    });
+  } else {
+    await setProductMaterialWaste(id, wastePercent);
+  }
   revalidatePath(`/products/${productId}`);
+  return { ok: true as const };
+}
+
+export async function updateProductMaterialSupplierColorAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(formData.get("productId") ?? "");
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false as const, error: "VALIDATION" as const };
+
+  const hasSupplier = formData.has("supplierId");
+  const hasColor = formData.has("colorSnapshot");
+  const supplierId = hasSupplier
+    ? String(formData.get("supplierId") ?? "").trim() || null
+    : undefined;
+  const colorSnapshot = hasColor
+    ? String(formData.get("colorSnapshot") ?? "").trim() || null
+    : undefined;
+
+  await setProductMaterialSupplierColor({ id, supplierId, colorSnapshot });
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/orders");
   return { ok: true as const };
 }
 
@@ -380,6 +448,49 @@ export async function updateProductCutRatesAction(formData: FormData) {
   return { ok: true as const };
 }
 
+export async function updateProductOperationRateTiersAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(formData.get("productId") ?? "");
+  const productOperationId = String(formData.get("productOperationId") ?? "");
+  if (!productId || !productOperationId) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  let tiers: Array<{ minQuantity: number; ratePerUnit: number }> = [];
+  const raw = formData.get("rateTiersJson");
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        tiers = parsed
+          .map((row) => ({
+            minQuantity: Number((row as { minQuantity?: unknown }).minQuantity),
+            ratePerUnit: Number((row as { ratePerUnit?: unknown }).ratePerUnit),
+          }))
+          .filter(
+            (row) =>
+              Number.isFinite(row.minQuantity) &&
+              row.minQuantity > 0 &&
+              Number.isFinite(row.ratePerUnit) &&
+              row.ratePerUnit >= 0,
+          );
+      }
+    } catch {
+      return { ok: false as const, error: "VALIDATION" as const };
+    }
+  }
+
+  if (tiers.length === 0) return { ok: false as const, error: "VALIDATION" as const };
+
+  await setProductOperationRateTiers({ productOperationId, tiers });
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/products");
+  return { ok: true as const };
+}
+
 export async function updateProductCommercialPricesAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
@@ -414,6 +525,24 @@ export async function updateProductCommercialPricesAction(formData: FormData) {
   return { ok: true as const };
 }
 
+export async function previewProductEconomicsAction(productId: string, quantity: number) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("viewProductCosts");
+
+  const qty = Math.max(1, Math.floor(Number(quantity) || 1));
+  const product = await getProduct(productId);
+  if (!product) return { ok: false as const, error: "NOT_FOUND" as const };
+
+  const { buildCalcFromProduct, getPricingDefaults } = await import(
+    "@/server/domains/calculation/from-entities"
+  );
+  const pricing = await getPricingDefaults();
+  const calc = buildCalcFromProduct(product, qty, pricing);
+
+  return { ok: true as const, calc, quantity: qty };
+}
+
 export async function bulkArchiveProductsAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
@@ -426,4 +555,53 @@ export async function bulkArchiveProductsAction(formData: FormData) {
   revalidatePath("/products");
   revalidatePath("/orders/new");
   return { ok: true as const, count: result.count };
+}
+
+export async function duplicateProductAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("saveAsStandardProduct");
+
+  const productId = String(formData.get("productId") ?? "");
+  if (!productId) return { ok: false as const, error: "INVALID" as const };
+
+  try {
+    const copy = await duplicateProduct(productId);
+    revalidatePath("/products");
+    revalidatePath("/orders/new");
+    revalidatePath(`/products/${copy.id}`);
+    return { ok: true as const, productId: copy.id, nameUk: copy.nameUk };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ERROR";
+    if (message === "PRODUCT_NOT_FOUND") {
+      return { ok: false as const, error: "NOT_FOUND" as const };
+    }
+    return { ok: false as const, error: "ERROR" as const };
+  }
+}
+
+export async function updateProductSizesAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(formData.get("productId") ?? "");
+  const sizeIds = formData.getAll("sizeIds").map(String).filter(Boolean);
+  if (!productId) return { ok: false as const, error: "INVALID" as const };
+
+  try {
+    await setProductSizes({ productId, sizeIds });
+    revalidatePath(`/products/${productId}`);
+    revalidatePath("/orders/new");
+    return { ok: true as const };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ERROR";
+    if (message === "PRODUCT_NOT_FOUND" || message === "PRODUCT_ARCHIVED") {
+      return { ok: false as const, error: message as "PRODUCT_NOT_FOUND" | "PRODUCT_ARCHIVED" };
+    }
+    if (message === "SIZE_NOT_FOUND") {
+      return { ok: false as const, error: "SIZE_NOT_FOUND" as const };
+    }
+    return { ok: false as const, error: "ERROR" as const };
+  }
 }

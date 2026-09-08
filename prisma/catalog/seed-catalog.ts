@@ -36,6 +36,7 @@ type UpsertMaterial = (
     wholesaleNote?: string | null;
     rollWeightKg?: number | null;
     metersPerRoll?: number | null;
+    availableColors?: string[];
     legacyNames?: string[];
   },
 ) => Promise<{ id: string; nameUk: string }>;
@@ -244,6 +245,7 @@ export async function seedCrmCatalog(args: {
       colorOrAttribute: trim.colorOrAttribute ?? undefined,
       note: trim.packNote ? `Упаковка: ${trim.packNote}` : undefined,
       status: "ACTIVE",
+      availableColors: trim.availableColors,
     });
     materialByName.set(trim.nameUk, material);
   }
@@ -290,7 +292,9 @@ export async function seedCrmCatalog(args: {
     pick((f) => /кашкорс|кашкорсе|рибан|рібан/i.test(f.nameUk));
 
   const thread =
-    [...materialByName.values()].find((m) => /^нитки(\s|·|$)/i.test(m.nameUk)) ?? null;
+    [...materialByName.values()].find((m) => /^нитки(\s|·|$)/i.test(m.nameUk)) ??
+    [...materialByName.values()].find((m) => /швейні\s+поліестер/i.test(m.nameUk)) ??
+    null;
   const zipper =
     [...materialByName.values()].find((m) =>
       /^блискавка(\s|·|$)/i.test(m.nameUk) && /спіральна.*№5.*75\s*см/i.test(m.nameUk),

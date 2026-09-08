@@ -8,14 +8,25 @@ import {
   expandOperationsForSizes,
   sizeCodesFromScopes,
   sizeConsumptionFromNorms,
+  sizeWasteFromNorms,
 } from "@/lib/size-bom";
 import {
+  effectiveOversizeConsumption,
+  isOversizeCode,
+  resolveSizeCoeffs,
+} from "@/lib/size-coeffs";
+import {
   buildCalcFromOrderItem,
-  cutRateContextFromProduct,
+  calcOptionsFromProduct,
   getPricingForOrder,
+  quantityTiersByOperationIdFromProduct,
 } from "@/server/domains/calculation/from-entities";
 import { commercialPriceForOrderItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
 import { isCutOperationName, resolveCutUnitRateForProduct } from "@/lib/cut-rate";
+import {
+  pickOperationQuantityTiers,
+  resolveQuantityTierRate,
+} from "@/lib/quantity-tiers";
 import { computeFabricDeliveryLine } from "@/lib/fabric-delivery";
 import {
   fabricFieldsForOrderLine,
@@ -27,6 +38,7 @@ import {
   fabricPricingModeLabel,
   resolveMaterialLinePurchasePrice,
   resolveCostMode,
+  resolveMinWholesaleMeters,
   type MaterialCostVatMode,
 } from "@/lib/fabric-pricing";
 import { getFabricPricingGlobals } from "@/server/domains/catalog/materials";
@@ -55,6 +67,7 @@ function purchasePriceForOrderMaterial(
   material: FabricMaterialFields,
   companyCostMode: MaterialCostVatMode,
   metersNeeded: number | null,
+  minWholesaleMetersOverride?: number | null,
 ) {
   return resolveMaterialLinePurchasePrice({
     type: material.type,
@@ -63,7 +76,10 @@ function purchasePriceForOrderMaterial(
     priceMeterUahVat: numField(material.priceMeterUahVat),
     priceMeterUahCutVat: numField(material.priceMeterUahCutVat),
     metersPerRoll: numField(material.metersPerRoll),
-    minWholesaleMeters: numField(material.minWholesaleMeters),
+    minWholesaleMeters:
+      minWholesaleMetersOverride != null && minWholesaleMetersOverride > 0
+        ? minWholesaleMetersOverride
+        : numField(material.minWholesaleMeters),
     costVatOverride: material.costVatOverride,
     companyCostMode,
     metersNeeded,
@@ -103,6 +119,7 @@ function previewFabricLineTerms(input: {
     cargoUsdPerKg?: { toString(): string } | number | null;
     usdUahRate?: { toString(): string } | number | null;
     costVatOverride?: MaterialCostVatMode | null;
+    minWholesaleMetersOverride?: { toString(): string } | number | null;
   };
   material: FabricMaterialFields & {
     type?: string | null;
@@ -116,6 +133,7 @@ function previewFabricLineTerms(input: {
   costVatOverride?: MaterialCostVatMode | null;
   cargoOverride?: number | null;
   usdUahRateOverride?: number | null;
+  minWholesaleMetersOverride?: number | null;
 }) {
   const metersNeeded = fabricMetersNeeded({
     consumptionPerUnit: Number(input.row.consumptionPerUnit),
@@ -126,6 +144,17 @@ function previewFabricLineTerms(input: {
   const vatOverride =
     input.costVatOverride ?? input.row.costVatOverride ?? input.material.costVatOverride ?? null;
   const fields = orderLineFabricFields({ costVatOverride: vatOverride }, input.material, input.offer);
+  const override =
+    input.minWholesaleMetersOverride != null
+      ? input.minWholesaleMetersOverride
+      : numField(input.row.minWholesaleMetersOverride);
+  const catalogMinWholesale = resolveMinWholesaleMeters({
+    minWholesaleMeters: fields.minWholesaleMeters,
+    metersPerRoll: fields.metersPerRoll,
+  });
+  const effectiveMinWholesale =
+    override != null && override > 0 ? override : catalogMinWholesale;
+
   const resolved = resolveMaterialLinePurchasePrice({
     type: input.material.type,
     purchasePrice: Number(input.material.purchasePrice),
@@ -133,7 +162,7 @@ function previewFabricLineTerms(input: {
     priceMeterUahVat: fields.priceMeterUahVat,
     priceMeterUahCutVat: fields.priceMeterUahCutVat ?? numField(input.material.priceMeterUahCutVat),
     metersPerRoll: fields.metersPerRoll,
-    minWholesaleMeters: fields.minWholesaleMeters,
+    minWholesaleMeters: effectiveMinWholesale,
     costVatOverride: fields.costVatOverride,
     companyCostMode: input.globals.materialCostVatMode,
     metersNeeded,
@@ -145,7 +174,7 @@ function previewFabricLineTerms(input: {
     priceMeterUahVat: fields.priceMeterUahVat,
     priceMeterUahCutVat: fields.priceMeterUahCutVat ?? numField(input.material.priceMeterUahCutVat),
     metersPerRoll: fields.metersPerRoll,
-    minWholesaleMeters: fields.minWholesaleMeters,
+    minWholesaleMeters: effectiveMinWholesale,
     costVatOverride: "NET",
     companyCostMode: "NET",
     metersNeeded,
@@ -157,7 +186,7 @@ function previewFabricLineTerms(input: {
     priceMeterUahVat: fields.priceMeterUahVat,
     priceMeterUahCutVat: fields.priceMeterUahCutVat ?? numField(input.material.priceMeterUahCutVat),
     metersPerRoll: fields.metersPerRoll,
-    minWholesaleMeters: fields.minWholesaleMeters,
+    minWholesaleMeters: effectiveMinWholesale,
     costVatOverride: "GROSS",
     companyCostMode: "GROSS",
     metersNeeded,
@@ -192,12 +221,32 @@ function previewFabricLineTerms(input: {
       ? Math.round((metersNeeded / metersPerKg) * 10) / 10
       : null;
 
+  const cutPurchasePrice =
+    numField(fields.priceMeterUahCutVat) ?? numField(input.material.priceMeterUahCutVat);
+  const hasCutPrice = cutPurchasePrice != null && cutPurchasePrice > 0;
+  // Threshold affects ₴/m only with cut↔гурт; order override is still shown/stored either way.
+  const minWholesaleMeters =
+    override != null && override > 0
+      ? override
+      : hasCutPrice
+        ? catalogMinWholesale
+        : null;
+
   return {
     purchasePricePerMeter: resolved.purchasePrice,
     purchasePriceNet: resolvedNet.purchasePrice,
     purchasePriceGross: resolvedGross.purchasePrice,
+    wholesalePurchasePrice: resolved.wholesalePurchasePrice,
+    wholesalePurchasePriceNet: resolvedNet.wholesalePurchasePrice,
+    wholesalePurchasePriceGross: resolvedGross.wholesalePurchasePrice,
     pricingMode: resolved.pricingMode,
     pricingModeLabel: fabricPricingModeLabel(resolved.pricingMode),
+    cutPurchasePrice: resolved.cutPurchasePrice,
+    hasCutPrice,
+    hasWholesalePrice: resolved.wholesalePurchasePrice > 0,
+    minWholesaleMeters,
+    catalogMinWholesaleMeters: catalogMinWholesale,
+    minWholesaleMetersOverride: override != null && override > 0 ? override : null,
     priceMeterUahNoVat: fields.priceMeterUahNoVat,
     priceMeterUahVat: fields.priceMeterUahVat,
     priceKgUsd: fields.priceKgUsd,
@@ -304,6 +353,19 @@ export async function getOrder(id: string) {
               isBaseModel: true,
               cutRateTiers: { orderBy: { minQuantity: "asc" } },
               commercialPriceTiers: { orderBy: { minQuantity: "asc" } },
+              operations: {
+                select: {
+                  operationId: true,
+                  rateTiers: { orderBy: { minQuantity: "asc" } },
+                  operation: {
+                    select: {
+                      calculationMethod: true,
+                      baseRate: true,
+                      rateTiers: { orderBy: { minQuantity: "asc" } },
+                    },
+                  },
+                },
+              },
             },
           },
           sizes: true,
@@ -364,6 +426,7 @@ function bomFromProduct(
   totalQuantity: number,
   quantitiesBySize: Record<string, number>,
   companyCostMode: MaterialCostVatMode,
+  sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>,
 ) {
   const expandedMaterials = expandMaterialsForSizes(
     product.materials.map((row) => ({
@@ -372,10 +435,21 @@ function bomFromProduct(
       waste: Number(row.wastePercent ?? row.material.defaultWastePercent),
       sizeCodes: sizeCodesFromScopes(row.sizeScopes),
       sizeConsumption: sizeConsumptionFromNorms(row.sizeNorms),
+      sizeWaste: sizeWasteFromNorms(row.sizeNorms),
     })),
     orderedSizeCodes,
   );
   const materialById = new Map(product.materials.map((row) => [row.materialId, row]));
+  const bakeOversizeConsumption = (
+    consumption: number,
+    sizeCode: string | null,
+    sizeConsumption: Record<string, number>,
+  ) => {
+    if (!sizeCode || !isOversizeCode(sizeCode)) return consumption;
+    if (sizeConsumption[sizeCode] != null) return consumption;
+    const { materialCoeff } = resolveSizeCoeffs(sizeCode, sizeRules);
+    return effectiveOversizeConsumption(consumption, materialCoeff);
+  };
   const expandedOperations = expandOperationsForSizes(
     product.operations.map((row) => ({
       operationId: row.operationId,
@@ -393,8 +467,13 @@ function bomFromProduct(
         const waste = Number(
           row.waste ?? source.wastePercent ?? source.material.defaultWastePercent,
         );
+        const consumption = bakeOversizeConsumption(
+          row.consumption,
+          row.sizeCode,
+          sizeConsumption,
+        );
         const metersNeeded = fabricMetersNeeded({
-          consumptionPerUnit: row.consumption,
+          consumptionPerUnit: consumption,
           wastePercent: waste,
           quantitiesBySize,
           sizeCode: row.sizeCode,
@@ -404,13 +483,16 @@ function bomFromProduct(
           materialId: source.materialId,
           nameSnapshot: source.material.nameUk,
           unitCodeSnapshot: source.material.unitOfMeasure.code,
-          consumptionPerUnit: row.consumption,
+          consumptionPerUnit: consumption,
           wastePercent: waste,
           purchasePrice: purchasePriceForOrderMaterial(
             source.material,
             companyCostMode,
             metersNeeded,
           ),
+          supplierId: source.supplierId ?? null,
+          supplierNameSnapshot: source.supplier?.nameUk ?? null,
+          colorSnapshot: source.colorSnapshot ?? null,
           sortOrder: index,
           sizeCode: row.sizeCode,
         };
@@ -425,9 +507,16 @@ function bomFromProduct(
             : source.operation.baseRate != null
               ? Number(source.operation.baseRate)
               : 0;
-        const unitRate = isCutOperationName(source.operation.nameUk)
-          ? resolveCutUnitRateForProduct(product, totalQuantity, fallbackRate)
-          : fallbackRate;
+        let unitRate = fallbackRate;
+        if (isCutOperationName(source.operation.nameUk)) {
+          unitRate = resolveCutUnitRateForProduct(product, totalQuantity, fallbackRate);
+        } else if (source.operation.calculationMethod === "QUANTITY_TIER") {
+          unitRate = resolveQuantityTierRate({
+            quantity: totalQuantity,
+            tiers: pickOperationQuantityTiers(source.rateTiers, source.operation.rateTiers),
+            fallbackRate,
+          });
+        }
         return {
           operationId: source.operationId,
           nameSnapshot: source.operation.nameUk,
@@ -444,7 +533,10 @@ function bomFromProduct(
       create: product.decorations.map((row, index) => ({
         decorationMethodId: row.decorationMethodId,
         nameSnapshot: row.decorationMethod.nameUk,
-        setupCost: row.decorationMethod.setupCost,
+        setupCost:
+          row.setupCostOverride != null
+            ? row.setupCostOverride
+            : row.decorationMethod.setupCost,
         unitRate: row.decorationMethod.unitRate,
         sortOrder: index,
       })),
@@ -552,14 +644,24 @@ export async function createOrderWithProducts(input: {
         sizeCode?: string | null;
         sizeCodes?: string[] | null;
         sizeConsumption?: Record<string, number>;
+        sizeWaste?: Record<string, number>;
         purchasePrice?: number | null;
+        colorSnapshot?: string | null;
+        cargoUsdPerKg?: number | null;
+        usdUahRate?: number | null;
+        fabricDeliveryManual?: boolean;
+        fabricDeliveryAmount?: number | null;
       }>;
       operations: Array<{
         operationId: string;
         sizeCode?: string | null;
         sizeCodes?: string[] | null;
       }>;
-      decorations: Array<{ decorationMethodId: string }>;
+      decorations: Array<{
+        decorationMethodId: string;
+        setupCost?: number | null;
+        unitRate?: number | null;
+      }>;
     };
   }>;
 }) {
@@ -584,7 +686,7 @@ export async function createOrderWithProducts(input: {
         clientId: input.clientId,
         managerId: input.managerId,
         title: input.title || primaryName,
-        status: "CALCULATION",
+        status: "DRAFT",
         deadline: input.deadline ?? null,
         comment: input.items[0]?.comment || null,
         targetMarginPercent:
@@ -625,7 +727,10 @@ export async function createOrderWithProducts(input: {
               })
             : Promise.resolve([]),
           operationIds.length
-            ? tx.operation.findMany({ where: { id: { in: operationIds } } })
+            ? tx.operation.findMany({
+                where: { id: { in: operationIds } },
+                include: { rateTiers: { orderBy: { minQuantity: "asc" } } },
+              })
             : Promise.resolve([]),
           decorationIds.length
             ? tx.decorationMethod.findMany({ where: { id: { in: decorationIds } } })
@@ -643,6 +748,7 @@ export async function createOrderWithProducts(input: {
             waste: row.wastePercent,
             sizeCodes: row.sizeCode ? [row.sizeCode] : row.sizeCodes,
             sizeConsumption: row.sizeConsumption,
+            sizeWaste: row.sizeWaste,
           })),
           orderedSizeCodes,
         );
@@ -652,16 +758,23 @@ export async function createOrderWithProducts(input: {
             const material = materialById.get(row.materialId);
             if (!material) return null;
             const waste = row.waste ?? Number(material.defaultWastePercent);
+            const draftSource = override.materials.find((m) => m.materialId === row.materialId);
+            const sizeConsumption = draftSource?.sizeConsumption ?? {};
+            const consumption =
+              row.sizeCode && isOversizeCode(row.sizeCode) && sizeConsumption[row.sizeCode] == null
+                ? effectiveOversizeConsumption(
+                    row.consumption,
+                    resolveSizeCoeffs(row.sizeCode).materialCoeff,
+                  )
+                : row.consumption;
             const metersNeeded = fabricMetersNeeded({
-              consumptionPerUnit: row.consumption,
+              consumptionPerUnit: consumption,
               wastePercent: waste,
               quantitiesBySize,
               sizeCode: row.sizeCode,
-              sizeConsumption: override.materials.find((m) => m.materialId === row.materialId)
-                ?.sizeConsumption,
+              sizeConsumption,
             });
-            const draftPrice = override.materials.find((m) => m.materialId === row.materialId)
-              ?.purchasePrice;
+            const draftPrice = draftSource?.purchasePrice;
             const purchasePrice =
               draftPrice != null && Number.isFinite(Number(draftPrice))
                 ? Number(draftPrice)
@@ -670,9 +783,26 @@ export async function createOrderWithProducts(input: {
               materialId: material.id,
               nameSnapshot: material.nameUk,
               unitCodeSnapshot: material.unitOfMeasure.code,
-              consumptionPerUnit: row.consumption,
+              consumptionPerUnit: consumption,
               wastePercent: waste,
               purchasePrice,
+              colorSnapshot: draftSource?.colorSnapshot?.trim() || null,
+              cargoUsdPerKg:
+                draftSource?.cargoUsdPerKg != null && Number.isFinite(Number(draftSource.cargoUsdPerKg))
+                  ? Number(draftSource.cargoUsdPerKg)
+                  : null,
+              usdUahRate:
+                draftSource?.usdUahRate != null && Number.isFinite(Number(draftSource.usdUahRate))
+                  ? Number(draftSource.usdUahRate)
+                  : null,
+              fabricDeliveryManual: Boolean(draftSource?.fabricDeliveryManual),
+              fabricDeliveryAmount:
+                draftSource?.fabricDeliveryManual &&
+                draftSource.fabricDeliveryAmount != null &&
+                Number.isFinite(Number(draftSource.fabricDeliveryAmount))
+                  ? Number(draftSource.fabricDeliveryAmount)
+                  : 0,
+              fabricDeliveryComputed: 0,
               sortOrder: index,
               sizeCode: row.sizeCode,
             };
@@ -698,9 +828,19 @@ export async function createOrderWithProducts(input: {
                 : operation.baseRate != null
                   ? Number(operation.baseRate)
                   : 0;
-            const unitRate = isCutOperationName(operation.nameUk)
-              ? resolveCutUnitRateForProduct(product, totalQuantity, fallbackRate)
-              : fallbackRate;
+            let unitRate = fallbackRate;
+            if (isCutOperationName(operation.nameUk)) {
+              unitRate = resolveCutUnitRateForProduct(product, totalQuantity, fallbackRate);
+            } else if (operation.calculationMethod === "QUANTITY_TIER") {
+              unitRate = resolveQuantityTierRate({
+                quantity: totalQuantity,
+                tiers: pickOperationQuantityTiers(
+                  productOp?.rateTiers,
+                  operation.rateTiers,
+                ),
+                fallbackRate,
+              });
+            }
             return {
               operationId: operation.id,
               nameSnapshot: operation.nameUk,
@@ -718,11 +858,19 @@ export async function createOrderWithProducts(input: {
           .map((row, index) => {
             const decoration = decorationById.get(row.decorationMethodId);
             if (!decoration) return null;
+            const setup =
+              row.setupCost != null && Number.isFinite(Number(row.setupCost))
+                ? Number(row.setupCost)
+                : Number(decoration.setupCost);
+            const unit =
+              row.unitRate != null && Number.isFinite(Number(row.unitRate))
+                ? Number(row.unitRate)
+                : Number(decoration.unitRate);
             return {
               decorationMethodId: decoration.id,
               nameSnapshot: decoration.nameUk,
-              setupCost: decoration.setupCost,
-              unitRate: decoration.unitRate,
+              setupCost: setup,
+              unitRate: unit,
               sortOrder: index,
             };
           })
@@ -927,24 +1075,58 @@ async function syncCutRatesForOrderItem(
         select: {
           optimalQty: true,
           cutRateTiers: { orderBy: { minQuantity: "asc" } },
+          operations: {
+            select: {
+              operationId: true,
+              rateTiers: { orderBy: { minQuantity: "asc" } },
+              operation: {
+                select: {
+                  calculationMethod: true,
+                  rateTiers: { orderBy: { minQuantity: "asc" } },
+                },
+              },
+            },
+          },
         },
       },
     },
   });
-  if (!item?.product?.cutRateTiers.length) return;
+  if (!item?.product) return;
+
+  const quantityTiers = quantityTiersByOperationIdFromProduct(item.product);
 
   for (const operation of item.operations) {
-    if (!isCutOperationName(operation.nameSnapshot)) continue;
-    const rate = resolveCutUnitRateForProduct(
-      item.product,
-      totalQuantity,
-      Number(operation.unitRate ?? 0),
-    );
-    if (Math.abs(Number(operation.unitRate ?? 0) - rate) > 0.0001) {
-      await tx.orderItemOperation.update({
-        where: { id: operation.id },
-        data: { unitRate: rate },
+    if (isCutOperationName(operation.nameSnapshot) && item.product.cutRateTiers.length) {
+      const rate = resolveCutUnitRateForProduct(
+        item.product,
+        totalQuantity,
+        Number(operation.unitRate ?? 0),
+      );
+      if (Math.abs(Number(operation.unitRate ?? 0) - rate) > 0.0001) {
+        await tx.orderItemOperation.update({
+          where: { id: operation.id },
+          data: { unitRate: rate },
+        });
+      }
+      continue;
+    }
+
+    if (
+      operation.calculationMethod === "QUANTITY_TIER" &&
+      operation.operationId &&
+      quantityTiers[operation.operationId]?.length
+    ) {
+      const rate = resolveQuantityTierRate({
+        quantity: totalQuantity,
+        tiers: quantityTiers[operation.operationId]!,
+        fallbackRate: Number(operation.unitRate ?? 0),
       });
+      if (Math.abs(Number(operation.unitRate ?? 0) - rate) > 0.0001) {
+        await tx.orderItemOperation.update({
+          where: { id: operation.id },
+          data: { unitRate: rate },
+        });
+      }
     }
   }
 }
@@ -987,6 +1169,7 @@ async function syncOrderItemFabricPrices(
       fields,
       fabricGlobals.materialCostVatMode,
       metersNeeded,
+      numField(row.minWholesaleMetersOverride),
     );
     if (Number(row.purchasePrice) === nextPrice) continue;
     await tx.orderItemMaterial.update({
@@ -1101,6 +1284,13 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       row.orderItem.sizes.map((size) => [size.sizeCode, size.quantity]),
     );
     const totalQuantity = row.orderItem.sizes.reduce((sum, size) => sum + size.quantity, 0);
+    const supplierRows = row.materialId
+      ? await prisma.materialSupplier.findMany({
+          where: { materialId: row.materialId },
+          include: { supplier: true },
+          orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+        })
+      : [];
     return {
       id: row.id,
       orderId: row.orderItem.orderId,
@@ -1115,6 +1305,16 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       isFabric: false,
       materialId: row.materialId,
       purchasePrice: Number(row.purchasePrice),
+      colorSnapshot: row.colorSnapshot,
+      supplierId: row.supplierId,
+      materialAvailableColors: row.material?.availableColors ?? [],
+      offers: supplierRows.map((offer) => ({
+        offerId: offer.id,
+        supplierId: offer.supplierId,
+        supplierName: offer.supplier.nameUk,
+        isPrimary: offer.isPrimary,
+        availableColors: offer.availableColors ?? [],
+      })),
       materialPartyCost:
         Math.round(
           Number(row.purchasePrice) *
@@ -1123,7 +1323,6 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
             totalQuantity *
             100,
         ) / 100,
-      offers: [],
     };
   }
 
@@ -1158,6 +1357,7 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       supplierId: offer.supplierId,
       supplierName: offer.supplier.nameUk,
       isPrimary: offer.isPrimary,
+      availableColors: offer.availableColors ?? [],
       ...preview,
     };
   });
@@ -1209,6 +1409,8 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
     isFabric,
     materialId: row.materialId,
     supplierId: row.supplierId,
+    colorSnapshot: row.colorSnapshot,
+    materialAvailableColors: row.material.availableColors ?? [],
     supplierName:
       row.supplierNameSnapshot ??
       (selectedOffer ? selectedOffer.supplier.nameUk : row.material.supplierCode ?? null),
@@ -1233,6 +1435,15 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
     metersNeeded: activePreview?.metersNeeded ?? 0,
     kgNeeded: activePreview?.kgNeeded ?? null,
     metersPerKg: activePreview?.metersPerKg ?? numField(row.material.metersPerKg),
+    hasCutPrice: Boolean(activePreview?.hasCutPrice),
+    hasWholesalePrice: Boolean(activePreview?.hasWholesalePrice),
+    minWholesaleMeters: activePreview?.minWholesaleMeters ?? null,
+    catalogMinWholesaleMeters: activePreview?.catalogMinWholesaleMeters ?? null,
+    minWholesaleMetersOverride: activePreview?.minWholesaleMetersOverride ?? null,
+    wholesaleNote:
+      (selectedOffer?.wholesaleNote as string | null | undefined) ??
+      row.material.wholesaleNote ??
+      null,
     priceKgUsd: activePreview?.priceKgUsd ?? numField(row.material.priceKgUsd),
     usdUahRate:
       numField(row.usdUahRate) ??
@@ -1248,6 +1459,7 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
 export async function updateOrderItemMaterialTerms(input: {
   id: string;
   supplierId?: string | null;
+  colorSnapshot?: string | null;
   cargoUsdPerKg?: number | null;
   usdUahRate?: number | null;
   costVatOverride?: MaterialCostVatMode | null;
@@ -1255,6 +1467,7 @@ export async function updateOrderItemMaterialTerms(input: {
   wastePercent?: number;
   fabricDeliveryAmount?: number;
   fabricDeliveryManual?: boolean;
+  minWholesaleMetersOverride?: number | null;
 }) {
   await assertOrderItemMaterialEditable(input.id);
   const row = await prisma.orderItemMaterial.findUniqueOrThrow({
@@ -1274,6 +1487,29 @@ export async function updateOrderItemMaterialTerms(input: {
       ? null
       : offer?.supplier.nameUk ?? row.supplierNameSnapshot;
 
+  let colorSnapshot =
+    input.colorSnapshot !== undefined ? input.colorSnapshot : row.colorSnapshot;
+  if (input.supplierId !== undefined || input.colorSnapshot !== undefined) {
+    const { reconcileColorForSupplier } = await import("@/lib/supplier-colors");
+    const offerRows =
+      row.materialId
+        ? await prisma.materialSupplier.findMany({
+            where: { materialId: row.materialId },
+            orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+          })
+        : [];
+    colorSnapshot = reconcileColorForSupplier({
+      color: colorSnapshot,
+      supplierId,
+      offers: offerRows.map((item) => ({
+        supplierId: item.supplierId,
+        isPrimary: item.isPrimary,
+        availableColors: item.availableColors,
+      })),
+      materialFallback: row.material?.availableColors ?? [],
+    });
+  }
+
   const costVatOverride =
     input.costVatOverride !== undefined ? input.costVatOverride : row.costVatOverride;
 
@@ -1290,6 +1526,11 @@ export async function updateOrderItemMaterialTerms(input: {
   const wastePercent =
     input.wastePercent !== undefined ? input.wastePercent : Number(row.wastePercent);
 
+  const minWholesaleMetersOverride =
+    input.minWholesaleMetersOverride !== undefined
+      ? input.minWholesaleMetersOverride
+      : numField(row.minWholesaleMetersOverride);
+
   const globals = await getFabricPricingGlobals();
   const quantitiesBySize = Object.fromEntries(
     row.orderItem.sizes.map((size) => [size.sizeCode, size.quantity]),
@@ -1302,6 +1543,7 @@ export async function updateOrderItemMaterialTerms(input: {
     costVatOverride,
     cargoUsdPerKg,
     usdUahRate,
+    minWholesaleMetersOverride,
   };
 
   const preview =
@@ -1315,6 +1557,7 @@ export async function updateOrderItemMaterialTerms(input: {
           costVatOverride,
           cargoOverride: cargoUsdPerKg,
           usdUahRateOverride: usdUahRate,
+          minWholesaleMetersOverride,
         })
       : null;
 
@@ -1328,11 +1571,13 @@ export async function updateOrderItemMaterialTerms(input: {
     data: {
       supplierId,
       supplierNameSnapshot,
+      colorSnapshot,
       cargoUsdPerKg,
       usdUahRate,
       costVatOverride,
       consumptionPerUnit,
       wastePercent,
+      minWholesaleMetersOverride,
       purchasePrice: preview?.purchasePricePerMeter ?? Number(row.purchasePrice),
       fabricDeliveryComputed: preview?.deliveryAmount ?? 0,
       fabricDeliveryAmount,
@@ -1572,7 +1817,10 @@ export async function addOrderItemOperation(input: {
 }) {
   await assertOrderItemEditable(input.orderItemId);
   const [operation, item, maxSort] = await Promise.all([
-    prisma.operation.findUniqueOrThrow({ where: { id: input.operationId } }),
+    prisma.operation.findUniqueOrThrow({
+      where: { id: input.operationId },
+      include: { rateTiers: { orderBy: { minQuantity: "asc" } } },
+    }),
     prisma.orderItem.findUniqueOrThrow({
       where: { id: input.orderItemId },
       select: {
@@ -1581,6 +1829,19 @@ export async function addOrderItemOperation(input: {
           select: {
             optimalQty: true,
             cutRateTiers: { orderBy: { minQuantity: "asc" } },
+            operations: {
+              where: { operationId: input.operationId },
+              select: {
+                operationId: true,
+                rateTiers: { orderBy: { minQuantity: "asc" } },
+                operation: {
+                  select: {
+                    calculationMethod: true,
+                    rateTiers: { orderBy: { minQuantity: "asc" } },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -1592,10 +1853,17 @@ export async function addOrderItemOperation(input: {
   ]);
 
   const fallbackRate = operation.baseRate != null ? Number(operation.baseRate) : 0;
-  const unitRate =
-    item.product && isCutOperationName(operation.nameUk)
-      ? resolveCutUnitRateForProduct(item.product, item.totalQuantity, fallbackRate)
-      : fallbackRate;
+  let unitRate = fallbackRate;
+  if (item.product && isCutOperationName(operation.nameUk)) {
+    unitRate = resolveCutUnitRateForProduct(item.product, item.totalQuantity, fallbackRate);
+  } else if (operation.calculationMethod === "QUANTITY_TIER") {
+    const productOp = item.product?.operations[0];
+    unitRate = resolveQuantityTierRate({
+      quantity: item.totalQuantity,
+      tiers: pickOperationQuantityTiers(productOp?.rateTiers, operation.rateTiers),
+      fallbackRate,
+    });
+  }
 
   return prisma.orderItemOperation.create({
     data: {
@@ -1764,6 +2032,21 @@ export async function addOrderItemDecoration(input: {
 export async function removeOrderItemDecoration(id: string) {
   await assertOrderItemDecorationEditable(id);
   return prisma.orderItemDecoration.delete({ where: { id } });
+}
+
+export async function updateOrderItemDecoration(input: {
+  id: string;
+  setupCost?: number;
+  unitRate?: number;
+}) {
+  await assertOrderItemDecorationEditable(input.id);
+  return prisma.orderItemDecoration.update({
+    where: { id: input.id },
+    data: {
+      ...(input.setupCost != null ? { setupCost: Math.max(0, input.setupCost) } : {}),
+      ...(input.unitRate != null ? { unitRate: Math.max(0, input.unitRate) } : {}),
+    },
+  });
 }
 
 export async function saveCalculationVersion(input: {
@@ -1954,7 +2237,7 @@ export async function saveProposal(input: {
       const costCalc = buildCalcFromOrderItem(
         item,
         { ...pricing },
-        { cutRate: cutRateContextFromProduct(item.product) },
+        calcOptionsFromProduct(item.product),
       );
 
       const commercial = commercialPriceForOrderItem(item, {
@@ -1973,7 +2256,7 @@ export async function saveProposal(input: {
         profitAmount = totalSellingValue - Number(costCalc.totalCost);
         marginPercent =
           totalSellingValue > 0 ? (profitAmount / totalSellingValue) * 100 : 0;
-      } else if (commercial) {
+      } else if (commercial?.fromPriceList) {
         const merged = mergeCommercialAndCost(commercial, costCalc, item.totalQuantity);
         sellingPricePerUnit = merged.sellingPricePerUnit;
         totalSellingValue = merged.totalSellingValue;

@@ -20,6 +20,7 @@ export default async function ApplicationsSettingsPage({
 }) {
   const access = await getCurrentUserAccess();
   if (!access) redirect("/login");
+  if (!accessHas(access, "manageCatalogs")) redirect("/overview");
 
   const { q, unit } = await searchParams;
 

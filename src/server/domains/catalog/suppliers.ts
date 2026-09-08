@@ -4,6 +4,7 @@ import {
   type FabricPricingGlobals,
 } from "@/lib/fabric-pricing";
 import { getFabricPricingGlobals } from "@/server/domains/catalog/materials";
+import { mergeColorLists } from "@/lib/trim-colors";
 
 export async function listSuppliers(params?: { search?: string }) {
   const search = params?.search?.trim();
@@ -64,6 +65,7 @@ export type MaterialSupplierOfferInput = {
   metersPerRoll?: number | null;
   minWholesaleMeters?: number | null;
   wholesaleNote?: string | null;
+  availableColors?: string[] | null;
 };
 
 /** Upsert primary offer from material form fields (supplier name + prices on Material). */
@@ -245,6 +247,7 @@ export async function upsertMaterialSupplierOffer(
       metersPerRoll: derived.metersPerRoll,
       minWholesaleMeters: offer.minWholesaleMeters ?? derived.minWholesaleMeters,
       wholesaleNote: offer.wholesaleNote ?? null,
+      availableColors: offer.availableColors ?? [],
     },
     update: {
       isPrimary: offer.isPrimary ?? false,
@@ -260,6 +263,9 @@ export async function upsertMaterialSupplierOffer(
       metersPerRoll: derived.metersPerRoll,
       minWholesaleMeters: offer.minWholesaleMeters ?? derived.minWholesaleMeters,
       wholesaleNote: offer.wholesaleNote ?? null,
+      ...(offer.availableColors !== undefined
+        ? { availableColors: offer.availableColors ?? [] }
+        : {}),
     },
     include: { supplier: true },
   });
@@ -280,6 +286,9 @@ export async function upsertMaterialSupplierOffer(
         metersPerRoll: derived.metersPerRoll,
         minWholesaleMeters: offer.minWholesaleMeters ?? derived.minWholesaleMeters,
         wholesaleNote: offer.wholesaleNote ?? undefined,
+        ...(offer.availableColors !== undefined
+          ? { availableColors: mergeColorLists(offer.availableColors ?? []) }
+          : {}),
       },
     });
   }
@@ -292,4 +301,70 @@ export async function deleteMaterialSupplierOffer(id: string) {
   if (!row) return;
   if (row.isPrimary) throw new Error("PRIMARY_OFFER");
   await prisma.materialSupplier.delete({ where: { id } });
+}
+
+/** Promote an existing offer to primary and mirror its terms onto Material. */
+export async function setPrimaryMaterialSupplierOffer(offerId: string) {
+  const row = await prisma.materialSupplier.findUnique({
+    where: { id: offerId },
+    include: { supplier: true },
+  });
+  if (!row) throw new Error("NOT_FOUND");
+
+  await prisma.materialSupplier.updateMany({
+    where: { materialId: row.materialId, isPrimary: true },
+    data: { isPrimary: false },
+  });
+
+  const primary = await prisma.materialSupplier.update({
+    where: { id: offerId },
+    data: { isPrimary: true },
+    include: { supplier: true },
+  });
+
+  const globals = await getFabricPricingGlobals();
+  const cargo =
+    primary.cargoUsdPerKg != null
+      ? Number(primary.cargoUsdPerKg)
+      : globals.fabricCargoUsdPerKg;
+  const derived = deriveFabricPricing(
+    {
+      metersPerKg: primary.metersPerKg != null ? Number(primary.metersPerKg) : null,
+      priceKgUsd: primary.priceKgUsd != null ? Number(primary.priceKgUsd) : null,
+      priceKgUsdCargo:
+        primary.priceKgUsdCargo != null ? Number(primary.priceKgUsdCargo) : null,
+      priceKgUsdVat: primary.priceKgUsdVat != null ? Number(primary.priceKgUsdVat) : null,
+      priceMeterUahNoVat:
+        primary.priceMeterUahNoVat != null ? Number(primary.priceMeterUahNoVat) : null,
+      priceMeterUahVat:
+        primary.priceMeterUahVat != null ? Number(primary.priceMeterUahVat) : null,
+      priceMeterUahCutVat:
+        primary.priceMeterUahCutVat != null ? Number(primary.priceMeterUahCutVat) : null,
+      rollWeightKg: primary.rollWeightKg != null ? Number(primary.rollWeightKg) : null,
+      metersPerRoll: primary.metersPerRoll != null ? Number(primary.metersPerRoll) : null,
+      minWholesaleMeters:
+        primary.minWholesaleMeters != null ? Number(primary.minWholesaleMeters) : null,
+    },
+    { ...globals, fabricCargoUsdPerKg: cargo },
+  );
+
+  await prisma.material.update({
+    where: { id: row.materialId },
+    data: {
+      supplierCode: primary.supplier.nameUk,
+      purchasePrice: derived.purchasePrice > 0 ? derived.purchasePrice : undefined,
+      metersPerKg: primary.metersPerKg ?? undefined,
+      priceKgUsd: primary.priceKgUsd ?? undefined,
+      priceKgUsdCargo: derived.priceKgUsdCargo,
+      priceKgUsdVat: primary.priceKgUsdVat ?? undefined,
+      priceMeterUahNoVat: derived.priceMeterUahNoVat,
+      priceMeterUahVat: derived.priceMeterUahVat,
+      priceMeterUahCutVat: primary.priceMeterUahCutVat ?? undefined,
+      metersPerRoll: derived.metersPerRoll,
+      minWholesaleMeters: primary.minWholesaleMeters ?? derived.minWholesaleMeters,
+      wholesaleNote: primary.wholesaleNote,
+    },
+  });
+
+  return primary;
 }

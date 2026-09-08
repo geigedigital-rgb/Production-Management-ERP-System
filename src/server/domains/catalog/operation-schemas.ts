@@ -1,10 +1,21 @@
 import { z } from "zod";
+import { parseRateTiersInput } from "@/lib/quantity-tiers";
 
 export const operationCalcMethodSchema = z.enum([
   "UNIT_RATE",
   "SHIFT_OUTPUT",
   "QUANTITY_TIER",
 ]);
+
+const rateTiersSchema = z
+  .array(
+    z.object({
+      minQuantity: z.coerce.number().int().positive(),
+      ratePerUnit: z.coerce.number().min(0),
+    }),
+  )
+  .optional()
+  .default([]);
 
 export const operationFormSchema = z
   .object({
@@ -15,6 +26,7 @@ export const operationFormSchema = z
     shiftCost: z.coerce.number().min(0).optional().nullable(),
     standardOutputPerShift: z.coerce.number().min(0).optional().nullable(),
     note: z.string().trim().optional().nullable(),
+    rateTiers: rateTiersSchema,
   })
   .superRefine((data, ctx) => {
     if (data.calculationMethod === "UNIT_RATE" && (data.baseRate == null || Number.isNaN(data.baseRate))) {
@@ -36,6 +48,21 @@ export const operationFormSchema = z
         });
       }
     }
+    if (data.calculationMethod === "QUANTITY_TIER") {
+      const tiers = parseRateTiersInput(data.rateTiers, data.baseRate ?? 0);
+      if (tiers.length === 0) {
+        ctx.addIssue({ code: "custom", message: "RATE_TIERS_REQUIRED", path: ["rateTiers"] });
+      }
+    }
+  })
+  .transform((data) => {
+    if (data.calculationMethod !== "QUANTITY_TIER") {
+      return { ...data, rateTiers: [] as Array<{ minQuantity: number; ratePerUnit: number }> };
+    }
+    return {
+      ...data,
+      rateTiers: parseRateTiersInput(data.rateTiers, data.baseRate ?? 0),
+    };
   });
 
 export type OperationFormValues = z.infer<typeof operationFormSchema>;

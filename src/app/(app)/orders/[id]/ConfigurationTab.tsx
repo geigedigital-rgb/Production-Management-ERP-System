@@ -36,10 +36,18 @@ import {
   removeOrderDecorationAction,
   removeOrderMaterialAction,
   removeOrderOperationAction,
+  updateOrderDecorationAction,
   updateOrderMaterialConsumptionAction,
   updateOrderSizesAction,
 } from "@/server/domains/orders/actions";
 import { CopySizeSpec, SizeScopeTabs } from "@/components/catalog/SizeScopeTabs";
+import { SizeBomScopeHint } from "@/components/catalog/SizeBomScopeHint";
+import {
+  effectiveOversizeConsumption,
+  isOversizeCode,
+  OVERSIZE_DEFAULT_COEFFS,
+  oversizeUpliftCaption,
+} from "@/lib/size-coeffs";
 import {
   ALL_SIZES,
   customizedSizeCodes,
@@ -113,6 +121,8 @@ export function ConfigurationTab({
   operationsSubtotal,
   decorationsSubtotal,
   corridorHint,
+  hideCosts = false,
+  canCreateCatalog = false,
 }: {
   orderId: string;
   itemId: string;
@@ -123,7 +133,7 @@ export function ConfigurationTab({
   materials: MaterialRow[];
   operations: OperationRow[];
   decorations: DecorationRow[];
-  materialOptions: Array<{ id: string; label: string }>;
+  materialOptions: Array<{ id: string; label: string; composition?: string | null }>;
   operationOptions: Array<{ id: string; label: string }>;
   decorationOptions: Array<{ id: string; label: string }>;
   unitOptions: Array<{ id: string; label: string }>;
@@ -131,6 +141,8 @@ export function ConfigurationTab({
   operationsSubtotal: number;
   decorationsSubtotal: number;
   corridorHint?: { title: string; detail: string } | null;
+  hideCosts?: boolean;
+  canCreateCatalog?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -147,6 +159,8 @@ export function ConfigurationTab({
 
   const dirty = sizes.some((size) => (quantities[size.sizeCode] ?? 0) !== size.quantity);
   const totalQuantity = sizes.reduce((sum, size) => sum + (quantities[size.sizeCode] ?? 0), 0);
+  const decorationSetupTotal = decorations.reduce((sum, row) => sum + row.setupCost, 0);
+  const decorationUnitRateTotal = decorations.reduce((sum, row) => sum + row.unitRate, 0);
   const sizeRefs = sizes.map((size) => ({ code: size.sizeCode, nameUk: size.sizeNameUk }));
   const visibleMaterials =
     sizeScope === ALL_SIZES ? materials : linesForSize(materials, sizeScope);
@@ -161,6 +175,11 @@ export function ConfigurationTab({
       sizeCodes: row.sizeCode ? [row.sizeCode] : null,
     })),
   });
+  const hasOversizeSizes = sizes.some((size) => isOversizeCode(size.sizeCode));
+  const scopeIsOversize = isOversizeCode(sizeScope);
+  const hasOversizeQty = sizes.some(
+    (size) => isOversizeCode(size.sizeCode) && (quantities[size.sizeCode] ?? 0) > 0,
+  );
 
   function saveMaterialConsumption(id: string, consumption: number) {
     const formData = new FormData();
@@ -170,6 +189,18 @@ export function ConfigurationTab({
     formData.set("sizeCode", sizeScope);
     startTransition(async () => {
       await updateOrderMaterialConsumptionAction(formData);
+      router.refresh();
+    });
+  }
+
+  function saveDecorationRates(id: string, setupCost: number, unitRate: number) {
+    const formData = new FormData();
+    formData.set("orderId", orderId);
+    formData.set("id", id);
+    formData.set("setupCost", String(setupCost));
+    formData.set("unitRate", String(unitRate));
+    startTransition(async () => {
+      await updateOrderDecorationAction(formData);
       router.refresh();
     });
   }
@@ -299,12 +330,14 @@ export function ConfigurationTab({
                     onChange={setSizeScope}
                     customized={customized}
                   />
+                  {sizes.length > 1 ? (
+                    <SizeBomScopeHint
+                      sizeScope={sizeScope}
+                      hasOversizeSizes={hasOversizeSizes}
+                    />
+                  ) : null}
                   {sizeScope !== ALL_SIZES && !locked ? (
                     <CopySizeSpec from={sizeScope} sizes={sizeRefs} onCopy={copySpecTo} disabled={pending} />
-                  ) : sizes.length > 1 ? (
-                    <p className="type-caption">
-                      Спільна специфіка. Оберіть розмір, щоб змінити норму лише для нього.
-                    </p>
                   ) : null}
                 </div>
               }
@@ -313,28 +346,44 @@ export function ConfigurationTab({
               <THead>
                 <TH className="min-w-[12rem] w-[38%]">Матеріал</TH>
                 <TH align="right">Норма / од.</TH>
-                <TH align="right">Відходи</TH>
-                <TH align="right">Ціна</TH>
-                <TH align="right">Собівартість / од.</TH>
+                {!hideCosts ? <TH align="right">Відходи</TH> : null}
+                {!hideCosts ? <TH align="right">Ціна</TH> : null}
+                {!hideCosts ? <TH align="right">Собівартість / од.</TH> : null}
                 {!locked ? <TH width="52px" /> : null}
               </THead>
               <TBody>
                 {visibleMaterials.length === 0 ? (
                   <TableEmpty
-                    colSpan={locked ? 5 : 6}
+                    colSpan={(hideCosts ? 2 : 5) + (locked ? 0 : 1)}
                     icon={<IconMaterials size={22} />}
                     title={sizeScope === ALL_SIZES ? "Матеріалів ще немає" : "Немає матеріалів для цього розміру"}
-                    description="Додайте з рядка нижче або створіть новий матеріал."
+                    description={
+                      canCreateCatalog
+                        ? "Додайте з рядка нижче або створіть новий матеріал."
+                        : "Додайте матеріал із каталогу нижче."
+                    }
                   />
                 ) : (
-                  visibleMaterials.map((row) => (
+                  visibleMaterials.map((row) => {
+                    const baseUnitCost = row.unitCost;
+                    const displayUnitCost = scopeIsOversize
+                      ? baseUnitCost * OVERSIZE_DEFAULT_COEFFS.materialCoeff
+                      : baseUnitCost;
+                    const oversizeNorm =
+                      hasOversizeSizes || scopeIsOversize
+                        ? effectiveOversizeConsumption(row.consumption)
+                        : null;
+                    return (
                     <TR
                       key={row.id}
                       className={cn(
-                        row.isFabric !== false && "cursor-pointer hover:bg-[var(--color-surface-subtle)]",
+                        !hideCosts && row.isFabric !== false && "cursor-pointer hover:bg-[var(--color-surface-subtle)]",
                         selectedMaterialId === row.id && "bg-[var(--color-primary-50)]/40",
                       )}
-                      onClick={() => setSelectedMaterialId(row.id)}
+                      onClick={() => {
+                        if (hideCosts) return;
+                        setSelectedMaterialId(row.id);
+                      }}
                     >
                       <TD title={row.name} className="min-w-[12rem] w-[38%] align-top">
                         <CellStack
@@ -342,8 +391,11 @@ export function ConfigurationTab({
                           subtitle={
                             [
                               row.sizeCode ? `Лише ${row.sizeCode}` : null,
-                              row.supplierName ? row.supplierName : null,
-                              row.pricingHint,
+                              !hideCosts && row.supplierName ? row.supplierName : null,
+                              !hideCosts && row.pricingHint ? row.pricingHint : null,
+                              hasOversizeSizes || hasOversizeQty
+                                ? oversizeUpliftCaption()
+                                : null,
                             ]
                               .filter(Boolean)
                               .join(" · ") || undefined
@@ -353,39 +405,66 @@ export function ConfigurationTab({
                       </TD>
                       <TD numeric>
                         {locked ? (
-                          <>
-                            {row.consumption} {row.unit}
-                          </>
-                        ) : (
-                          <span className="inline-flex items-center justify-end gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.0001"
-                              defaultValue={row.consumption}
-                              onBlur={(event) => {
-                                const next = Math.max(0, Number(event.target.value) || 0);
-                                if (next === row.consumption) return;
-                                saveMaterialConsumption(row.id, next);
-                              }}
-                              onClick={(event) => event.stopPropagation()}
-                              className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
-                            />
-                            <span className="text-[12px] text-[var(--color-text-secondary)]">
-                              {row.unit}
+                          <span className="inline-flex flex-col items-end gap-0.5">
+                            <span>
+                              {row.consumption} {row.unit}
                             </span>
+                            {oversizeNorm != null ? (
+                              <span className="text-[10px] text-[var(--color-text-quiet)]">
+                                XXL+ ≈ {oversizeNorm} {row.unit}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          <span className="inline-flex flex-col items-end gap-0.5">
+                            <span className="inline-flex items-center justify-end gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.0001"
+                                defaultValue={row.consumption}
+                                onBlur={(event) => {
+                                  const next = Math.max(0, Number(event.target.value) || 0);
+                                  if (next === row.consumption) return;
+                                  saveMaterialConsumption(row.id, next);
+                                }}
+                                onClick={(event) => event.stopPropagation()}
+                                className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                              />
+                              <span className="text-[12px] text-[var(--color-text-secondary)]">
+                                {row.unit}
+                              </span>
+                            </span>
+                            {oversizeNorm != null ? (
+                              <span className="text-[10px] text-[var(--color-text-quiet)]">
+                                XXL+ ≈ {oversizeNorm} {row.unit}
+                              </span>
+                            ) : null}
                           </span>
                         )}
                       </TD>
-                      <TD numeric className="text-[var(--color-text-secondary)]">
-                        {row.waste}%
-                      </TD>
-                      <TD numeric className="text-[var(--color-text-secondary)]">
-                        {formatMoneyUah(row.price)}
-                      </TD>
-                      <TD numeric className="font-medium">
-                        {formatMoneyUah(row.unitCost)}
-                      </TD>
+                      {!hideCosts ? (
+                        <TD numeric className="text-[var(--color-text-secondary)]">
+                          {row.waste}%
+                        </TD>
+                      ) : null}
+                      {!hideCosts ? (
+                        <TD numeric className="text-[var(--color-text-secondary)]">
+                          {formatMoneyUah(row.price)}
+                        </TD>
+                      ) : null}
+                      {!hideCosts ? (
+                        <TD numeric className="font-medium">
+                          <span className="inline-flex flex-col items-end gap-0.5">
+                            <span>{formatMoneyUah(displayUnitCost)}</span>
+                            {scopeIsOversize ? (
+                              <span className="text-[10px] font-normal text-[var(--color-text-quiet)]">
+                                база {formatMoneyUah(baseUnitCost)}
+                              </span>
+                            ) : null}
+                          </span>
+                        </TD>
+                      ) : null}
                       {!locked ? (
                         <TD align="center">
                           <button
@@ -402,10 +481,11 @@ export function ConfigurationTab({
                         </TD>
                       ) : null}
                     </TR>
-                  ))
+                    );
+                  })
                 )}
               </TBody>
-              {materials.length > 0 ? (
+              {materials.length > 0 && !hideCosts ? (
                 <TFoot>
                   <tr>
                     <TD colSpan={4} className="text-[var(--color-text-secondary)]">
@@ -424,6 +504,8 @@ export function ConfigurationTab({
                 materials={materialOptions}
                 units={unitOptions}
                 sizeCode={sizeScope}
+                hideCosts={hideCosts}
+                canCreateCatalog={canCreateCatalog}
               />
             ) : null}
           </TableCard>
@@ -434,16 +516,16 @@ export function ConfigurationTab({
               <THead>
                 <TH>Операція</TH>
                 <TH>Метод</TH>
-                <TH align="right">Вартість / од.</TH>
+                {!hideCosts ? <TH align="right">Вартість / од.</TH> : null}
                 {!locked ? <TH width="52px" /> : null}
               </THead>
               <TBody>
                 {visibleOperations.length === 0 ? (
                   <TableEmpty
-                    colSpan={locked ? 3 : 4}
+                    colSpan={(hideCosts ? 2 : 3) + (locked ? 0 : 1)}
                     icon={<IconOperations size={22} />}
                     title={sizeScope === ALL_SIZES ? "Операцій ще немає" : "Немає операцій для цього розміру"}
-                    description="Додайте з рядка нижче або створіть нову операцію."
+                    description="Додайте операцію з рядка нижче."
                   />
                 ) : (
                   visibleOperations.map((row) => (
@@ -457,9 +539,11 @@ export function ConfigurationTab({
                       <TD className="text-[var(--color-text-secondary)]">
                         {operationMethodLabel(row.method)}
                       </TD>
-                      <TD numeric className="font-medium">
-                        {formatMoneyUah(row.unitCost)}
-                      </TD>
+                      {!hideCosts ? (
+                        <TD numeric className="font-medium">
+                          {formatMoneyUah(row.unitCost)}
+                        </TD>
+                      ) : null}
                       {!locked ? (
                         <TD align="center">
                           <button
@@ -478,7 +562,7 @@ export function ConfigurationTab({
                   ))
                 )}
               </TBody>
-              {operations.length > 0 ? (
+              {operations.length > 0 && !hideCosts ? (
                 <TFoot>
                   <tr>
                     <TD colSpan={2} className="text-[var(--color-text-secondary)]">
@@ -496,17 +580,26 @@ export function ConfigurationTab({
                 itemId={itemId}
                 operations={operationOptions}
                 sizeCode={sizeScope}
+                canCreateCatalog={canCreateCatalog}
               />
             ) : null}
           </TableCard>
 
           <TableCard>
             <TableToolbar left={<span className="type-subsection">Нанесення</span>} />
-            <Table>
+            <Table className="table-fixed">
               <THead>
                 <TH>Метод</TH>
-                <TH align="right">Приладка</TH>
-                <TH align="right">Тариф / од.</TH>
+                {!hideCosts ? (
+                  <TH align="right" width="96px" title="Один раз на всю партію">
+                    Приладка
+                  </TH>
+                ) : null}
+                {!hideCosts ? (
+                  <TH align="right" width="80px" title="За кожну одиницю">
+                    ₴/шт
+                  </TH>
+                ) : null}
                 {!locked ? <TH width="52px" /> : null}
               </THead>
               <TBody>
@@ -515,18 +608,60 @@ export function ConfigurationTab({
                     colSpan={locked ? 3 : 4}
                     icon={<IconDecoration size={22} />}
                     title="Нанесення не використовується"
-                    description="Необовʼязково — додайте з рядка нижче, якщо потрібен друк або вишивка."
+                    description="Додайте друк або вишивку, якщо потрібно."
                   />
                 ) : (
                   decorations.map((row) => (
                     <TR key={row.id}>
-                      <TD className="font-medium">{row.name}</TD>
-                      <TD numeric className="text-[var(--color-text-secondary)]">
-                        {formatMoneyUah(row.setupCost)}
+                      <TD className="min-w-0">
+                        <CellStack title={row.name} maxWidth="100%" />
                       </TD>
-                      <TD numeric className="font-medium">
-                        {formatMoneyUah(row.unitRate)}
+                      {!hideCosts ? (
+                      <TD numeric>
+                        {locked ? (
+                          <span className="text-[var(--color-text-secondary)]">
+                            {formatMoneyUah(row.setupCost)}
+                          </span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.1"
+                            defaultValue={row.setupCost}
+                            disabled={pending}
+                            onBlur={(event) => {
+                              const next = Math.max(0, Number(event.target.value) || 0);
+                              if (next === row.setupCost) return;
+                              saveDecorationRates(row.id, next, row.unitRate);
+                            }}
+                            className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                            title="Приладка (разово на партію)"
+                          />
+                        )}
                       </TD>
+                      ) : null}
+                      {!hideCosts ? (
+                      <TD numeric>
+                        {locked ? (
+                          <span className="font-medium">{formatMoneyUah(row.unitRate)}</span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.1"
+                            defaultValue={row.unitRate}
+                            disabled={pending}
+                            onBlur={(event) => {
+                              const next = Math.max(0, Number(event.target.value) || 0);
+                              if (next === row.unitRate) return;
+                              saveDecorationRates(row.id, row.setupCost, next);
+                            }}
+                            className="h-7 w-[64px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                            title="Ставка за виріб"
+                          />
+                        )}
+                      </TD>
+                      ) : null}
                       {!locked ? (
                         <TD align="center">
                           <button
@@ -545,13 +680,17 @@ export function ConfigurationTab({
                   ))
                 )}
               </TBody>
-              {decorations.length > 0 ? (
+              {decorations.length > 0 && !hideCosts ? (
                 <TFoot>
                   <tr>
-                    <TD colSpan={2} className="text-[var(--color-text-secondary)]">
-                      Нанесення разом на {totalQuantity} шт
+                    <TD
+                      className="min-w-0 truncate text-[var(--color-text-secondary)]"
+                      title={`На ${totalQuantity} шт: ${formatMoneyUah(decorationsSubtotal)}`}
+                    >
+                      Разом
                     </TD>
-                    <TD numeric>{formatMoneyUah(decorationsSubtotal)}</TD>
+                    <TD numeric>{formatMoneyUah(decorationSetupTotal)}</TD>
+                    <TD numeric>{formatMoneyUah(decorationUnitRateTotal)}</TD>
                     {!locked ? <TD /> : null}
                   </tr>
                 </TFoot>
@@ -562,6 +701,7 @@ export function ConfigurationTab({
                 orderId={orderId}
                 itemId={itemId}
                 decorations={decorationOptions}
+                canCreateCatalog={canCreateCatalog}
               />
             ) : null}
           </TableCard>
@@ -605,12 +745,16 @@ function InlineAddOrderMaterial({
   materials,
   units,
   sizeCode,
+  hideCosts = false,
+  canCreateCatalog = false,
 }: {
   orderId: string;
   itemId: string;
-  materials: Array<{ id: string; label: string }>;
+  materials: Array<{ id: string; label: string; composition?: string | null }>;
   units: Array<{ id: string; label: string }>;
   sizeCode: string;
+  hideCosts?: boolean;
+  canCreateCatalog?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -625,7 +769,7 @@ function InlineAddOrderMaterial({
     formData.set("orderItemId", itemId);
     formData.set("materialId", nextMaterialId);
     formData.set("consumptionPerUnit", consumption || "1");
-    formData.set("wastePercent", waste);
+    formData.set("wastePercent", hideCosts ? "" : waste);
     formData.set("sizeCode", sizeCode);
     startTransition(async () => {
       await addOrderMaterialAction(formData);
@@ -647,7 +791,11 @@ function InlineAddOrderMaterial({
       >
         <option value="">Оберіть матеріал…</option>
         {materials.map((row) => (
-          <option key={row.id} value={row.id}>
+          <option
+            key={row.id}
+            value={row.id}
+            data-description={row.composition?.trim() || undefined}
+          >
             {row.label}
           </option>
         ))}
@@ -665,20 +813,22 @@ function InlineAddOrderMaterial({
           className="h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
         />
       </label>
-      <label className="w-[64px]">
-        <span className="mb-1 block text-[11px] font-medium text-[var(--color-text-tertiary)]">
-          Відх. %
-        </span>
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          value={waste}
-          placeholder="авто"
-          onChange={(event) => setWaste(event.target.value)}
-          className="h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none placeholder:text-[11px] focus:border-[var(--color-primary-500)]"
-        />
-      </label>
+      {!hideCosts ? (
+        <label className="w-[64px]">
+          <span className="mb-1 block text-[11px] font-medium text-[var(--color-text-tertiary)]">
+            Відх. %
+          </span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={waste}
+            placeholder="авто"
+            onChange={(event) => setWaste(event.target.value)}
+            className="h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none placeholder:text-[11px] focus:border-[var(--color-primary-500)]"
+          />
+        </label>
+      ) : null}
       <Button
         type="button"
         size="sm"
@@ -689,16 +839,18 @@ function InlineAddOrderMaterial({
         <IconPlus size={14} />
         {pending ? "…" : "Додати"}
       </Button>
-      <MaterialCreatePanel
-        units={units}
-        variant="ghost"
-        size="sm"
-        triggerLabel="Новий матеріал"
-        onCreated={(result) => {
-          const id = typeof result.materialId === "string" ? result.materialId : null;
-          if (id) submit(id);
-        }}
-      />
+      {canCreateCatalog ? (
+        <MaterialCreatePanel
+          units={units}
+          variant="ghost"
+          size="sm"
+          triggerLabel="Новий матеріал"
+          onCreated={(result) => {
+            const id = typeof result.materialId === "string" ? result.materialId : null;
+            if (id) submit(id);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -708,11 +860,13 @@ function InlineAddOrderOperation({
   itemId,
   operations,
   sizeCode,
+  canCreateCatalog = false,
 }: {
   orderId: string;
   itemId: string;
   operations: Array<{ id: string; label: string }>;
   sizeCode: string;
+  canCreateCatalog?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -758,15 +912,17 @@ function InlineAddOrderOperation({
         <IconPlus size={14} />
         {pending ? "…" : "Додати"}
       </Button>
-      <OperationCreatePanel
-        variant="ghost"
-        size="sm"
-        triggerLabel="Нова операція"
-        onCreated={(result) => {
-          const id = typeof result.operationId === "string" ? result.operationId : null;
-          if (id) submit(id);
-        }}
-      />
+      {canCreateCatalog ? (
+        <OperationCreatePanel
+          variant="ghost"
+          size="sm"
+          triggerLabel="Нова операція"
+          onCreated={(result) => {
+            const id = typeof result.operationId === "string" ? result.operationId : null;
+            if (id) submit(id);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -775,10 +931,12 @@ function InlineAddOrderDecoration({
   orderId,
   itemId,
   decorations,
+  canCreateCatalog = false,
 }: {
   orderId: string;
   itemId: string;
   decorations: Array<{ id: string; label: string }>;
+  canCreateCatalog?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -823,7 +981,8 @@ function InlineAddOrderDecoration({
         <IconPlus size={14} />
         {pending ? "…" : "Додати"}
       </Button>
-      <DecorationCreatePanel
+      {canCreateCatalog ? (
+        <DecorationCreatePanel
         variant="ghost"
         size="sm"
         triggerLabel="Нове нанесення"
@@ -832,6 +991,7 @@ function InlineAddOrderDecoration({
           if (id) submit(id);
         }}
       />
+      ) : null}
     </div>
   );
 }

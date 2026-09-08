@@ -11,7 +11,6 @@ import { SidePanel } from "@/components/ui/Overlay";
 import { SidePanelSkeleton } from "@/components/ui/Skeleton";
 import {
   IconCalc,
-  IconClients,
   IconFabricKind,
   IconFormTitle,
   IconMeterPrice,
@@ -34,6 +33,7 @@ import {
   deriveFabricPricing,
   type FabricPricingGlobals,
 } from "@/lib/fabric-pricing";
+import { formatMoneyUah } from "@/lib/utils";
 
 type UnitOption = { id: string; label: string };
 
@@ -104,11 +104,14 @@ function MaterialFields({
   defaults,
   fabricGlobals,
   suppliers = [],
+  managePricingSeparately = false,
 }: {
   units: UnitOption[];
   defaults?: MaterialFormDefaults;
   fabricGlobals: FabricPricingGlobals;
   suppliers?: string[];
+  /** Edit fabric: prices live in MaterialSuppliersEditor, not in this form. */
+  managePricingSeparately?: boolean;
 }) {
   const initialKind = resolveFabricKindSelect(defaults?.fabricKindUk);
   const [catalogCompositions, setCatalogCompositions] = useState<string[]>([
@@ -194,23 +197,23 @@ function MaterialFields({
   const [wholesaleNote, setWholesaleNote] = useState(defaults?.wholesaleNote ?? "");
   const [note, setNote] = useState(defaults?.note ?? "");
   const [costOverride, setCostOverride] = useState(defaults?.costVatOverride ?? "");
-  const [usdUahRate, setUsdUahRate] = useState(String(fabricGlobals.usdUahRate));
   const [fabricCargoUsdPerKg, setFabricCargoUsdPerKg] = useState(
     String(fabricGlobals.fabricCargoUsdPerKg),
   );
 
   const [purchasePrice, setPurchasePrice] = useState(String(defaults?.purchasePrice ?? 0));
 
+  const pricingInline = type === "FABRIC" && !managePricingSeparately;
+
   const liveGlobals = useMemo<FabricPricingGlobals>(
     () => ({
       ...fabricGlobals,
-      usdUahRate: Number(usdUahRate) > 0 ? Number(usdUahRate) : fabricGlobals.usdUahRate,
       fabricCargoUsdPerKg:
         Number(fabricCargoUsdPerKg) >= 0
           ? Number(fabricCargoUsdPerKg)
           : fabricGlobals.fabricCargoUsdPerKg,
     }),
-    [fabricGlobals, usdUahRate, fabricCargoUsdPerKg],
+    [fabricGlobals, fabricCargoUsdPerKg],
   );
 
   const derived = useMemo(
@@ -244,7 +247,6 @@ function MaterialFields({
   );
 
   function recalcMeterPrices(next: {
-    usdUahRate?: string;
     fabricCargoUsdPerKg?: string;
     metersPerKg?: string;
     priceKgUsd?: string;
@@ -252,10 +254,6 @@ function MaterialFields({
   }) {
     const globals: FabricPricingGlobals = {
       ...fabricGlobals,
-      usdUahRate:
-        Number(next.usdUahRate ?? usdUahRate) > 0
-          ? Number(next.usdUahRate ?? usdUahRate)
-          : fabricGlobals.usdUahRate,
       fabricCargoUsdPerKg:
         Number(next.fabricCargoUsdPerKg ?? fabricCargoUsdPerKg) >= 0
           ? Number(next.fabricCargoUsdPerKg ?? fabricCargoUsdPerKg)
@@ -291,8 +289,12 @@ function MaterialFields({
     supplierSelect === SUPPLIER_OTHER ? supplierOther.trim() : supplierSelect;
 
   const purchaseDisplay =
-    type === "FABRIC" && derived.purchasePrice > 0
-      ? String(derived.purchasePrice)
+    type === "FABRIC"
+      ? managePricingSeparately
+        ? String(defaults?.purchasePrice ?? purchasePrice)
+        : derived.purchasePrice > 0
+          ? String(derived.purchasePrice)
+          : purchasePrice
       : purchasePrice;
 
   const policyLabel =
@@ -301,6 +303,9 @@ function MaterialFields({
   return (
     <div className="space-y-4">
       {defaults ? <input type="hidden" name="id" value={defaults.id} /> : null}
+      {managePricingSeparately ? (
+        <input type="hidden" name="pricingManagedSeparately" value="1" />
+      ) : null}
 
       <FormGroup label="Основне" icon={<IconFormTitle size={14} />} columns={2} compact>
         <Input
@@ -352,9 +357,11 @@ function MaterialFields({
           }
           hint={
             type === "FABRIC"
-              ? derived.costMode === "NET"
-                ? "Без ПДВ"
-                : "З ПДВ"
+              ? managePricingSeparately
+                ? "З умов основного постачальника нижче"
+                : derived.costMode === "NET"
+                  ? "Без ПДВ"
+                  : "З ПДВ"
               : undefined
           }
         />
@@ -445,7 +452,7 @@ function MaterialFields({
               onChange={(event) => {
                 const value = event.target.value;
                 setMetersPerKg(value);
-                recalcMeterPrices({ metersPerKg: value });
+                if (pricingInline) recalcMeterPrices({ metersPerKg: value });
               }}
             />
             <Input
@@ -464,119 +471,155 @@ function MaterialFields({
               tabIndex={-1}
             />
             <input type="hidden" name="metersPerRoll" value={derived.metersPerRoll ?? ""} />
-            <Input
-              name="minWholesaleMeters"
-              label="Мін. м для гурту"
-              type="number"
-              step="0.1"
-              min="0"
-              value={minWholesaleMeters}
-              onChange={(event) => setMinWholesaleMeters(event.target.value)}
-              hint="Порожньо = метраж рулону"
-            />
           </FormGroup>
 
-          <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
-            <Input
-              name="usdUahRate"
-              label="Курс ₴/$"
-              type="number"
-              step="0.01"
-              min="0.01"
-              value={usdUahRate}
-              onChange={(event) => {
-                const value = event.target.value;
-                setUsdUahRate(value);
-                recalcMeterPrices({ usdUahRate: value });
-              }}
-            />
-            <Input
-              name="fabricCargoUsdPerKg"
-              label="Карго $/кг"
-              type="number"
-              step="0.01"
-              min="0"
-              value={fabricCargoUsdPerKg}
-              onChange={(event) => {
-                const value = event.target.value;
-                setFabricCargoUsdPerKg(value);
-                recalcMeterPrices({ fabricCargoUsdPerKg: value });
-              }}
-            />
-            <Input
-              name="priceKgUsd"
-              label="$ / кг"
-              type="number"
-              step="0.01"
-              min="0"
-              value={priceKgUsd}
-              onChange={(event) => {
-                const value = event.target.value;
-                setPriceKgUsd(value);
-                recalcMeterPrices({ priceKgUsd: value });
-              }}
-            />
-            <Input
-              label="Тариф доставки $/кг (довідник)"
-              value={derived.priceKgUsdCargo ?? ""}
-              readOnly
-              tabIndex={-1}
-            />
-            <input type="hidden" name="priceKgUsdCargo" value={derived.priceKgUsdCargo ?? ""} />
-            <Input
-              name="priceKgUsdVat"
-              label="$ / кг з ПДВ"
-              type="number"
-              step="0.01"
-              min="0"
-              value={priceKgUsdVat}
-              onChange={(event) => {
-                const value = event.target.value;
-                setPriceKgUsdVat(value);
-                recalcMeterPrices({ priceKgUsdVat: value });
-              }}
-            />
-          </FormGroup>
+          {pricingInline ? (
+            <>
+              <FormGroup
+                label="Основний постачальник"
+                icon={<IconPurchaseKg size={14} />}
+                columns={3}
+                compact
+              >
+                <p className="type-caption sm:col-span-3">
+                  Ці умови стануть собівартістю в каталозі. Курс ₴/$: {fabricGlobals.usdUahRate}{" "}
+                  (з налаштувань).
+                </p>
+                <div className="space-y-2 sm:col-span-3 lg:col-span-2">
+                  <Select
+                    label="Постачальник"
+                    value={supplierSelect}
+                    onChange={(event) => setSupplierSelect(event.target.value)}
+                  >
+                    <option value="">Оберіть…</option>
+                    {knownSuppliers.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                    <option value={SUPPLIER_OTHER}>Додати нового…</option>
+                  </Select>
+                  <input type="hidden" name="supplierCode" value={supplierValue} />
+                  {supplierSelect === SUPPLIER_OTHER ? (
+                    <Input
+                      label="Назва постачальника"
+                      value={supplierOther}
+                      onChange={(event) => setSupplierOther(event.target.value)}
+                      placeholder="Наприклад Зейджан"
+                    />
+                  ) : null}
+                </div>
+                <Input
+                  name="fabricCargoUsdPerKg"
+                  label="Карго $/кг"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={fabricCargoUsdPerKg}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setFabricCargoUsdPerKg(value);
+                    recalcMeterPrices({ fabricCargoUsdPerKg: value });
+                  }}
+                />
+                <Input
+                  name="priceKgUsd"
+                  label="$ / кг"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={priceKgUsd}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setPriceKgUsd(value);
+                    recalcMeterPrices({ priceKgUsd: value });
+                  }}
+                />
+                <Input
+                  label="$ / кг з карго (довідково)"
+                  value={derived.priceKgUsdCargo ?? ""}
+                  readOnly
+                  tabIndex={-1}
+                />
+                <input type="hidden" name="priceKgUsdCargo" value={derived.priceKgUsdCargo ?? ""} />
+                <Input
+                  name="priceKgUsdVat"
+                  label="$ / кг з ПДВ"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={priceKgUsdVat}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setPriceKgUsdVat(value);
+                    recalcMeterPrices({ priceKgUsdVat: value });
+                  }}
+                />
+              </FormGroup>
 
-          <FormGroup label="Ціна за м.п." icon={<IconMeterPrice size={14} />} columns={3} compact>
-            <Input
-              name="priceMeterUahNoVat"
-              label="₴ без ПДВ"
-              type="number"
-              step="0.1"
-              min="0"
-              value={priceMeterNoVat}
-              onChange={(event) => setPriceMeterNoVat(event.target.value)}
-              hint="Авто, можна змінити"
-            />
-            <Input
-              name="priceMeterUahVat"
-              label="₴ з ПДВ"
-              type="number"
-              step="0.1"
-              min="0"
-              value={priceMeterVat}
-              onChange={(event) => setPriceMeterVat(event.target.value)}
-              hint="Авто, можна змінити"
-            />
-            <Input
-              name="priceMeterUahCutVat"
-              label="₴ нарізка (відріз)"
-              type="number"
-              step="0.1"
-              min="0"
-              value={priceMeterCutVat}
-              onChange={(event) => setPriceMeterCutVat(event.target.value)}
-              hint="Для каталогу / малих тиражів"
-            />
-            {derived.pricingMode === "cut" ? (
-              <p className="type-caption sm:col-span-3">
-                Активна собівартість каталогу: ціна на відріз ({derived.purchasePrice} ₴/м) —
-                консервативно для базових моделей.
-              </p>
-            ) : null}
+              <FormGroup label="Ціна за м.п. і гурт" icon={<IconMeterPrice size={14} />} columns={3} compact>
+                <Input
+                  name="priceMeterUahNoVat"
+                  label="₴/м без ПДВ (гурт)"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={priceMeterNoVat}
+                  onChange={(event) => setPriceMeterNoVat(event.target.value)}
+                  hint="Ціна після межі гурту"
+                />
+                <Input
+                  name="priceMeterUahVat"
+                  label="₴/м з ПДВ (гурт)"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={priceMeterVat}
+                  onChange={(event) => setPriceMeterVat(event.target.value)}
+                  hint="Ціна після межі гурту · з ПДВ"
+                />
+                <Input
+                  name="priceMeterUahCutVat"
+                  label="₴/м відріз"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={priceMeterCutVat}
+                  onChange={(event) => setPriceMeterCutVat(event.target.value)}
+                  hint="До межі гурту / малі тиражі"
+                />
+                <Input
+                  name="minWholesaleMeters"
+                  label="Межа витрати, м"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={minWholesaleMeters}
+                  onChange={(event) => setMinWholesaleMeters(event.target.value)}
+                  hint="Порожньо = метраж рулону · ≥ межі → гурт"
+                />
+                <Input
+                  name="wholesaleNote"
+                  label="Примітка гурту"
+                  value={wholesaleNote}
+                  onChange={(event) => setWholesaleNote(event.target.value)}
+                  className="sm:col-span-2"
+                />
+                {derived.purchasePrice > 0 ? (
+                  <p className="type-caption sm:col-span-3 tabular">
+                    Активна собівартість з цих умов: {formatMoneyUah(derived.purchasePrice)}/м
+                    {derived.pricingMode === "cut" ? " (відріз)" : ""}
+                    {minWholesaleMeters ? ` · ≥ ${minWholesaleMeters} м → гурт` : ""}
+                  </p>
+                ) : null}
+              </FormGroup>
+            </>
+          ) : (
+            <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
+          )}
+
+          <FormGroup label="ПДВ" icon={<IconCalc size={14} />} columns={1} compact>
             <Select
-              className="sm:col-span-2 lg:col-span-2"
               name="costVatOverride"
               label="ПДВ у собівартості"
               value={costOverride}
@@ -586,39 +629,6 @@ function MaterialFields({
               <option value="NET">Завжди без ПДВ</option>
               <option value="GROSS">Завжди з ПДВ</option>
             </Select>
-          </FormGroup>
-
-          <FormGroup label="Постачання" icon={<IconClients size={14} />} columns={2} compact>
-            <div className="space-y-2">
-              <Select
-                label="Постачальник"
-                value={supplierSelect}
-                onChange={(event) => setSupplierSelect(event.target.value)}
-              >
-                <option value="">Оберіть…</option>
-                {knownSuppliers.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-                <option value={SUPPLIER_OTHER}>Додати нового…</option>
-              </Select>
-              <input type="hidden" name="supplierCode" value={supplierValue} />
-              {supplierSelect === SUPPLIER_OTHER ? (
-                <Input
-                  label="Назва постачальника"
-                  value={supplierOther}
-                  onChange={(event) => setSupplierOther(event.target.value)}
-                  placeholder="Наприклад Зейджан"
-                />
-              ) : null}
-            </div>
-            <Input
-              name="wholesaleNote"
-              label="Гурт"
-              value={wholesaleNote}
-              onChange={(event) => setWholesaleNote(event.target.value)}
-            />
           </FormGroup>
           <input type="hidden" name="colorOrAttribute" value={defaults?.colorOrAttribute ?? ""} />
         </>
@@ -672,7 +682,7 @@ export function MaterialCreatePanel({
   return (
     <CreatePanel
       title="Новий матеріал"
-      description="Тканини — з курсом, карго і цінами з/без ПДВ. Фурнітура — звичайна закупівельна ціна."
+      description="Тканини: вкажіть основного постачальника й ціни — це собівартість каталогу. Альтернативи додасте після створення."
       triggerLabel={triggerLabel}
       submitLabel="Створити"
       action={createMaterialAction}
@@ -752,7 +762,7 @@ export function MaterialEditPanel({
           setOpen(false);
         }}
         title="Змінити матеріал"
-        description="Після збереження активна собівартість оновиться за політикою ПДВ."
+        description="Параметри тканини зберігаються кнопкою «Зберегти». Ціни закупівлі — у блоці постачальників (окремо)."
         width="lg"
         footer={
           <>
@@ -776,14 +786,29 @@ export function MaterialEditPanel({
           ) : (
             <>
               <MaterialFields
-                key={`${loaded.id}-${loaded.densityGsm}-${loaded.metersPerKg}`}
+                key={`${loaded.id}-${loaded.densityGsm}-${loaded.metersPerKg}-${loaded.purchasePrice}`}
                 units={units}
                 defaults={loaded}
                 fabricGlobals={globals}
                 suppliers={suppliers}
+                managePricingSeparately={loaded.type === "FABRIC"}
               />
               {loaded.type === "FABRIC" ? (
-                <MaterialSuppliersEditor materialId={loaded.id} />
+                <MaterialSuppliersEditor
+                  materialId={loaded.id}
+                  metersPerKg={loaded.metersPerKg}
+                  fabricGlobals={globals}
+                  onPrimaryChanged={() => {
+                    void (async () => {
+                      const result = await getMaterialForEditAction(loaded.id);
+                      if (result.ok && "material" in result) {
+                        setLoaded(result.material);
+                        setGlobals(result.fabricGlobals);
+                      }
+                      router.refresh();
+                    })();
+                  }}
+                />
               ) : null}
             </>
           )}

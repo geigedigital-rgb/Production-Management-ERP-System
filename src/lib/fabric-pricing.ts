@@ -138,11 +138,18 @@ export function resolveOrderFabricPurchasePrice(input: {
   const minM = num(input.minWholesaleMeters);
   const wholesale = input.wholesalePurchasePrice;
 
+  // Single ₴/m price = always wholesale; threshold only matters when cut vs гурт differ.
   if (cut == null || cut <= 0) {
-    return { purchasePrice: wholesale, pricingMode: wholesale > 0 ? "wholesale" : "standard" };
+    return {
+      purchasePrice: wholesale > 0 ? wholesale : 0,
+      pricingMode: wholesale > 0 ? "wholesale" : "standard",
+    };
   }
 
-  if (minM != null && minM > 0 && input.metersNeeded >= minM) {
+  const atWholesale =
+    minM != null && minM > 0 && Number.isFinite(input.metersNeeded) && input.metersNeeded >= minM;
+
+  if (atWholesale) {
     return { purchasePrice: wholesale > 0 ? wholesale : cut, pricingMode: "wholesale" };
   }
 

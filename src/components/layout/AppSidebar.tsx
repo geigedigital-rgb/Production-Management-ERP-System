@@ -50,14 +50,29 @@ const workspace: NavItem[] = [
 ];
 
 const catalogs: NavItem[] = [
-  { href: "/settings/resources", labelKey: "materials", icon: IconMaterials },
-  { href: "/settings/operations", labelKey: "operations", icon: IconOperations },
-  { href: "/settings/applications", labelKey: "applications", icon: IconDecoration },
+  {
+    href: "/settings/resources",
+    labelKey: "materials",
+    icon: IconMaterials,
+    requiredPermission: "manageCatalogs",
+  },
+  {
+    href: "/settings/operations",
+    labelKey: "operations",
+    icon: IconOperations,
+    requiredPermission: "manageCatalogs",
+  },
+  {
+    href: "/settings/applications",
+    labelKey: "applications",
+    icon: IconDecoration,
+    requiredPermission: "manageCatalogs",
+  },
 ];
 
 const configuration: NavItem[] = [
   { href: "/settings/pricing", labelKey: "pricing", icon: IconPricing, requiredPermission: "managePricingRules" },
-  { href: "/settings/users", labelKey: "users", icon: IconUsers },
+  { href: "/settings/users", labelKey: "users", icon: IconUsers, requiredPermission: "manageUsers" },
   { href: "/settings/company", labelKey: "company", icon: IconCompany, requiredPermission: "managePricingRules" },
 ];
 

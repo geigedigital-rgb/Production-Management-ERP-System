@@ -41,9 +41,9 @@ export function TableToolbar({
   return (
     <div className={cn("border-b border-[var(--color-border)]", className)}>
       {(left || right) && (
-        <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">{left}</div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">{right}</div>
+        <div className="flex flex-wrap items-start justify-between gap-3 px-3.5 py-2.5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{left}</div>
+          <div className="ml-auto flex shrink-0 flex-wrap items-start justify-end gap-2">{right}</div>
         </div>
       )}
       {filters ? (
@@ -210,6 +210,7 @@ export function TD({
   className,
   colSpan,
   title,
+  onClick,
 }: {
   children?: React.ReactNode;
   align?: "left" | "right" | "center";
@@ -219,11 +220,13 @@ export function TD({
   className?: string;
   colSpan?: number;
   title?: string;
+  onClick?: (event: React.MouseEvent<HTMLTableCellElement>) => void;
 }) {
   return (
     <td
       colSpan={colSpan}
       title={title}
+      onClick={onClick}
       className={cn(
         "px-3 py-2 align-middle text-[13px] font-normal text-[var(--color-text-secondary)]",
         align === "right" && "text-right",

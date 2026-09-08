@@ -31,8 +31,8 @@ export function MaterialPricingToggles({
   onCostVatMode,
   onPriceMode,
 }: {
-  costVatMode: "NET" | "GROSS";
-  priceMode: "auto" | "cut" | "wholesale";
+  costVatMode?: "NET" | "GROSS" | null;
+  priceMode?: "auto" | "cut" | "wholesale" | null;
   hasCut: boolean;
   onCostVatMode: (mode: "NET" | "GROSS") => void;
   onPriceMode: (mode: "auto" | "cut" | "wholesale") => void;
@@ -49,7 +49,7 @@ export function MaterialPricingToggles({
         label="з ПДВ"
         onClick={() => onCostVatMode("GROSS")}
       />
-      {hasCut ? (
+      {hasCut && costVatMode ? (
         <>
           <span className="mx-0.5 text-[10px] text-[var(--color-text-tertiary)]">|</span>
           <PricingToggle active={priceMode === "auto"} label="авто" onClick={() => onPriceMode("auto")} />

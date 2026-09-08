@@ -125,6 +125,11 @@ export function CostSummary({
             собівартість {formatMoneyUah(Number(calc.costPerUnit))}
             {quantity > 1 ? ` · ${quantity} шт` : " / од."}
           </p>
+          {quantity > 1 ? (
+            <p className="type-caption mt-1 text-[var(--color-text-tertiary)]">
+              Разом собівартість {formatMoneyUah(Number(calc.totalCost))}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-2 border-y border-[var(--color-divider)] py-2.5">

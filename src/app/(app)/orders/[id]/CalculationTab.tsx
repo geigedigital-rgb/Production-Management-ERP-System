@@ -16,6 +16,7 @@ import { Banner } from "@/components/ui/Banner";
 import { formatMoneyUah } from "@/lib/utils";
 import type { CalculationResult } from "@/server/domains/calculation/engine";
 import type { DecorationRow, FabricDeliveryRow, MaterialRow, OperationRow } from "./ConfigurationTab";
+import { isOversizeCode, oversizeMaterialPct, oversizeOperationPct, oversizeUpliftCaption, resolveSizeCoeffs } from "@/lib/size-coeffs";
 
 /**
  * Line-item breakdown for the calculation tab.
@@ -38,6 +39,7 @@ export function CalculationTab({
   commercialSellingPricePerUnit,
   commercialTotalValue,
   commercialMarginPercent,
+  sizeQuantities = [],
 }: {
   calc: CalculationResult;
   totalQuantity: number;
@@ -55,6 +57,7 @@ export function CalculationTab({
   commercialSellingPricePerUnit?: number;
   commercialTotalValue?: number;
   commercialMarginPercent?: number;
+  sizeQuantities?: Array<{ sizeCode: string; quantity: number }>;
 }) {
   const perUnit = (value: number) => (totalQuantity > 0 ? value / totalQuantity : 0);
   const margin = Number(calc.marginPercent);
@@ -62,6 +65,12 @@ export function CalculationTab({
   const belowMinimum = hasCommercialPriceList
     ? commercialMargin < minimumMarginPercent
     : margin < minimumMarginPercent;
+  const oversizeRows = sizeQuantities
+    .filter((row) => row.quantity > 0 && isOversizeCode(row.sizeCode))
+    .map((row) => ({
+      ...row,
+      ...resolveSizeCoeffs(row.sizeCode),
+    }));
   const otherAdditionalCosts = Math.max(
     0,
     Number(calc.additionalCostsSubtotal) - fabricDeliveryAmount,
@@ -125,7 +134,41 @@ export function CalculationTab({
             <TH align="right">Разом</TH>
           </THead>
           <TBody>
-            <TableSectionHeader title="Матеріали" first />
+            {oversizeRows.length > 0 ? (
+              <>
+                <TableSectionHeader title="Розміри XXL+" first />
+                {oversizeRows.map((row) => (
+                  <TR key={row.sizeCode}>
+                    <TD className="font-medium text-[var(--color-text-primary)]">
+                      {row.sizeCode}
+                    </TD>
+                    <TD className="type-caption">
+                      матеріали ×{row.materialCoeff.toFixed(2)} · операції ×
+                      {row.operationCoeff.toFixed(2)} (+{oversizeMaterialPct()}% / +
+                      {oversizeOperationPct()}% до спільної норми)
+                    </TD>
+                    <TD numeric className="text-[var(--color-text-secondary)]">
+                      —
+                    </TD>
+                    <TD numeric>{row.quantity} шт</TD>
+                  </TR>
+                ))}
+                <TableSectionSubtotal
+                  label="Разом oversized"
+                  perUnit="—"
+                  total={`${oversizeRows.reduce((sum, row) => sum + row.quantity, 0)} шт`}
+                />
+              </>
+            ) : null}
+
+            <TableSectionHeader title="Матеріали" first={oversizeRows.length === 0} />
+            {oversizeRows.length > 0 ? (
+              <TR muted>
+                <TD colSpan={4} className="type-caption">
+                  У сумах нижче вже враховано {oversizeUpliftCaption()} на частку тиражу XXL+.
+                </TD>
+              </TR>
+            ) : null}
             {materials.length === 0 ? (
               <TR muted>
                 <TD colSpan={4}>Матеріалів немає</TD>
@@ -142,6 +185,9 @@ export function CalculationTab({
                   <TD className="type-caption">
                     {row.consumption} {row.unit} × (1 + {row.waste}%) × {formatMoneyUah(row.price)}
                     {row.sizeCode ? ` · ${row.sizeCode}` : ""}
+                    {oversizeRows.length > 0 && !row.sizeCode
+                      ? ` · для XXL+ ще ×${(1 + oversizeMaterialPct() / 100).toFixed(2)}`
+                      : ""}
                   </TD>
                   <TD numeric className="text-[var(--color-text-secondary)]">
                     {formatMoneyUah(row.unitCost)}
@@ -159,6 +205,14 @@ export function CalculationTab({
             ) : null}
 
             <TableSectionHeader title="Операції" />
+            {oversizeRows.length > 0 ? (
+              <TR muted>
+                <TD colSpan={4} className="type-caption">
+                  Для XXL+ ставка операцій ×{(1 + oversizeOperationPct() / 100).toFixed(2)} вже в
+                  підсумку.
+                </TD>
+              </TR>
+            ) : null}
             {operations.length === 0 ? (
               <TR muted>
                 <TD colSpan={4}>Операцій немає</TD>

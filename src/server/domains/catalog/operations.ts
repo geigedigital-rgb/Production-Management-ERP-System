@@ -7,6 +7,11 @@ import {
 } from "./operation-schemas";
 import type { OperationCalcMethod, RecordStatus } from "@prisma/client";
 
+const operationListInclude = {
+  category: true,
+  rateTiers: { orderBy: { minQuantity: "asc" as const } },
+} as const;
+
 export async function listOperations(params?: { search?: string; status?: RecordStatus }) {
   const search = params?.search?.trim();
   return prisma.operation.findMany({
@@ -16,14 +21,29 @@ export async function listOperations(params?: { search?: string; status?: Record
         ? { nameUk: { contains: search, mode: "insensitive" } }
         : {}),
     },
-    include: { category: true },
+    include: operationListInclude,
     orderBy: { nameUk: "asc" },
+  });
+}
+
+async function replaceOperationRateTiers(
+  operationId: string,
+  tiers: Array<{ minQuantity: number; ratePerUnit: number }>,
+) {
+  await prisma.operationRateTier.deleteMany({ where: { operationId } });
+  if (tiers.length === 0) return;
+  await prisma.operationRateTier.createMany({
+    data: tiers.map((tier) => ({
+      operationId,
+      minQuantity: tier.minQuantity,
+      ratePerUnit: tier.ratePerUnit,
+    })),
   });
 }
 
 export async function createOperation(raw: OperationFormValues) {
   const data = operationFormSchema.parse(raw);
-  return prisma.operation.create({
+  const operation = await prisma.operation.create({
     data: {
       nameUk: data.nameUk,
       categoryId: data.categoryId || null,
@@ -34,11 +54,18 @@ export async function createOperation(raw: OperationFormValues) {
       note: data.note || null,
     },
   });
+  if (data.calculationMethod === "QUANTITY_TIER") {
+    await replaceOperationRateTiers(operation.id, data.rateTiers);
+  }
+  return prisma.operation.findUniqueOrThrow({
+    where: { id: operation.id },
+    include: operationListInclude,
+  });
 }
 
 export async function updateOperation(id: string, raw: OperationFormValues) {
   const data = operationFormSchema.parse(raw);
-  return prisma.operation.update({
+  await prisma.operation.update({
     where: { id },
     data: {
       nameUk: data.nameUk,
@@ -49,6 +76,15 @@ export async function updateOperation(id: string, raw: OperationFormValues) {
       standardOutputPerShift: data.standardOutputPerShift ?? null,
       note: data.note || null,
     },
+  });
+  if (data.calculationMethod === "QUANTITY_TIER") {
+    await replaceOperationRateTiers(id, data.rateTiers);
+  } else {
+    await prisma.operationRateTier.deleteMany({ where: { operationId: id } });
+  }
+  return prisma.operation.findUniqueOrThrow({
+    where: { id },
+    include: operationListInclude,
   });
 }
 

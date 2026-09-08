@@ -15,20 +15,21 @@ export const PERMISSIONS = {
   saveVersions: "saveVersions",
   generateQuotations: "generateQuotations",
   changeOrderStatus: "changeOrderStatus",
+  /** Product list/detail prices, economics, BOM money columns; order calc/cost rails. */
+  viewProductCosts: "viewProductCosts",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
 const ALL_PERMISSIONS = Object.values(PERMISSIONS);
 
+/**
+ * Manager: assemble orders (DRAFT) + clients.
+ * Calculation, proposals, catalogs, product costs — admin (or explicitly granted).
+ */
 export const DEFAULT_MANAGER_PERMISSIONS: Permission[] = [
   PERMISSIONS.manageOrders,
   PERMISSIONS.manageClients,
-  PERMISSIONS.createInlineCatalog,
-  PERMISSIONS.adjustPriceInRange,
-  PERMISSIONS.saveVersions,
-  PERMISSIONS.generateQuotations,
-  PERMISSIONS.changeOrderStatus,
 ];
 
 export type PermissionMeta = {
@@ -41,32 +42,42 @@ export type PermissionMeta = {
 export const PERMISSION_META: PermissionMeta[] = [
   {
     key: PERMISSIONS.manageOrders,
-    label: "Створення та ведення замовлень",
+    label: "Створення та комплектація замовлень (до розрахунку)",
     group: "Замовлення",
   },
   {
     key: PERMISSIONS.saveVersions,
-    label: "Збереження пропозицій калькуляції",
+    label: "Розрахунок і збереження пропозицій калькуляції",
     group: "Замовлення",
+    adminOnly: true,
   },
   {
     key: PERMISSIONS.changeOrderStatus,
     label: "Погодження пропозицій та передача у виробництво",
     group: "Замовлення",
+    adminOnly: true,
   },
   {
     key: PERMISSIONS.generateQuotations,
     label: "Формування комерційних пропозицій (КП)",
     group: "Замовлення",
+    adminOnly: true,
   },
   {
     key: PERMISSIONS.adjustPriceInRange,
     label: "Коригування ціни в дозволеному діапазоні",
     group: "Замовлення",
+    adminOnly: true,
   },
   {
     key: PERMISSIONS.approveBelowMinMargin,
     label: "Збереження нижче мінімальної маржі",
+    group: "Замовлення",
+    adminOnly: true,
+  },
+  {
+    key: PERMISSIONS.viewProductCosts,
+    label: "Ціни та калькуляція виробів / собівартість у замовленні",
     group: "Замовлення",
     adminOnly: true,
   },
@@ -79,10 +90,11 @@ export const PERMISSION_META: PermissionMeta[] = [
     key: PERMISSIONS.createInlineCatalog,
     label: "Швидке додавання записів у довідники",
     group: "Довідники",
+    adminOnly: true,
   },
   {
     key: PERMISSIONS.manageCatalogs,
-    label: "Повне керування довідниками",
+    label: "База матеріалів, операцій і нанесень",
     group: "Довідники",
     adminOnly: true,
   },

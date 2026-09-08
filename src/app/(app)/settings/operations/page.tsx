@@ -20,6 +20,7 @@ export default async function OperationsSettingsPage({
 }) {
   const access = await getCurrentUserAccess();
   if (!access) redirect("/login");
+  if (!accessHas(access, "manageCatalogs")) redirect("/overview");
 
   const { q, method } = await searchParams;
 
@@ -57,6 +58,15 @@ export default async function OperationsSettingsPage({
         unitCostValue = Number(row.shiftCost) / Number(row.standardOutputPerShift);
         unitCostLabel = formatMoneyUah(unitCostValue);
       }
+    } else if (row.calculationMethod === "QUANTITY_TIER") {
+      const tiers = row.rateTiers ?? [];
+      if (tiers.length > 0) {
+        unitCostValue = Number(tiers[0]!.ratePerUnit);
+        unitCostLabel = `від ${formatMoneyUah(unitCostValue)}`;
+      } else if (row.baseRate != null) {
+        unitCostValue = Number(row.baseRate);
+        unitCostLabel = formatMoneyUah(unitCostValue);
+      }
     } else if (row.baseRate != null) {
       unitCostValue = Number(row.baseRate);
       unitCostLabel = formatMoneyUah(unitCostValue);
@@ -73,6 +83,10 @@ export default async function OperationsSettingsPage({
       note: row.note ?? "",
       unitCostLabel,
       unitCostValue,
+      rateTiers: (row.rateTiers ?? []).map((tier) => ({
+        minQuantity: tier.minQuantity,
+        ratePerUnit: Number(tier.ratePerUnit),
+      })),
     };
   });
 

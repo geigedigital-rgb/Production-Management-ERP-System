@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeFabricKind } from "../../src/lib/fabric-kinds";
+import { mergeColorLists, splitColorLabels } from "../../src/lib/trim-colors";
 
 export type ParsedFabric = {
   key: string;
@@ -34,7 +35,10 @@ export type ParsedTrim = {
   category: string;
   unitCode: "pcs" | "m" | "cone";
   purchasePrice: number;
+  /** Type / size attributes without color. */
   colorOrAttribute: string | null;
+  /** Colors for this base SKU (merged across CSV rows that differ only by color). */
+  availableColors: string[];
   supplierCode: string | null;
   packNote: string | null;
 };
@@ -173,6 +177,40 @@ function joinParts(...parts: Array<string | null | undefined>) {
     .join(" · ");
 }
 
+/**
+ * Sheet globals for meter formulas:
+ * - New export: header ends with «доллар…» / «карго…», values on row 1 (cols 17–18).
+ * - Legacy: row1 «доллар,45» and row2 «карго,1.7» in cols 0–1.
+ * App PricingSettings also stores these; CSV values seed/refresh that config.
+ */
+function readFabricSheetGlobals(rows: string[][]): {
+  usdUah: number;
+  cargoUsd: number;
+  dataStart: number;
+} {
+  const header = rows[0] ?? [];
+  const dollarCol = header.findIndex((cell) => /доллар/i.test(cell));
+  const cargoCol = header.findIndex((cell) => /карго/i.test(cell));
+
+  if (dollarCol >= 0 || cargoCol >= 0) {
+    const usdUah =
+      parseUaNumber(rows[1]?.[dollarCol]) ??
+      parseUaNumber(rows[2]?.[dollarCol]) ??
+      45;
+    const cargoUsd =
+      parseUaNumber(rows[1]?.[cargoCol]) ??
+      parseUaNumber(rows[2]?.[cargoCol]) ??
+      1.7;
+    return { usdUah, cargoUsd, dataStart: 3 };
+  }
+
+  return {
+    usdUah: parseUaNumber(rows[1]?.[1]) ?? 45,
+    cargoUsd: parseUaNumber(rows[2]?.[1]) ?? 1.7,
+    dataStart: 3,
+  };
+}
+
 export function loadFabrics(options?: {
   materialCostVatMode?: "NET" | "GROSS";
 }): { fabrics: ParsedFabric[]; skipped: Array<{ name: string; reason: string }>; usdUah: number; cargoUsd: number } {
@@ -182,11 +220,9 @@ export function loadFabrics(options?: {
   const seen = new Set<string>();
   const costMode = options?.materialCostVatMode ?? "NET";
 
-  // Row 0 header, rows 1–2 meta (dollar rate / cargo markup), data from row 3
-  const usdUah = parseUaNumber(rows[1]?.[1]) ?? 45;
-  const cargoUsd = parseUaNumber(rows[2]?.[1]) ?? 1.7;
+  const { usdUah, cargoUsd, dataStart } = readFabricSheetGlobals(rows);
 
-  for (let i = 3; i < rows.length; i++) {
+  for (let i = dataStart; i < rows.length; i++) {
     const row = rows[i]!;
     const fabricKindUk = normalizeFabricKind(row[0]);
     const type = fabricKindUk || row[0] || "Тканина";
@@ -308,9 +344,8 @@ export function loadFabrics(options?: {
 
 export function loadTrims(): { trims: ParsedTrim[]; skipped: Array<{ name: string; reason: string }> } {
   const rows = parseCsv(readFileSync(catalogPath("trims.csv"), "utf8"));
-  const trims: ParsedTrim[] = [];
+  const byKey = new Map<string, ParsedTrim>();
   const skipped: Array<{ name: string; reason: string }> = [];
-  const seen = new Set<string>();
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i]!;
@@ -319,7 +354,7 @@ export function loadTrims(): { trims: ParsedTrim[]; skipped: Array<{ name: strin
     if (!name) continue;
     const type = row[2] || null;
     const size = row[3] || null;
-    const color = row[4] || null;
+    const colorRaw = row[4] || null;
     const unitRaw = (row[5] || "шт").toLowerCase();
     const price = parseUaNumber(row[6]);
     const pack = row[7] || null;
@@ -334,27 +369,38 @@ export function loadTrims(): { trims: ParsedTrim[]; skipped: Array<{ name: strin
     if (unitRaw.startsWith("м")) unitCode = "m";
     else if (unitRaw.includes("боб")) unitCode = "cone";
 
-    const nameUk = joinParts(category, name, type, size && size !== "-" ? size : null, color);
+    const sizePart = size && size !== "-" ? size : null;
+    // Base SKU name — without color (colors live in availableColors).
+    const nameUk = joinParts(category, name, type, sizePart);
     const key = nameUk.toLowerCase();
-    if (seen.has(key)) {
-      skipped.push({ name: nameUk, reason: "дубль (злито)" });
+    const colors = splitColorLabels(colorRaw);
+    const attributes = joinParts(type, sizePart) || null;
+
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.availableColors = mergeColorLists(existing.availableColors, colors);
+      // Keep the first non-null supplier / pack; price stays from first row (same SKU).
+      if (!existing.supplierCode && supplier && !supplier.startsWith("http")) {
+        existing.supplierCode = supplier;
+      }
+      if (!existing.packNote && pack) existing.packNote = pack;
       continue;
     }
-    seen.add(key);
 
-    trims.push({
+    byKey.set(key, {
       key,
       nameUk,
       category: category.trim(),
       unitCode,
       purchasePrice: price,
-      colorOrAttribute: joinParts(type, size && size !== "-" ? size : null, color) || null,
+      colorOrAttribute: attributes,
+      availableColors: colors,
       supplierCode: supplier && !supplier.startsWith("http") ? supplier : null,
       packNote: pack,
     });
   }
 
-  return { trims, skipped };
+  return { trims: [...byKey.values()], skipped };
 }
 
 const CUT_TIER_COLUMNS: Array<{ col: number; qty: number }> = [
@@ -431,7 +477,7 @@ export function loadModels(): { models: ParsedModel[]; skipped: Array<{ name: st
 
     const cat = category || "Інше";
     const sizeCodes =
-      /дит/i.test(nameUk) ? ["XS", "S", "M", "L"] : ["S", "M", "L", "XL", "XXL"];
+      /дит/i.test(nameUk) ? ["XS", "S", "M", "L"] : ["S", "M", "L", "XL", "XXL", "3XL", "4XL"];
     const cutOptimal =
       cutRateOptimal && cutRateOptimal > 0 ? cutRateOptimal : Math.max(2, Math.round(sewRate * 0.15));
 

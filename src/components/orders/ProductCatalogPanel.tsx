@@ -34,6 +34,19 @@ export type ProductCompositionTemplate = {
     costVatMode?: "NET" | "GROSS" | null;
     /** auto = за метражем; cut/wholesale = примусово. */
     priceMode?: "auto" | "cut" | "wholesale" | null;
+    /** Order-spec color / attribute (not a separate catalog SKU). */
+    lineColor?: string | null;
+    /** Palette from Material.availableColors for this line. */
+    availableColors?: string[];
+    /** User confirmed row in the side panel (order draft only). */
+    specReviewed?: boolean;
+    /** Fabric delivery / cargo overrides for this draft line. */
+    metersPerKg?: number | null;
+    cargoUsdPerKg?: number | null;
+    usdUahRate?: number | null;
+    fabricDeliveryManual?: boolean;
+    fabricDeliveryAmount?: number | null;
+    wholesaleNote?: string | null;
   }>;
   operations: Array<{
     operationId: string;
@@ -43,6 +56,7 @@ export type ProductCompositionTemplate = {
     shiftCost: number | null;
     standardOutput: number | null;
     sizeCodes?: string[] | null;
+    rateTiers?: Array<{ minQuantity: number; ratePerUnit: number }>;
   }>;
   decorations: Array<{
     decorationMethodId: string;
@@ -164,16 +178,25 @@ export function ProductCatalogPanel({
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return products.filter((product) => {
-      const haystack = [product.label, product.nameUk, product.internalCode]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      const matchesTerm = term ? haystack.includes(term) : true;
-      const ready = isReady(product);
-      const matchesFilter = filter === "all" ? true : filter === "ready" ? ready : !ready;
-      return matchesTerm && matchesFilter;
-    });
+    return products
+      .filter((product) => {
+        const haystack = [product.label, product.nameUk, product.internalCode]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        const matchesTerm = term ? haystack.includes(term) : true;
+        const ready = isReady(product);
+        const matchesFilter = filter === "all" ? true : filter === "ready" ? ready : !ready;
+        return matchesTerm && matchesFilter;
+      })
+      .sort((left, right) => {
+        const readyLeft = isReady(left) ? 0 : 1;
+        const readyRight = isReady(right) ? 0 : 1;
+        if (readyLeft !== readyRight) return readyLeft - readyRight;
+        const nameLeft = left.nameUk ?? left.label;
+        const nameRight = right.nameUk ?? right.label;
+        return nameLeft.localeCompare(nameRight, "uk", { numeric: true, sensitivity: "base" });
+      });
   }, [products, query, filter]);
 
   return (

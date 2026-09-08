@@ -28,7 +28,10 @@ export type ProductsTableRow = {
   id: string;
   nameUk: string;
   internalCode: string | null;
+  imageUrl?: string | null;
   isBaseModel?: boolean;
+  /** Short fabric/BOM composition for card secondary text. */
+  compositionSummary?: string | null;
   materialsCount: number;
   operationsCount: number;
   decorationsCount: number;
@@ -43,25 +46,33 @@ export function ProductsTable({
   rows,
   empty,
   canDelete = false,
+  showPrices = true,
 }: {
   rows: ProductsTableRow[];
   empty: { title: string; description?: string; action?: React.ReactNode };
   canDelete?: boolean;
+  showPrices?: boolean;
 }) {
   const priceTiers = rows[0]?.priceTiers ?? [50, 100, 500];
-  const { sort, toggle } = useTableSort<SortKey>({ key: "name", direction: "asc" });
+  const { sort, toggle } = useTableSort<SortKey>({ key: "status", direction: "desc" });
   const sorted = useMemo(
     () =>
-      sortRows(rows, sort, {
-        name: (row) => row.nameUk,
-        composition: (row) => row.materialsCount + row.operationsCount,
-        status: (row) => (row.ready ? 1 : 0),
-        price: (row) => row.prices[1] ?? row.prices[0] ?? 0,
-      }),
+      sortRows(
+        rows,
+        sort,
+        {
+          name: (row) => row.nameUk,
+          composition: (row) => row.materialsCount + row.operationsCount,
+          status: (row) => (row.ready ? 1 : 0),
+          price: (row) => row.prices[1] ?? row.prices[0] ?? 0,
+        },
+        sort?.key === "status" ? { key: "name", direction: "asc" } : undefined,
+      ),
     [rows, sort],
   );
   const ids = useMemo(() => sorted.map((row) => row.id), [sorted]);
   const selection = useRowSelection(ids);
+  const colSpan = showPrices ? 5 : 4;
 
   return (
     <div>
@@ -96,23 +107,25 @@ export function ProductsTable({
           <SortableTH columnKey="composition" sort={sort} onSort={toggle}>
             Комплектація
           </SortableTH>
-          <SortableTH columnKey="price" sort={sort} onSort={toggle} align="right">
-            <span className="block">Розрахунковий прайс, ₴</span>
-            <span className="mt-0.5 flex justify-end gap-4 font-normal normal-case tracking-normal">
-              {priceTiers.map((qty) => (
-                <span key={qty} className="tabular w-[76px] text-right">
-                  {qty} шт
-                </span>
-              ))}
-            </span>
-          </SortableTH>
+          {showPrices ? (
+            <SortableTH columnKey="price" sort={sort} onSort={toggle} align="right">
+              <span className="block">Розрахунковий прайс, ₴</span>
+              <span className="mt-0.5 flex justify-end gap-4 font-normal normal-case tracking-normal">
+                {priceTiers.map((qty) => (
+                  <span key={qty} className="tabular w-[76px] text-right">
+                    {qty} шт
+                  </span>
+                ))}
+              </span>
+            </SortableTH>
+          ) : null}
           <SortableTH columnKey="status" sort={sort} onSort={toggle} stickyRight>
             Стан
           </SortableTH>
         </THead>
         <TBody>
           {sorted.length === 0 ? (
-            <TableEmpty colSpan={5} title={empty.title} description={empty.description} action={empty.action} />
+            <TableEmpty colSpan={colSpan} title={empty.title} description={empty.description} action={empty.action} />
           ) : (
             sorted.map((product) => {
               const isSelected = selection.isSelected(product.id);
@@ -150,22 +163,24 @@ export function ProductsTable({
                     {product.materialsCount} мат. · {product.operationsCount} оп. ·{" "}
                     {product.decorationsCount} нанес.
                   </TD>
-                  <TD nowrap>
-                    <div className="flex justify-end gap-4">
-                      {product.prices.map((price, index) => (
-                        <span
-                          key={priceTiers[index]}
-                          className={cn(
-                            "tabular w-[76px] text-right",
-                            !product.ready && "text-[var(--color-text-tertiary)]",
-                            index === 1 && "font-medium",
-                          )}
-                        >
-                          {product.ready && price != null ? formatAmount(Number(price)) : "—"}
-                        </span>
-                      ))}
-                    </div>
-                  </TD>
+                  {showPrices ? (
+                    <TD nowrap>
+                      <div className="flex justify-end gap-4">
+                        {product.prices.map((price, index) => (
+                          <span
+                            key={priceTiers[index]}
+                            className={cn(
+                              "tabular w-[76px] text-right",
+                              !product.ready && "text-[var(--color-text-tertiary)]",
+                              index === 1 && "font-medium",
+                            )}
+                          >
+                            {product.ready && price != null ? formatAmount(Number(price)) : "—"}
+                          </span>
+                        ))}
+                      </div>
+                    </TD>
+                  ) : null}
                   <TD nowrap stickyRight>
                     <StatusBadge dot tone={product.ready ? "success" : "warning"}>
                       {product.ready ? "Готовий" : "Комплектація"}

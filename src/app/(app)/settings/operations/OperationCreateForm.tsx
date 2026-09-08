@@ -1,29 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/Input";
 import { FormGroup } from "@/components/ui/Field";
-import { Banner } from "@/components/ui/Banner";
+import { Button } from "@/components/ui/Button";
 import { CreatePanel } from "@/components/ui/CreatePanel";
 import {
   createOperationAction,
   updateOperationAction,
 } from "@/server/domains/catalog/actions";
-import { cn } from "@/lib/utils";
+import {
+  DEFAULT_OPERATION_QTY_TIERS,
+  defaultOperationRateTiers,
+  resolveQuantityTierRate,
+  type QuantityRateTier,
+} from "@/lib/quantity-tiers";
+import { formatMoneyUah, cn } from "@/lib/utils";
 
 type Method = "UNIT_RATE" | "SHIFT_OUTPUT" | "QUANTITY_TIER";
 
 const methods: { value: Method; label: string; hint: string }[] = [
-  { value: "UNIT_RATE", label: "Ставка за одиницю", hint: "Вартість операції фіксована на одне виріб." },
+  {
+    value: "UNIT_RATE",
+    label: "Ставка за одиницю",
+    hint: "Фіксована ₴/шт — не залежить від тиражу.",
+  },
   {
     value: "SHIFT_OUTPUT",
-    label: "Зміна / норма виробітку",
+    label: "Зміна / норма",
     hint: "Вартість = вартість зміни ÷ норму виробітку за зміну.",
   },
   {
     value: "QUANTITY_TIER",
-    label: "За діапазоном кількості",
-    hint: "Ставка береться з тарифної сітки в налаштуваннях ціноутворення.",
+    label: "Ставка за тиражем",
+    hint: "₴/шт за сходинками тиражу (як у крою): береться найбільша сходинка ≤ кількості.",
   },
 ];
 
@@ -35,15 +45,135 @@ export type OperationFormDefaults = {
   shiftCost: number | null;
   standardOutputPerShift: number | null;
   note: string;
+  rateTiers?: QuantityRateTier[];
 };
+
+function OperationRateTierEditor({
+  tiers,
+  onChange,
+  previewQty = 100,
+}: {
+  tiers: QuantityRateTier[];
+  onChange: (tiers: QuantityRateTier[]) => void;
+  previewQty?: number;
+}) {
+  const previewRate = useMemo(
+    () =>
+      resolveQuantityTierRate({
+        quantity: previewQty,
+        tiers,
+        fallbackRate: tiers[0]?.ratePerUnit ?? 0,
+      }),
+    [previewQty, tiers],
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto">
+        <table className="erp-table w-full min-w-[320px] text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--color-table-section-border)]">
+              <th className="py-1.5">Тираж від, шт</th>
+              <th className="py-1.5">₴ / шт</th>
+              <th className="w-16" />
+            </tr>
+          </thead>
+          <tbody>
+            {tiers.map((row, index) => (
+              <tr key={index} className="border-b border-[var(--color-border-muted)]">
+                <td className="py-1.5 pr-2">
+                  <input
+                    type="number"
+                    min={1}
+                    className="field-input w-full"
+                    value={row.minQuantity}
+                    onChange={(event) => {
+                      const next = [...tiers];
+                      next[index] = { ...row, minQuantity: Number(event.target.value) };
+                      onChange(next);
+                    }}
+                  />
+                </td>
+                <td className="py-1.5 pr-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="field-input w-full"
+                    value={row.ratePerUnit}
+                    onChange={(event) => {
+                      const next = [...tiers];
+                      next[index] = { ...row, ratePerUnit: Number(event.target.value) };
+                      onChange(next);
+                    }}
+                  />
+                </td>
+                <td className="py-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onChange(tiers.filter((_, i) => i !== index))}
+                    disabled={tiers.length <= 1}
+                  >
+                    ✕
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            onChange([
+              ...tiers,
+              {
+                minQuantity: (tiers[tiers.length - 1]?.minQuantity ?? 0) + 50,
+                ratePerUnit: tiers[tiers.length - 1]?.ratePerUnit ?? 0,
+              },
+            ])
+          }
+        >
+          Додати сходинку
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            onChange(
+              defaultOperationRateTiers(tiers.find((t) => t.ratePerUnit > 0)?.ratePerUnit ?? 0),
+            )
+          }
+        >
+          Сітка {DEFAULT_OPERATION_QTY_TIERS.join("/")}
+        </Button>
+        <span className="type-caption">
+          Приклад: {previewQty} шт → {formatMoneyUah(previewRate)} / шт
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function OperationFields({ defaults }: { defaults?: OperationFormDefaults }) {
   const [method, setMethod] = useState<Method>(defaults?.calculationMethod ?? "UNIT_RATE");
+  const [rateTiers, setRateTiers] = useState<QuantityRateTier[]>(() =>
+    defaults?.rateTiers?.length
+      ? defaults.rateTiers
+      : defaultOperationRateTiers(defaults?.baseRate ?? 0),
+  );
   const active = methods.find((item) => item.value === method)!;
 
   return (
     <>
       {defaults ? <input type="hidden" name="id" value={defaults.id} /> : null}
+      <input type="hidden" name="rateTiersJson" value={JSON.stringify(rateTiers)} />
 
       <FormGroup label="Основне" columns={1}>
         <Input
@@ -51,7 +181,7 @@ function OperationFields({ defaults }: { defaults?: OperationFormDefaults }) {
           label="Назва операції"
           required
           autoFocus={!defaults}
-          placeholder="Розкрій"
+          placeholder="Пошиття"
           defaultValue={defaults?.nameUk}
         />
       </FormGroup>
@@ -125,20 +255,21 @@ function OperationFields({ defaults }: { defaults?: OperationFormDefaults }) {
       ) : null}
 
       {method === "QUANTITY_TIER" ? (
-        <Banner tone="info" title="Тариф береться з налаштувань">
-          Ставка визначається діапазоном кількості в розділі «Ціноутворення». Базову ставку можна вказати
-          як запасне значення.
-          <div className="mt-2">
-            <Input
-              name="baseRate"
-              label="Запасна ставка, ₴"
-              type="number"
-              step="0.01"
-              min="0"
-              defaultValue={defaults?.baseRate ?? undefined}
-            />
-          </div>
-        </Banner>
+        <FormGroup
+          label="Сітка за тиражем"
+          columns={1}
+          description="Базова сітка 30/50/100/150/200/250. Можна додати або прибрати сходинки."
+        >
+          <Input
+            name="baseRate"
+            label="Запасна ставка, ₴ (якщо тираж менший за першу сходинку)"
+            type="number"
+            step="0.01"
+            min="0"
+            defaultValue={defaults?.baseRate ?? undefined}
+          />
+          <OperationRateTierEditor tiers={rateTiers} onChange={setRateTiers} />
+        </FormGroup>
       ) : null}
 
       <FormGroup label="Примітка" columns={1} description={active.hint}>
@@ -174,6 +305,7 @@ export function OperationCreatePanel({
       variant={variant}
       size={size}
       onCreated={onCreated}
+      width="lg"
     >
       <OperationFields />
     </CreatePanel>
@@ -192,6 +324,7 @@ export function OperationEditPanel({ operation }: { operation: OperationFormDefa
       showPlusIcon={false}
       variant="ghost"
       size="sm"
+      width="lg"
     >
       <OperationFields defaults={operation} />
     </CreatePanel>

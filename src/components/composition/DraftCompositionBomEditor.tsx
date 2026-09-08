@@ -5,6 +5,13 @@ import { MaterialCreatePanel } from "@/app/(app)/settings/resources/MaterialCrea
 import { OperationCreatePanel } from "@/app/(app)/settings/operations/OperationCreateForm";
 import { DecorationCreatePanel } from "@/app/(app)/settings/applications/DecorationCreateForm";
 import { CopySizeSpec, SizeScopeTabs } from "@/components/catalog/SizeScopeTabs";
+import { SizeBomScopeHint } from "@/components/catalog/SizeBomScopeHint";
+import {
+  effectiveOversizeConsumption,
+  isOversizeCode,
+  OVERSIZE_DEFAULT_COEFFS,
+  oversizeUpliftCaption,
+} from "@/lib/size-coeffs";
 import {
   CompositionAddBar,
   DraftAddDecorationForm,
@@ -24,13 +31,26 @@ import {
 import {
   decorationBatchCost,
   draftKey,
+  draftMaterialChoiceSummary,
+  draftMaterialMissingChoices,
+  draftMaterialPricingChoiceHint,
+  draftMaterialShowsColorSlot,
+  draftMaterialRowPricingReady,
   materialHasPricingControls,
   materialUnitCost,
   operationUnitCost,
   pricingFieldsFromCatalogOption,
   resolveDraftMaterialPrice,
 } from "@/lib/draft-composition";
+import { DraftChoiceAttention } from "@/components/composition/DraftChoiceAttention";
+import { DraftColorSlotMarker } from "@/components/composition/DraftColorSlotMarker";
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
+import {
+  CUT_RATES_TAB_HINT,
+  isCutOperationName,
+  summarizeCutOperationDisplay,
+  type CutRateTier,
+} from "@/lib/cut-rate";
 import { operationMethodLabel } from "@/lib/operation-labels";
 import {
   ALL_SIZES,
@@ -42,7 +62,7 @@ import {
   type SizeScope,
   visibleDraftRows,
 } from "@/lib/size-bom";
-import { formatMoneyUah, formatUnit } from "@/lib/utils";
+import { formatMoneyUah, formatUnit, cn } from "@/lib/utils";
 import {
   CellStack,
   Table,
@@ -57,7 +77,7 @@ import {
   TR,
 } from "@/components/ui/Table";
 
-import { MaterialPricingToggles } from "@/components/composition/PricingToggles";
+import { DraftMaterialLinePanel } from "@/components/composition/DraftMaterialLinePanel";
 
 export function DraftCompositionBomEditor({
   composition,
@@ -68,6 +88,7 @@ export function DraftCompositionBomEditor({
   decorationOptions = [],
   unitOptions = [],
   onMaterialCatalogAdd,
+  onMaterialCatalogColorsChange,
   onOperationCatalogAdd,
   onDecorationCatalogAdd,
   quantitiesBySize,
@@ -76,6 +97,9 @@ export function DraftCompositionBomEditor({
   scopeHint,
   enableLinePricingControls = false,
   companyCostMode = "NET",
+  cutRatePreview,
+  cutRateHint = CUT_RATES_TAB_HINT,
+  fabricGlobals,
 }: {
   composition: DraftComposition;
   onCompositionChange: (next: DraftComposition) => void;
@@ -85,6 +109,7 @@ export function DraftCompositionBomEditor({
   decorationOptions?: DecorationCatalogOption[];
   unitOptions?: Array<{ id: string; label: string }>;
   onMaterialCatalogAdd?: (option: MaterialCatalogOption) => void;
+  onMaterialCatalogColorsChange?: (materialId: string, colors: string[]) => void;
   onOperationCatalogAdd?: (option: OperationCatalogOption) => void;
   onDecorationCatalogAdd?: (option: DecorationCatalogOption) => void;
   quantitiesBySize?: Record<string, number>;
@@ -94,8 +119,12 @@ export function DraftCompositionBomEditor({
   /** Order draft: per-row ПДВ / гурт·відріз toggles with live price. */
   enableLinePricingControls?: boolean;
   companyCostMode?: MaterialCostVatMode;
+  cutRatePreview?: { optimalQty?: number | null; tiers: CutRateTier[] };
+  cutRateHint?: string;
+  fabricGlobals?: { usdUahRate: number; fabricCargoUsdPerKg: number };
 }) {
   const [sizeScope, setSizeScope] = useState<SizeScope>(ALL_SIZES);
+  const [selectedMaterialKey, setSelectedMaterialKey] = useState<string | null>(null);
   const sizeCodes = sizes.map((size) => size.code);
   const totalQty = quantitiesBySize
     ? sizes.reduce((sum, size) => sum + (quantitiesBySize[size.code] || 0), 0)
@@ -108,8 +137,12 @@ export function DraftCompositionBomEditor({
     materials: composition.materials,
     operations: composition.operations,
   });
+  const hasOversizeSizes = sizes.some((size) => isOversizeCode(size.code));
+  const scopeIsOversize = isOversizeCode(sizeScope);
   const resolvedScopeHint =
     typeof scopeHint === "function" ? scopeHint(sizeScope) : scopeHint;
+  const selectedMaterial =
+    composition.materials.find((row) => row.key === selectedMaterialKey) ?? null;
 
   const materialsSubtotal =
     quantitiesBySize && totalQty > 0
@@ -126,14 +159,24 @@ export function DraftCompositionBomEditor({
         }, 0)
       : composition.materials.reduce((sum, row) => sum + materialUnitCost(row), 0) * controlQty;
   const operationsSubtotal =
-    composition.operations.reduce((sum, row) => sum + operationUnitCost(row), 0) * controlQty;
+    composition.operations
+      .filter((row) => !isCutOperationName(row.name))
+      .reduce((sum, row) => sum + operationUnitCost(row, controlQty), 0) * controlQty;
+  const hasCutOperation = composition.operations.some((row) => isCutOperationName(row.name));
   const decorationsSubtotal = composition.decorations.reduce(
     (sum, row) => sum + decorationBatchCost(row, controlQty),
     0,
   );
+  const decorationSetupTotal = composition.decorations.reduce((sum, row) => sum + row.setupCost, 0);
+  const decorationUnitRateTotal = composition.decorations.reduce((sum, row) => sum + row.unitRate, 0);
 
   function withResolvedPrice(row: DraftMaterialRow): DraftMaterialRow {
     if (!enableLinePricingControls || !materialHasPricingControls(row)) return row;
+    if (!draftMaterialRowPricingReady(row)) {
+      if (!row.costVatMode) return row;
+      const { purchasePrice } = resolveDraftMaterialPrice(row, quantitiesBySize, companyCostMode);
+      return Math.abs(purchasePrice - row.price) < 0.0001 ? row : { ...row, price: purchasePrice };
+    }
     const { purchasePrice } = resolveDraftMaterialPrice(row, quantitiesBySize, companyCostMode);
     return { ...row, price: purchasePrice };
   }
@@ -163,12 +206,30 @@ export function DraftCompositionBomEditor({
     });
   }
 
-  function updateMaterial(key: string, patch: Partial<DraftMaterialRow>) {
+  function updateDecoration(key: string, patch: Partial<DraftDecorationRow>) {
     onCompositionChange({
       ...composition,
-      materials: composition.materials.map((row) =>
-        row.key === key ? withResolvedPrice({ ...row, ...patch }) : row,
+      decorations: composition.decorations.map((row) =>
+        row.key === key ? { ...row, ...patch } : row,
       ),
+    });
+  }
+
+  function updateMaterial(key: string, patch: Partial<DraftMaterialRow>) {
+    const target = composition.materials.find((row) => row.key === key);
+    onCompositionChange({
+      ...composition,
+      materials: composition.materials.map((row) => {
+        if (row.key === key) return withResolvedPrice({ ...row, ...patch });
+        if (
+          patch.availableColors &&
+          target &&
+          row.materialId === target.materialId
+        ) {
+          return { ...row, availableColors: patch.availableColors };
+        }
+        return row;
+      }),
     });
   }
 
@@ -229,14 +290,13 @@ export function DraftCompositionBomEditor({
                     onChange={setSizeScope}
                     customized={customized}
                   />
+                  {sizes.length > 1 ? (
+                    <SizeBomScopeHint sizeScope={sizeScope} hasOversizeSizes={hasOversizeSizes} />
+                  ) : null}
                   {resolvedScopeHint}
                   {sizeScope !== ALL_SIZES ? (
                     <CopySizeSpec from={sizeScope} sizes={sizes} onCopy={copySpecTo} />
-                  ) : (
-                    <p className="type-caption">
-                      Спільна специфіка. Оберіть розмір, щоб змінити норму лише для нього.
-                    </p>
-                  )}
+                  ) : null}
                 </>
               ) : (
                 resolvedScopeHint
@@ -268,64 +328,102 @@ export function DraftCompositionBomEditor({
                   sizeScope === ALL_SIZES && Object.keys(row.sizeConsumption ?? {}).length > 0;
                 const showPricing =
                   enableLinePricingControls && materialHasPricingControls(row);
-                const hasCut =
-                  row.priceMeterUahCutVat != null && row.priceMeterUahCutVat > 0;
                 const pricing = showPricing
                   ? resolveDraftMaterialPrice(row, quantitiesBySize, companyCostMode)
                   : null;
-                const vatMode = (row.costVatMode ?? companyCostMode) as MaterialCostVatMode;
-                const priceMode = row.priceMode ?? "auto";
+                const choiceSummary = draftMaterialChoiceSummary(row, companyCostMode, {
+                  includePricing: showPricing,
+                });
+                const sizeSubtitle = row.sizeCodes?.length
+                  ? row.sizeCodes.join(" · ")
+                  : mixed
+                    ? "Норма різна по розмірах"
+                    : hasOversizeSizes
+                      ? oversizeUpliftCaption()
+                      : null;
+                const subtitle = [sizeSubtitle, choiceSummary].filter(Boolean).join(" · ") || undefined;
+                const isSelected = selectedMaterialKey === row.key;
+                const showColorSlot = draftMaterialShowsColorSlot(row, {
+                  enableLinePricingControls,
+                });
+                const missingChoices = draftMaterialMissingChoices(row, {
+                  enableLinePricingControls,
+                  companyCostMode,
+                });
+                const needsAttention = missingChoices.length > 0;
+                const attentionTitle = needsAttention
+                  ? `Потрібно: ${missingChoices.join(", ")}`
+                  : undefined;
+                const pricingChoiceHint = draftMaterialPricingChoiceHint(row, {
+                  enableLinePricingControls,
+                });
+                const showMarker = showColorSlot || needsAttention;
+                const baseUnitCost = consumption * (1 + row.waste / 100) * row.price;
+                const displayUnitCost = scopeIsOversize
+                  ? baseUnitCost * OVERSIZE_DEFAULT_COEFFS.materialCoeff
+                  : baseUnitCost;
+                const oversizeNorm =
+                  hasOversizeSizes || scopeIsOversize
+                    ? effectiveOversizeConsumption(consumption)
+                    : null;
                 return (
-                  <TR key={row.key}>
+                  <TR
+                    key={row.key}
+                    className={cn(
+                      "cursor-pointer transition-colors",
+                      isSelected
+                        ? "bg-[var(--color-tint-sage)]/50"
+                        : "hover:bg-[var(--color-surface-hover)]",
+                    )}
+                    onClick={() => setSelectedMaterialKey(row.key)}
+                  >
                     <TD title={row.name} className="min-w-[12rem] w-[38%] align-top">
-                      <CellStack
-                        title={row.name}
-                        subtitle={
-                          row.sizeCodes?.length
-                            ? row.sizeCodes.join(" · ")
-                            : mixed
-                              ? "Норма різна по розмірах"
-                              : undefined
-                        }
-                        wrap
-                      />
-                      {showPricing ? (
-                        <div className="mt-1.5">
-                          <MaterialPricingToggles
-                            costVatMode={vatMode}
-                            priceMode={priceMode}
-                            hasCut={hasCut}
-                            onCostVatMode={(mode) => updateMaterial(row.key, { costVatMode: mode })}
-                            onPriceMode={(mode) => updateMaterial(row.key, { priceMode: mode })}
+                      <div className="flex items-start gap-2">
+                        {showMarker ? (
+                          <DraftColorSlotMarker
+                            value={row.lineColor}
+                            attention={needsAttention}
+                            attentionTitle={attentionTitle}
                           />
+                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <CellStack title={row.name} subtitle={subtitle} wrap />
+                          <DraftChoiceAttention hint={pricingChoiceHint} />
                         </div>
-                      ) : null}
+                      </div>
                     </TD>
-                    <TD align="right">
-                      <span className="inline-flex items-center justify-end gap-1">
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.0001"
-                          value={consumption}
-                          onChange={(event) =>
-                            updateMaterial(
-                              row.key,
-                              patchDraftConsumption(
-                                row,
-                                sizeScope,
-                                Math.max(0, Number(event.target.value) || 0),
-                              ),
-                            )
-                          }
-                          className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
-                        />
-                        <span className="text-[12px] text-[var(--color-text-secondary)]">
-                          {formatUnit(row.unit)}
+                    <TD align="right" onClick={(event) => event.stopPropagation()}>
+                      <span className="inline-flex flex-col items-end gap-0.5">
+                        <span className="inline-flex items-center justify-end gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.0001"
+                            value={consumption}
+                            onChange={(event) =>
+                              updateMaterial(
+                                row.key,
+                                patchDraftConsumption(
+                                  row,
+                                  sizeScope,
+                                  Math.max(0, Number(event.target.value) || 0),
+                                ),
+                              )
+                            }
+                            className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                          />
+                          <span className="text-[12px] text-[var(--color-text-secondary)]">
+                            {formatUnit(row.unit)}
+                          </span>
                         </span>
+                        {oversizeNorm != null ? (
+                          <span className="text-[10px] text-[var(--color-text-quiet)]">
+                            XXL+ ≈ {oversizeNorm} {formatUnit(row.unit)}
+                          </span>
+                        ) : null}
                       </span>
                     </TD>
-                    <TD align="right">
+                    <TD align="right" onClick={(event) => event.stopPropagation()}>
                       <span className="inline-flex items-center justify-end gap-0.5">
                         <input
                           type="number"
@@ -344,20 +442,30 @@ export function DraftCompositionBomEditor({
                     </TD>
                     <TD numeric className="text-[var(--color-text-secondary)]">
                       <div>{formatMoneyUah(row.price)}</div>
-                      {pricing ? (
+                      {pricing?.hint ? (
                         <div className="mt-0.5 text-[10px] font-normal leading-tight text-[var(--color-text-tertiary)]">
                           {pricing.hint}
                         </div>
                       ) : null}
                     </TD>
                     <TD numeric className="font-medium">
-                      {formatMoneyUah(consumption * (1 + row.waste / 100) * row.price)}
+                      <span className="inline-flex flex-col items-end gap-0.5">
+                        <span>{formatMoneyUah(displayUnitCost)}</span>
+                        {scopeIsOversize ? (
+                          <span className="text-[10px] font-normal text-[var(--color-text-quiet)]">
+                            база {formatMoneyUah(baseUnitCost)}
+                          </span>
+                        ) : null}
+                      </span>
                     </TD>
-                    <TD align="center">
+                    <TD align="center" onClick={(event) => event.stopPropagation()}>
                       <button
                         type="button"
                         aria-label={`Прибрати ${row.name}`}
-                        onClick={() => removeMaterial(row.key)}
+                        onClick={() => {
+                          if (selectedMaterialKey === row.key) setSelectedMaterialKey(null);
+                          removeMaterial(row.key);
+                        }}
                         className="rounded-[var(--radius-control)] p-1.5 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
                       >
                         <IconTrash size={15} />
@@ -403,6 +511,7 @@ export function DraftCompositionBomEditor({
                       metersPerRoll?: number | null;
                       minWholesaleMeters?: number | null;
                       costVatOverride?: "NET" | "GROSS" | null;
+                      availableColors?: string[];
                     }
                   | undefined;
                 if (!created) return;
@@ -420,6 +529,7 @@ export function DraftCompositionBomEditor({
                   metersPerRoll: created.metersPerRoll,
                   minWholesaleMeters: created.minWholesaleMeters,
                   costVatOverride: created.costVatOverride,
+                  availableColors: created.availableColors ?? [],
                 };
                 onMaterialCatalogAdd?.(option);
                 addMaterial({
@@ -429,7 +539,9 @@ export function DraftCompositionBomEditor({
                   unit: option.unit,
                   consumption: 1,
                   waste: option.defaultWaste,
-                  ...pricingFieldsFromCatalogOption(option, companyCostMode),
+                  ...pricingFieldsFromCatalogOption(option, companyCostMode, {
+                    deferUserChoices: enableLinePricingControls,
+                  }),
                 });
               }}
             />
@@ -464,14 +576,57 @@ export function DraftCompositionBomEditor({
                 description="Додайте з рядка нижче або створіть нову операцію."
               />
             ) : (
-              visibleOperations.map((row) => (
+              visibleOperations.map((row) => {
+                const isCut = isCutOperationName(row.name);
+                const cutDisplay =
+                  isCut && cutRatePreview
+                    ? summarizeCutOperationDisplay({
+                        optimalQty: cutRatePreview.optimalQty,
+                        tiers: cutRatePreview.tiers,
+                        fallbackRate: row.unitRate ?? 0,
+                        previewQty: controlQty,
+                      })
+                    : null;
+                const cutRange =
+                  cutDisplay?.minRate != null &&
+                  cutDisplay.maxRate != null &&
+                  cutDisplay.minRate !== cutDisplay.maxRate
+                    ? `діапазон ${formatMoneyUah(cutDisplay.minRate)}–${formatMoneyUah(cutDisplay.maxRate)}`
+                    : cutDisplay?.previewRate != null
+                      ? `${cutDisplay.previewQty} шт`
+                      : null;
+                return (
                 <TR key={row.key}>
                   <TD className="font-medium">{row.name}</TD>
-                  <TD className="text-[var(--color-text-secondary)]">
-                    {operationMethodLabel(row.method)}
+                  <TD className="min-w-0">
+                    {isCut && cutRange ? (
+                      <div className="min-w-0">
+                        <div className="text-[13px] text-[var(--color-text-secondary)]">
+                          {cutDisplay?.methodLabel ?? "Крій за тиражем"}
+                        </div>
+                        <div className="mt-0.5 break-words text-[12px] text-[var(--color-text-quiet)]">
+                          {cutRange}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-[var(--color-text-secondary)]">
+                        {isCut ? cutDisplay?.methodLabel ?? "Крій за тиражем" : operationMethodLabel(row.method)}
+                      </span>
+                    )}
                   </TD>
-                  <TD numeric className="font-medium">
-                    {formatMoneyUah(operationUnitCost(row))}
+                  <TD
+                    numeric={!isCut}
+                    align={isCut ? "right" : undefined}
+                    className={cn("font-medium", isCut && "!whitespace-normal")}
+                    title={isCut ? cutRateHint : undefined}
+                  >
+                    {isCut ? (
+                      cutDisplay?.configured && cutDisplay.previewRate != null
+                        ? formatMoneyUah(cutDisplay.previewRate)
+                        : "—"
+                    ) : (
+                      formatMoneyUah(operationUnitCost(row, controlQty))
+                    )}
                   </TD>
                   <TD align="center">
                     <button
@@ -484,19 +639,41 @@ export function DraftCompositionBomEditor({
                     </button>
                   </TD>
                 </TR>
-              ))
+                );
+              })
             )}
           </TBody>
           {showSubtotals && composition.operations.length > 0 ? (
             <TFoot>
               <tr>
                 <TD colSpan={2} className="text-[var(--color-text-secondary)]">
-                  Операції разом на {controlQty} шт
+                  {hasCutOperation ? "Операції без крою" : "Операції разом"} на {controlQty} шт
                   {totalQty <= 0 ? " (орієнтир)" : ""}
                 </TD>
                 <TD numeric>{formatMoneyUah(operationsSubtotal)}</TD>
                 <TD />
               </tr>
+              {hasCutOperation ? (
+                <tr>
+                  <TD colSpan={2} className="text-[var(--color-text-secondary)]">
+                    Крій
+                  </TD>
+                  <TD numeric className="font-medium">
+                    {(() => {
+                      const cutRow = composition.operations.find((row) => isCutOperationName(row.name));
+                      if (!cutRow || !cutRatePreview) return "—";
+                      const cut = summarizeCutOperationDisplay({
+                        optimalQty: cutRatePreview.optimalQty,
+                        tiers: cutRatePreview.tiers,
+                        fallbackRate: cutRow.unitRate ?? 0,
+                        previewQty: controlQty,
+                      });
+                      return cut.previewRate != null ? formatMoneyUah(cut.previewRate) : "—";
+                    })()}
+                  </TD>
+                  <TD />
+                </tr>
+              ) : null}
             </TFoot>
           ) : null}
         </Table>
@@ -515,6 +692,7 @@ export function DraftCompositionBomEditor({
                       unitRate: number | null;
                       shiftCost: number | null;
                       standardOutput: number | null;
+                      rateTiers?: Array<{ minQuantity: number; ratePerUnit: number }>;
                     }
                   | undefined;
                 if (!created) return;
@@ -525,6 +703,7 @@ export function DraftCompositionBomEditor({
                   unitRate: created.unitRate,
                   shiftCost: created.shiftCost,
                   standardOutput: created.standardOutput,
+                  rateTiers: created.rateTiers,
                 };
                 onOperationCatalogAdd?.(option);
                 addOperation({
@@ -535,6 +714,7 @@ export function DraftCompositionBomEditor({
                   unitRate: option.unitRate,
                   shiftCost: option.shiftCost,
                   standardOutput: option.standardOutput,
+                  rateTiers: option.rateTiers,
                 });
               }}
             />
@@ -546,11 +726,15 @@ export function DraftCompositionBomEditor({
 
       <TableCard>
         <TableToolbar left={<span className="type-subsection">Нанесення</span>} />
-        <Table>
+        <Table className="table-fixed">
           <THead>
             <TH>Метод</TH>
-            <TH align="right">Приладка</TH>
-            <TH align="right">Тариф / од.</TH>
+            <TH align="right" width="96px" title="Один раз на всю партію">
+              Приладка
+            </TH>
+            <TH align="right" width="80px" title="За кожну одиницю">
+              ₴/шт
+            </TH>
             <TH width="44px" />
           </THead>
           <TBody>
@@ -559,17 +743,43 @@ export function DraftCompositionBomEditor({
                 colSpan={4}
                 icon={<IconDecoration size={22} />}
                 title="Нанесення не використовується"
-                description="Необовʼязково — додайте з рядка нижче, якщо потрібен друк або вишивка."
+                description="Додайте друк або вишивку, якщо потрібно."
               />
             ) : (
               composition.decorations.map((row) => (
                 <TR key={row.key}>
-                  <TD className="font-medium">{row.name}</TD>
-                  <TD numeric className="text-[var(--color-text-secondary)]">
-                    {formatMoneyUah(row.setupCost)}
+                  <TD className="min-w-0">
+                    <CellStack title={row.name} maxWidth="100%" />
                   </TD>
-                  <TD numeric className="font-medium">
-                    {formatMoneyUah(row.unitRate)}
+                  <TD numeric onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.1"
+                      value={row.setupCost}
+                      onChange={(event) =>
+                        updateDecoration(row.key, {
+                          setupCost: Math.max(0, Number(event.target.value) || 0),
+                        })
+                      }
+                      className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                      title="Приладка (разово на партію)"
+                    />
+                  </TD>
+                  <TD numeric onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.1"
+                      value={row.unitRate}
+                      onChange={(event) =>
+                        updateDecoration(row.key, {
+                          unitRate: Math.max(0, Number(event.target.value) || 0),
+                        })
+                      }
+                      className="h-7 w-[64px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                      title="Ставка за виріб"
+                    />
                   </TD>
                   <TD align="center">
                     <button
@@ -588,11 +798,14 @@ export function DraftCompositionBomEditor({
           {showSubtotals && composition.decorations.length > 0 ? (
             <TFoot>
               <tr>
-                <TD colSpan={2} className="text-[var(--color-text-secondary)]">
-                  Нанесення разом на {controlQty} шт
-                  {totalQty <= 0 ? " (орієнтир)" : ""}
+                <TD
+                  className="min-w-0 truncate text-[var(--color-text-secondary)]"
+                  title={`На ${controlQty} шт: ${formatMoneyUah(decorationsSubtotal)}`}
+                >
+                  Разом
                 </TD>
-                <TD numeric>{formatMoneyUah(decorationsSubtotal)}</TD>
+                <TD numeric>{formatMoneyUah(decorationSetupTotal)}</TD>
+                <TD numeric>{formatMoneyUah(decorationUnitRateTotal)}</TD>
                 <TD />
               </tr>
             </TFoot>
@@ -635,6 +848,21 @@ export function DraftCompositionBomEditor({
           <DraftAddDecorationForm options={decorationOptions} onAdd={addDecoration} compact />
         </CompositionAddBar>
       </TableCard>
+
+      <DraftMaterialLinePanel
+        open={Boolean(selectedMaterial)}
+        row={selectedMaterial}
+        onClose={() => setSelectedMaterialKey(null)}
+        onChange={(patch) => {
+          if (!selectedMaterialKey) return;
+          updateMaterial(selectedMaterialKey, patch);
+        }}
+        onCatalogColorsChange={onMaterialCatalogColorsChange}
+        quantitiesBySize={quantitiesBySize}
+        companyCostMode={companyCostMode}
+        enablePricingControls={enableLinePricingControls}
+        fabricGlobals={fabricGlobals}
+      />
     </div>
   );
 }

@@ -3,7 +3,12 @@ import { z } from "zod";
 import {
   sizeCodesFromScopes,
   sizeConsumptionFromNorms,
+  sizeWasteFromNorms,
 } from "@/lib/size-bom";
+import {
+  defaultOperationRateTiers,
+  parseRateTiersInput,
+} from "@/lib/quantity-tiers";
 
 export function assertProductOrderable(
   product: { status: string } | null | undefined,
@@ -15,13 +20,27 @@ export function assertProductOrderable(
 const sizeCodesField = z.array(z.string()).optional().nullable();
 const sizeConsumptionField = z.record(z.string(), z.number().nonnegative()).optional();
 
+/** Absolute https URL or app-local /uploads/... path from storeProductImage. */
+export function isAllowedProductImageUrl(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("/uploads/")) {
+    return !trimmed.includes("..") && trimmed.length < 500;
+  }
+  return z.string().url().safeParse(trimmed).success;
+}
+
 export const productFormSchema = z.object({
   nameUk: z.string().trim().min(1),
   internalCode: z.string().trim().optional().nullable(),
   description: z.string().trim().optional().nullable(),
   imageUrl: z.preprocess(
     (value) => (value === "" || value == null ? null : value),
-    z.string().url().nullable().optional(),
+    z
+      .string()
+      .refine(isAllowedProductImageUrl, "INVALID_IMAGE_URL")
+      .nullable()
+      .optional(),
   ),
   sizeIds: z.array(z.string()).default([]),
   materials: z
@@ -55,15 +74,25 @@ export const productFormSchema = z.object({
 export type ProductFormValues = z.infer<typeof productFormSchema>;
 
 const productMaterialInclude = {
-  material: { include: { unitOfMeasure: true } },
+  material: {
+    include: {
+      unitOfMeasure: true,
+      supplierOffers: {
+        include: { supplier: true },
+        orderBy: [{ isPrimary: "desc" as const }, { updatedAt: "desc" as const }],
+      },
+    },
+  },
+  supplier: true,
   sizeNorms: { include: { size: true } },
   sizeScopes: { include: { size: true } },
-} as const;
+} satisfies import("@prisma/client").Prisma.ProductMaterialInclude;
 
 const productOperationInclude = {
-  operation: true,
+  operation: { include: { rateTiers: { orderBy: { minQuantity: "asc" as const } } } },
   sizeScopes: { include: { size: true } },
-} as const;
+  rateTiers: { orderBy: { minQuantity: "asc" as const } },
+} satisfies import("@prisma/client").Prisma.ProductOperationInclude;
 
 const productDetailInclude = {
   category: true,
@@ -74,7 +103,7 @@ const productDetailInclude = {
   additionalCosts: true,
   cutRateTiers: { orderBy: { minQuantity: "asc" as const } },
   commercialPriceTiers: { orderBy: { minQuantity: "asc" as const } },
-};
+} satisfies import("@prisma/client").Prisma.ProductInclude;
 
 function sizeCreateForCodes(
   codes: string[] | null | undefined,
@@ -118,6 +147,22 @@ export async function listProductsSummary() {
       nameUk: true,
       internalCode: true,
       isBaseModel: true,
+      imageUrl: true,
+      description: true,
+      category: { select: { nameUk: true } },
+      materials: {
+        where: { material: { type: "FABRIC" } },
+        select: {
+          material: {
+            select: {
+              type: true,
+              nameUk: true,
+            },
+          },
+        },
+        orderBy: { id: "asc" },
+        take: 4,
+      },
       _count: {
         select: {
           materials: true,
@@ -146,6 +191,57 @@ export async function listSizes() {
   });
 }
 
+/** Replace product size grid. Removing a size also clears size-specific norms/scopes. */
+export async function setProductSizes(input: { productId: string; sizeIds: string[] }) {
+  const product = await getProduct(input.productId);
+  if (!product) throw new Error("PRODUCT_NOT_FOUND");
+  if (product.status === "ARCHIVED") throw new Error("PRODUCT_ARCHIVED");
+
+  const uniqueIds = [...new Set(input.sizeIds.filter(Boolean))];
+  if (uniqueIds.length > 0) {
+    const found = await prisma.size.findMany({
+      where: { id: { in: uniqueIds }, status: "ACTIVE" },
+      select: { id: true },
+    });
+    if (found.length !== uniqueIds.length) throw new Error("SIZE_NOT_FOUND");
+  }
+
+  const currentIds = new Set(product.sizes.map((row) => row.sizeId));
+  const nextIds = new Set(uniqueIds);
+  const toAdd = uniqueIds.filter((id) => !currentIds.has(id));
+  const toRemove = [...currentIds].filter((id) => !nextIds.has(id));
+
+  await prisma.$transaction(async (tx) => {
+    if (toRemove.length > 0) {
+      const materialIds = product.materials.map((row) => row.id);
+      const operationIds = product.operations.map((row) => row.id);
+      if (materialIds.length > 0) {
+        await tx.productMaterialSizeNorm.deleteMany({
+          where: { productMaterialId: { in: materialIds }, sizeId: { in: toRemove } },
+        });
+        await tx.productMaterialSizeScope.deleteMany({
+          where: { productMaterialId: { in: materialIds }, sizeId: { in: toRemove } },
+        });
+      }
+      if (operationIds.length > 0) {
+        await tx.productOperationSizeScope.deleteMany({
+          where: { productOperationId: { in: operationIds }, sizeId: { in: toRemove } },
+        });
+      }
+      await tx.productSize.deleteMany({
+        where: { productId: input.productId, sizeId: { in: toRemove } },
+      });
+    }
+    if (toAdd.length > 0) {
+      await tx.productSize.createMany({
+        data: toAdd.map((sizeId) => ({ productId: input.productId, sizeId })),
+      });
+    }
+  });
+
+  return getProduct(input.productId);
+}
+
 export async function createProductDraft(raw: ProductFormValues) {
   const data = productFormSchema.parse(raw);
   const imageUrl = data.imageUrl?.trim() ? data.imageUrl.trim() : null;
@@ -156,6 +252,17 @@ export async function createProductDraft(raw: ProductFormValues) {
       ? await prisma.material.findMany({ where: { id: { in: materialIds } } })
       : [];
   const materialById = new Map(materials.map((row) => [row.id, row]));
+
+  const operationIds = [...new Set(data.operations.map((row) => row.operationId))];
+  const catalogOperations =
+    operationIds.length > 0
+      ? await prisma.operation.findMany({
+          where: { id: { in: operationIds } },
+          include: { rateTiers: { orderBy: { minQuantity: "asc" } } },
+        })
+      : [];
+  const operationById = new Map(catalogOperations.map((row) => [row.id, row]));
+
   const sizeRecords = data.sizeIds.length
     ? await prisma.size.findMany({ where: { id: { in: data.sizeIds } } })
     : await prisma.size.findMany({ where: { status: "ACTIVE" } });
@@ -184,10 +291,33 @@ export async function createProductDraft(raw: ProductFormValues) {
         }),
       },
       operations: {
-        create: data.operations.map((row) => ({
-          operationId: row.operationId,
-          sizeScopes: sizeCreateForCodes(row.sizeCodes, sizeIdByCode),
-        })),
+        create: data.operations.map((row) => {
+          const catalog = operationById.get(row.operationId);
+          const tiers =
+            catalog?.calculationMethod === "QUANTITY_TIER"
+              ? catalog.rateTiers.length > 0
+                ? catalog.rateTiers.map((tier) => ({
+                    minQuantity: tier.minQuantity,
+                    ratePerUnit: Number(tier.ratePerUnit),
+                  }))
+                : defaultOperationRateTiers(
+                    catalog.baseRate != null ? Number(catalog.baseRate) : 0,
+                  )
+              : [];
+          return {
+            operationId: row.operationId,
+            sizeScopes: sizeCreateForCodes(row.sizeCodes, sizeIdByCode),
+            rateTiers:
+              tiers.length > 0
+                ? {
+                    create: tiers.map((tier) => ({
+                      minQuantity: tier.minQuantity,
+                      ratePerUnit: tier.ratePerUnit,
+                    })),
+                  }
+                : undefined,
+          };
+        }),
       },
       decorations: {
         create: data.decorations.map((row) => ({
@@ -217,6 +347,29 @@ export function toCompositionTemplate(product: NonNullable<Awaited<ReturnType<ty
       price: Number(row.material.purchasePrice),
       sizeCodes: sizeCodesFromScopes(row.sizeScopes),
       sizeConsumption: sizeConsumptionFromNorms(row.sizeNorms),
+      sizeWaste: sizeWasteFromNorms(row.sizeNorms),
+      materialType: row.material.type,
+      priceMeterUahNoVat:
+        row.material.priceMeterUahNoVat != null
+          ? Number(row.material.priceMeterUahNoVat)
+          : null,
+      priceMeterUahVat:
+        row.material.priceMeterUahVat != null ? Number(row.material.priceMeterUahVat) : null,
+      priceMeterUahCutVat:
+        row.material.priceMeterUahCutVat != null
+          ? Number(row.material.priceMeterUahCutVat)
+          : null,
+      metersPerRoll:
+        row.material.metersPerRoll != null ? Number(row.material.metersPerRoll) : null,
+      minWholesaleMeters:
+        row.material.minWholesaleMeters != null
+          ? Number(row.material.minWholesaleMeters)
+          : null,
+      metersPerKg:
+        row.material.metersPerKg != null ? Number(row.material.metersPerKg) : null,
+      wholesaleNote: row.material.wholesaleNote ?? null,
+      costVatMode: row.material.costVatOverride,
+      availableColors: row.material.availableColors ?? [],
     })),
     operations: product.operations.map((row) => ({
       operationId: row.operationId,
@@ -236,11 +389,20 @@ export function toCompositionTemplate(product: NonNullable<Awaited<ReturnType<ty
             ? Number(row.operation.standardOutputPerShift)
             : null,
       sizeCodes: sizeCodesFromScopes(row.sizeScopes),
+      rateTiers: (row.rateTiers.length > 0 ? row.rateTiers : row.operation.rateTiers).map(
+        (tier) => ({
+          minQuantity: tier.minQuantity,
+          ratePerUnit: Number(tier.ratePerUnit),
+        }),
+      ),
     })),
     decorations: product.decorations.map((row) => ({
       decorationMethodId: row.decorationMethodId,
       name: row.decorationMethod.nameUk,
-      setupCost: Number(row.decorationMethod.setupCost),
+      setupCost:
+        row.setupCostOverride != null
+          ? Number(row.setupCostOverride)
+          : Number(row.decorationMethod.setupCost),
       unitRate: Number(row.decorationMethod.unitRate),
     })),
   };
@@ -252,10 +414,37 @@ export async function addProductMaterial(input: {
   consumptionPerUnit: number;
   wastePercent?: number | null;
   sizeIds?: string[];
+  supplierId?: string | null;
+  colorSnapshot?: string | null;
 }) {
   const material = await prisma.material.findUniqueOrThrow({
     where: { id: input.materialId },
+    include: {
+      supplierOffers: {
+        orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+      },
+    },
   });
+
+  const { defaultSupplierId, reconcileColorForSupplier } = await import(
+    "@/lib/supplier-colors"
+  );
+  const offers = material.supplierOffers.map((row) => ({
+    supplierId: row.supplierId,
+    isPrimary: row.isPrimary,
+    availableColors: row.availableColors,
+  }));
+  const supplierId =
+    input.supplierId ?? defaultSupplierId(offers);
+  const colorSnapshot =
+    input.colorSnapshot !== undefined
+      ? input.colorSnapshot
+      : reconcileColorForSupplier({
+          color: null,
+          supplierId,
+          offers,
+          materialFallback: material.availableColors,
+        });
 
   return prisma.productMaterial.create({
     data: {
@@ -263,10 +452,58 @@ export async function addProductMaterial(input: {
       materialId: input.materialId,
       consumptionPerUnit: input.consumptionPerUnit,
       wastePercent: input.wastePercent ?? material.defaultWastePercent,
+      supplierId,
+      colorSnapshot,
       sizeScopes:
         input.sizeIds && input.sizeIds.length > 0
           ? { create: input.sizeIds.map((sizeId) => ({ sizeId })) }
           : undefined,
+    },
+  });
+}
+
+export async function setProductMaterialSupplierColor(input: {
+  id: string;
+  supplierId?: string | null;
+  colorSnapshot?: string | null;
+}) {
+  const row = await prisma.productMaterial.findUniqueOrThrow({
+    where: { id: input.id },
+    include: {
+      material: {
+        include: {
+          supplierOffers: {
+            orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+          },
+        },
+      },
+    },
+  });
+
+  const { reconcileColorForSupplier } = await import("@/lib/supplier-colors");
+  const offers = row.material.supplierOffers.map((offer) => ({
+    supplierId: offer.supplierId,
+    isPrimary: offer.isPrimary,
+    availableColors: offer.availableColors,
+  }));
+  const supplierId =
+    input.supplierId !== undefined ? input.supplierId : row.supplierId;
+  const nextColor =
+    input.colorSnapshot !== undefined && input.supplierId === undefined
+      ? input.colorSnapshot
+      : reconcileColorForSupplier({
+          color:
+            input.colorSnapshot !== undefined ? input.colorSnapshot : row.colorSnapshot,
+          supplierId,
+          offers,
+          materialFallback: row.material.availableColors,
+        });
+
+  return prisma.productMaterial.update({
+    where: { id: input.id },
+    data: {
+      supplierId,
+      colorSnapshot: nextColor,
     },
   });
 }
@@ -276,6 +513,24 @@ export async function addProductOperation(input: {
   operationId: string;
   sizeIds?: string[];
 }) {
+  const operation = await prisma.operation.findUnique({
+    where: { id: input.operationId },
+    include: { rateTiers: { orderBy: { minQuantity: "asc" } } },
+  });
+  if (!operation) throw new Error("OPERATION_NOT_FOUND");
+
+  const catalogTiers =
+    operation.calculationMethod === "QUANTITY_TIER"
+      ? operation.rateTiers.length > 0
+        ? operation.rateTiers.map((tier) => ({
+            minQuantity: tier.minQuantity,
+            ratePerUnit: Number(tier.ratePerUnit),
+          }))
+        : defaultOperationRateTiers(
+            operation.baseRate != null ? Number(operation.baseRate) : 0,
+          )
+      : [];
+
   return prisma.productOperation.create({
     data: {
       productId: input.productId,
@@ -284,7 +539,40 @@ export async function addProductOperation(input: {
         input.sizeIds && input.sizeIds.length > 0
           ? { create: input.sizeIds.map((sizeId) => ({ sizeId })) }
           : undefined,
+      rateTiers:
+        catalogTiers.length > 0
+          ? {
+              create: catalogTiers.map((tier) => ({
+                minQuantity: tier.minQuantity,
+                ratePerUnit: tier.ratePerUnit,
+              })),
+            }
+          : undefined,
     },
+    include: productOperationInclude,
+  });
+}
+
+export async function setProductOperationRateTiers(input: {
+  productOperationId: string;
+  tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
+}) {
+  const tiers = parseRateTiersInput(input.tiers);
+  await prisma.$transaction([
+    prisma.productOperationRateTier.deleteMany({
+      where: { productOperationId: input.productOperationId },
+    }),
+    prisma.productOperationRateTier.createMany({
+      data: tiers.map((tier) => ({
+        productOperationId: input.productOperationId,
+        minQuantity: tier.minQuantity,
+        ratePerUnit: tier.ratePerUnit,
+      })),
+    }),
+  ]);
+  return prisma.productOperation.findUnique({
+    where: { id: input.productOperationId },
+    include: productOperationInclude,
   });
 }
 
@@ -306,6 +594,7 @@ export async function setProductMaterialSizeNorm(input: {
   productMaterialId: string;
   sizeId: string;
   consumptionPerUnit: number;
+  wastePercent?: number | null;
 }) {
   return prisma.productMaterialSizeNorm.upsert({
     where: {
@@ -314,11 +603,50 @@ export async function setProductMaterialSizeNorm(input: {
         sizeId: input.sizeId,
       },
     },
-    update: { consumptionPerUnit: input.consumptionPerUnit },
+    update: {
+      consumptionPerUnit: input.consumptionPerUnit,
+      ...(input.wastePercent !== undefined
+        ? { wastePercent: input.wastePercent }
+        : {}),
+    },
     create: {
       productMaterialId: input.productMaterialId,
       sizeId: input.sizeId,
       consumptionPerUnit: input.consumptionPerUnit,
+      wastePercent:
+        input.wastePercent !== undefined ? input.wastePercent : null,
+    },
+  });
+}
+
+/** Set waste for one size; creates a size norm row with base consumption if missing. */
+export async function setProductMaterialSizeWaste(input: {
+  productMaterialId: string;
+  sizeId: string;
+  wastePercent: number;
+}) {
+  const row = await prisma.productMaterial.findUnique({
+    where: { id: input.productMaterialId },
+    include: { sizeNorms: true },
+  });
+  if (!row) throw new Error("PRODUCT_MATERIAL_NOT_FOUND");
+  const existing = row.sizeNorms.find((norm) => norm.sizeId === input.sizeId);
+  const consumptionPerUnit = Number(
+    existing?.consumptionPerUnit ?? row.consumptionPerUnit,
+  );
+  return prisma.productMaterialSizeNorm.upsert({
+    where: {
+      productMaterialId_sizeId: {
+        productMaterialId: input.productMaterialId,
+        sizeId: input.sizeId,
+      },
+    },
+    update: { wastePercent: input.wastePercent },
+    create: {
+      productMaterialId: input.productMaterialId,
+      sizeId: input.sizeId,
+      consumptionPerUnit,
+      wastePercent: input.wastePercent,
     },
   });
 }
@@ -442,6 +770,13 @@ export async function copyProductSizeSpec(input: {
         material.sizeNorms.find((norm) => norm.sizeId === input.fromSizeId)?.consumptionPerUnit ??
           material.consumptionPerUnit,
       );
+      const fromNorm = material.sizeNorms.find((norm) => norm.sizeId === input.fromSizeId);
+      const wastePercent =
+        fromNorm?.wastePercent != null
+          ? Number(fromNorm.wastePercent)
+          : material.wastePercent != null
+            ? Number(material.wastePercent)
+            : null;
       for (const sizeId of targets) {
         if (material.sizeScopes.length > 0) {
           await tx.productMaterialSizeScope.upsert({
@@ -456,11 +791,12 @@ export async function copyProductSizeSpec(input: {
           where: {
             productMaterialId_sizeId: { productMaterialId: material.id, sizeId },
           },
-          update: { consumptionPerUnit: consumption },
+          update: { consumptionPerUnit: consumption, wastePercent },
           create: {
             productMaterialId: material.id,
             sizeId,
             consumptionPerUnit: consumption,
+            wastePercent,
           },
         });
       }
@@ -472,11 +808,12 @@ export async function copyProductSizeSpec(input: {
               sizeId: input.fromSizeId,
             },
           },
-          update: { consumptionPerUnit: consumption },
+          update: { consumptionPerUnit: consumption, wastePercent },
           create: {
             productMaterialId: material.id,
             sizeId: input.fromSizeId,
             consumptionPerUnit: consumption,
+            wastePercent,
           },
         });
       }
@@ -511,6 +848,27 @@ export async function addProductDecoration(input: {
       productId: input.productId,
       decorationMethodId: input.decorationMethodId,
     },
+  });
+}
+
+export async function setProductDecorationSetupCost(
+  productDecorationId: string,
+  setupCost: number,
+) {
+  return prisma.productDecoration.update({
+    where: { id: productDecorationId },
+    data: { setupCostOverride: setupCost },
+  });
+}
+
+export async function setProductImageUrl(productId: string, imageUrl: string | null) {
+  const url = imageUrl?.trim() ? imageUrl.trim() : null;
+  if (url && !isAllowedProductImageUrl(url)) {
+    throw new Error("INVALID_IMAGE_URL");
+  }
+  return prisma.product.update({
+    where: { id: productId },
+    data: { imageUrl: url },
   });
 }
 
@@ -661,5 +1019,113 @@ export async function setProductCutRates(input: {
         });
       }
     }
+  });
+}
+
+async function uniqueProductNameUk(baseName: string) {
+  const trimmed = baseName.replace(/\s+/g, " ").trim();
+  const candidates = [
+    `${trimmed} (копія)`,
+    ...Array.from({ length: 20 }, (_, index) => `${trimmed} (копія ${index + 2})`),
+  ];
+  for (const nameUk of candidates) {
+    const existing = await prisma.product.findFirst({
+      where: { nameUk: { equals: nameUk, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (!existing) return nameUk;
+  }
+  return `${trimmed} (копія ${Date.now()})`;
+}
+
+/** Full BOM clone into a new catalog product with a unique name. */
+export async function duplicateProduct(sourceId: string) {
+  const source = await getProduct(sourceId);
+  if (!source) throw new Error("PRODUCT_NOT_FOUND");
+
+  const nameUk = await uniqueProductNameUk(source.nameUk);
+  let internalCode: string | null = null;
+  if (source.internalCode?.trim()) {
+    const codeBase = `${source.internalCode.trim()}-COPY`;
+    const codeTaken = await prisma.product.findFirst({
+      where: { internalCode: { equals: codeBase, mode: "insensitive" } },
+      select: { id: true },
+    });
+    internalCode = codeTaken ? `${codeBase}-${Date.now().toString(36)}` : codeBase;
+  }
+
+  return prisma.product.create({
+    data: {
+      nameUk,
+      internalCode,
+      description: source.description,
+      imageUrl: source.imageUrl,
+      categoryId: source.categoryId,
+      status: "ACTIVE",
+      isBaseModel: false,
+      optimalQty: source.optimalQty,
+      sizes: {
+        create: source.sizes.map((row) => ({ sizeId: row.sizeId })),
+      },
+      materials: {
+        create: source.materials.map((row) => ({
+          materialId: row.materialId,
+          consumptionPerUnit: row.consumptionPerUnit,
+          wastePercent: row.wastePercent,
+          sizeScopes: {
+            create: row.sizeScopes.map((scope) => ({ sizeId: scope.sizeId })),
+          },
+          sizeNorms: {
+            create: row.sizeNorms.map((norm) => ({
+              sizeId: norm.sizeId,
+              consumptionPerUnit: norm.consumptionPerUnit,
+              wastePercent: norm.wastePercent,
+            })),
+          },
+        })),
+      },
+      operations: {
+        create: source.operations.map((row) => ({
+          operationId: row.operationId,
+          rateOverride: row.rateOverride,
+          standardOverride: row.standardOverride,
+          sizeScopes: {
+            create: row.sizeScopes.map((scope) => ({ sizeId: scope.sizeId })),
+          },
+          rateTiers: {
+            create: row.rateTiers.map((tier) => ({
+              minQuantity: tier.minQuantity,
+              ratePerUnit: tier.ratePerUnit,
+            })),
+          },
+        })),
+      },
+      decorations: {
+        create: source.decorations.map((row) => ({
+          decorationMethodId: row.decorationMethodId,
+          setupCostOverride: row.setupCostOverride,
+        })),
+      },
+      additionalCosts: {
+        create: source.additionalCosts.map((row) => ({
+          nameUk: row.nameUk,
+          amount: row.amount,
+          isPerUnit: row.isPerUnit,
+        })),
+      },
+      cutRateTiers: {
+        create: source.cutRateTiers.map((tier) => ({
+          minQuantity: tier.minQuantity,
+          ratePerUnit: tier.ratePerUnit,
+        })),
+      },
+      commercialPriceTiers: {
+        create: source.commercialPriceTiers.map((tier) => ({
+          minQuantity: tier.minQuantity,
+          pricePerUnit: tier.pricePerUnit,
+        })),
+      },
+    },
+    include: productDetailInclude,
   });
 }

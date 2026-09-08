@@ -10,6 +10,7 @@ export type ExpandableMaterial = {
   waste?: number | null;
   sizeCodes?: string[] | null;
   sizeConsumption?: Record<string, number>;
+  sizeWaste?: Record<string, number>;
 };
 
 export type ExpandedMaterial = {
@@ -53,6 +54,15 @@ export function consumptionForSize(
   return override != null && Number.isFinite(override) ? override : base;
 }
 
+export function wasteForSize(
+  base: number,
+  sizeWaste: Record<string, number> | undefined,
+  sizeCode: string,
+): number {
+  const override = sizeWaste?.[sizeCode];
+  return override != null && Number.isFinite(override) ? override : base;
+}
+
 export function effectiveSizeCodes(
   sizeCodes: string[] | null | undefined,
   allCodes: string[],
@@ -61,7 +71,7 @@ export function effectiveSizeCodes(
   return allCodes.filter((code) => sizeCodes.includes(code));
 }
 
-function sameConsumption(values: number[]) {
+function sameNumberList(values: number[]) {
   if (values.length <= 1) return true;
   return values.every((value) => value === values[0]);
 }
@@ -74,16 +84,22 @@ export function expandMaterialsForSizes(
   for (const row of materials) {
     const applies = effectiveSizeCodes(row.sizeCodes, orderedSizeCodes);
     if (applies.length === 0) continue;
+    const baseWaste = row.waste ?? 0;
     const consumptions = applies.map((code) =>
       consumptionForSize(row.consumption, row.sizeConsumption, code),
     );
+    const wastes = applies.map((code) =>
+      wasteForSize(baseWaste, row.sizeWaste, code),
+    );
     const shared =
-      applies.length === orderedSizeCodes.length && sameConsumption(consumptions);
+      applies.length === orderedSizeCodes.length &&
+      sameNumberList(consumptions) &&
+      sameNumberList(wastes);
     if (shared) {
       result.push({
         materialId: row.materialId,
         consumption: consumptions[0] ?? row.consumption,
-        waste: row.waste,
+        waste: wastes[0] ?? baseWaste,
         sizeCode: null,
       });
     } else {
@@ -91,7 +107,7 @@ export function expandMaterialsForSizes(
         result.push({
           materialId: row.materialId,
           consumption: consumptions[i]!,
-          waste: row.waste,
+          waste: wastes[i]!,
           sizeCode: applies[i]!,
         });
       }
@@ -194,6 +210,7 @@ export function customizedSizeCodes(input: {
   materials: Array<{
     sizeCodes?: string[] | null;
     sizeConsumption?: Record<string, number>;
+    sizeWaste?: Record<string, number>;
   }>;
   operations?: Array<{ sizeCodes?: string[] | null }>;
 }): Set<string> {
@@ -206,6 +223,7 @@ export function customizedSizeCodes(input: {
       }
     }
     for (const code of Object.keys(row.sizeConsumption ?? {})) result.add(code);
+    for (const code of Object.keys(row.sizeWaste ?? {})) result.add(code);
   }
   for (const row of input.operations ?? []) {
     if (row.sizeCodes && row.sizeCodes.length > 0 && row.sizeCodes.length < input.allCodes.length) {
@@ -234,6 +252,14 @@ export function draftConsumption(
   return consumptionForSize(row.consumption, row.sizeConsumption, scope);
 }
 
+export function draftWaste(
+  row: { waste: number; sizeWaste?: Record<string, number> },
+  scope: SizeScope,
+) {
+  if (scope === ALL_SIZES) return row.waste;
+  return wasteForSize(row.waste, row.sizeWaste, scope);
+}
+
 export function patchDraftConsumption<
   T extends { consumption: number; sizeConsumption?: Record<string, number> },
 >(row: T, scope: SizeScope, value: number): T {
@@ -244,7 +270,21 @@ export function patchDraftConsumption<
   };
 }
 
-export function patchDraftScope<T extends { sizeCodes?: string[] | null; sizeConsumption?: Record<string, number> }>(
+export function patchDraftWaste<
+  T extends { waste: number; sizeWaste?: Record<string, number> },
+>(row: T, scope: SizeScope, value: number): T {
+  if (scope === ALL_SIZES) return { ...row, waste: value };
+  return {
+    ...row,
+    sizeWaste: { ...row.sizeWaste, [scope]: value },
+  };
+}
+
+export function patchDraftScope<T extends {
+  sizeCodes?: string[] | null;
+  sizeConsumption?: Record<string, number>;
+  sizeWaste?: Record<string, number>;
+}>(
   row: T,
   scope: SizeScope,
   allCodes: string[],
@@ -253,9 +293,16 @@ export function patchDraftScope<T extends { sizeCodes?: string[] | null; sizeCon
   const current = effectiveSizeCodes(row.sizeCodes, allCodes);
   const next = current.filter((code) => code !== scope);
   if (next.length === 0) return null;
-  const rest = { ...(row.sizeConsumption ?? {}) };
-  delete rest[scope];
-  return { ...row, sizeCodes: next, sizeConsumption: rest };
+  const restConsumption = { ...(row.sizeConsumption ?? {}) };
+  delete restConsumption[scope];
+  const restWaste = { ...(row.sizeWaste ?? {}) };
+  delete restWaste[scope];
+  return {
+    ...row,
+    sizeCodes: next,
+    sizeConsumption: restConsumption,
+    sizeWaste: restWaste,
+  };
 }
 
 export function attachDraftScope<T extends { sizeCodes?: string[] | null }>(
@@ -278,5 +325,18 @@ export function sizeConsumptionFromNorms(
 ): Record<string, number> {
   return Object.fromEntries(
     norms.map((row) => [row.size.code, Number(row.consumptionPerUnit)]),
+  );
+}
+
+export function sizeWasteFromNorms(
+  norms: Array<{
+    size: { code: string };
+    wastePercent?: { toString(): string } | number | null;
+  }>,
+): Record<string, number> {
+  return Object.fromEntries(
+    norms
+      .filter((row) => row.wastePercent != null)
+      .map((row) => [row.size.code, Number(row.wastePercent)]),
   );
 }

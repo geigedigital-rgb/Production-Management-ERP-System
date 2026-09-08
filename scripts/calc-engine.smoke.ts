@@ -159,6 +159,51 @@ assert.equal(withDeco!.basePricePerUnit, 420);
 assert.ok(withDeco!.sellingPricePerUnit > 420);
 console.log("commercial price list smoke test passed");
 
+import { draftLineFromItem } from "../src/lib/order-item-commercial";
+import type { CalculationResult } from "../src/server/domains/calculation/engine";
+
+const costCalcStub = {
+  costPerUnit: "350.54",
+  totalCost: "35053.93",
+  sellingPricePerUnit: "500.77",
+  totalSellingValue: "50077.00",
+  marginPercent: "30.00",
+  profitAmount: "15023.07",
+  materialsSubtotal: "23389.73",
+  operationsSubtotal: "4600.00",
+  decorationsSubtotal: "4000.00",
+  additionalCostsSubtotal: "3064.20",
+} as CalculationResult;
+
+const decoItem = {
+  totalQuantity: 100,
+  decorations: [{ setupCost: 500, unitRate: 35 }],
+  product: {
+    isBaseModel: true as boolean,
+    commercialPriceTiers: [] as Array<{ minQuantity: number; pricePerUnit: number }>,
+  },
+};
+
+const noPriceListDraft = draftLineFromItem(decoItem, costCalcStub);
+assert.equal(noPriceListDraft.fromPriceList, false);
+assert.equal(noPriceListDraft.totalSellingValue, 50077);
+assert.equal(noPriceListDraft.sellingPricePerUnit, 500.77);
+
+const priceListDraft = draftLineFromItem(
+  {
+    ...decoItem,
+    product: {
+      isBaseModel: true,
+      commercialPriceTiers: [{ minQuantity: 30, pricePerUnit: 350 }],
+    },
+  },
+  costCalcStub,
+);
+assert.equal(priceListDraft.fromPriceList, true);
+assert.equal(priceListDraft.totalSellingValue, 39000);
+assert.equal(priceListDraft.sellingPricePerUnit, 390);
+console.log("commercial draft line smoke test passed");
+
 import {
   deriveFabricPricing,
   meterPriceFromKgUsd,
@@ -238,6 +283,38 @@ const lineOrder = resolveMaterialLinePurchasePrice({
 assert.equal(lineOrder.pricingMode, "wholesale");
 assert.equal(lineOrder.purchasePrice, 180);
 
+// Wholesale-only fabric: threshold must not change mode or price.
+const wholesaleOnlyBelow = resolveOrderFabricPurchasePrice({
+  metersNeeded: 20,
+  wholesalePurchasePrice: 180,
+  cutPurchasePrice: null,
+  minWholesaleMeters: 50,
+});
+assert.equal(wholesaleOnlyBelow.pricingMode, "wholesale");
+assert.equal(wholesaleOnlyBelow.purchasePrice, 180);
+
+const wholesaleOnlyAbove = resolveOrderFabricPurchasePrice({
+  metersNeeded: 80,
+  wholesalePurchasePrice: 180,
+  cutPurchasePrice: null,
+  minWholesaleMeters: 50,
+});
+assert.equal(wholesaleOnlyAbove.pricingMode, "wholesale");
+assert.equal(wholesaleOnlyAbove.purchasePrice, 180);
+
+const wholesaleOnlyLine = resolveMaterialLinePurchasePrice({
+  type: "FABRIC",
+  purchasePrice: 180,
+  priceMeterUahNoVat: 180,
+  priceMeterUahCutVat: null,
+  metersPerRoll: 50,
+  minWholesaleMeters: 50,
+  companyCostMode: "NET",
+  metersNeeded: 10,
+});
+assert.equal(wholesaleOnlyLine.pricingMode, "wholesale");
+assert.equal(wholesaleOnlyLine.purchasePrice, 180);
+
 import { computeOrderItemFabricDelivery } from "../src/lib/fabric-delivery";
 
 const delivery = computeOrderItemFabricDelivery({
@@ -257,3 +334,69 @@ const delivery = computeOrderItemFabricDelivery({
 assert.equal(delivery, 3855.6);
 
 console.log("fabric cargo + cut/wholesale smoke test passed");
+
+import { resolveSizeCoeffs, OVERSIZE_DEFAULT_COEFFS } from "../src/lib/size-coeffs";
+
+assert.deepEqual(resolveSizeCoeffs("M"), { materialCoeff: 1, operationCoeff: 1 });
+assert.deepEqual(resolveSizeCoeffs("XXL"), OVERSIZE_DEFAULT_COEFFS);
+assert.deepEqual(resolveSizeCoeffs("3XL"), OVERSIZE_DEFAULT_COEFFS);
+assert.deepEqual(resolveSizeCoeffs("4XL"), OVERSIZE_DEFAULT_COEFFS);
+assert.deepEqual(
+  resolveSizeCoeffs("XXL", [{ sizeCode: "XXL", materialCoeff: 1.1, operationCoeff: 1.25 }]),
+  { materialCoeff: 1.1, operationCoeff: 1.25 },
+);
+
+const oversizeCalc = calculateCosting({
+  sizes: [
+    { sizeCode: "M", quantity: 50, materialCoeff: 1, operationCoeff: 1 },
+    { sizeCode: "XXL", quantity: 50, materialCoeff: 1.15, operationCoeff: 1.2 },
+  ],
+  materials: [
+    {
+      id: "fabric",
+      consumptionPerUnit: 1.2,
+      wastePercent: 5,
+      purchasePrice: 200,
+      applySizeCoeff: true,
+    },
+  ],
+  operations: [
+    {
+      id: "sew",
+      method: "UNIT_RATE",
+      unitRate: 80,
+      applySizeCoeff: true,
+    },
+  ],
+  decorations: [],
+  additionalCosts: [],
+  pricingMethod: "MARGIN",
+  targetRatePercent: 30,
+});
+const flatCalc = calculateCosting({
+  sizes: [{ sizeCode: "M", quantity: 100, materialCoeff: 1, operationCoeff: 1 }],
+  materials: [
+    {
+      id: "fabric",
+      consumptionPerUnit: 1.2,
+      wastePercent: 5,
+      purchasePrice: 200,
+      applySizeCoeff: true,
+    },
+  ],
+  operations: [
+    {
+      id: "sew",
+      method: "UNIT_RATE",
+      unitRate: 80,
+      applySizeCoeff: true,
+    },
+  ],
+  decorations: [],
+  additionalCosts: [],
+  pricingMethod: "MARGIN",
+  targetRatePercent: 30,
+});
+assert.ok(Number(oversizeCalc.materialsSubtotal) > Number(flatCalc.materialsSubtotal));
+assert.ok(Number(oversizeCalc.operationsSubtotal) > Number(flatCalc.operationsSubtotal));
+console.log("oversize XXL+ coeffs smoke test passed");

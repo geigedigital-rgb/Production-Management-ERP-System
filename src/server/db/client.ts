@@ -9,11 +9,14 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Bump when Prisma schema changes so dev HMR does not keep a stale client. */
-const PRISMA_CLIENT_VERSION = "20260829220000_order_material_usd_rate";
+const PRISMA_CLIENT_VERSION = "20260907190000_size_norm_waste";
 
 if (globalForPrisma.prismaClientVersion !== PRISMA_CLIENT_VERSION) {
+  const stale = globalForPrisma.prisma;
   globalForPrisma.prisma = undefined;
   globalForPrisma.prismaClientVersion = PRISMA_CLIENT_VERSION;
+  // Drop cached instance from a previous schema; ignore disconnect errors in HMR.
+  void stale?.$disconnect().catch(() => undefined);
 }
 
 function createPrismaClient() {

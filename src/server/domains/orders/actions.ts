@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/server/auth";
-import { assertSessionPermission, getCurrentUserAccess } from "@/server/auth/access";
+import { assertSessionPermission, getCurrentUserAccess, canEditOrderComposition } from "@/server/auth/access";
 import { hasUserPermission } from "@/lib/permissions";
 import {
   addOrderFile,
@@ -35,12 +35,27 @@ import {
 } from "@/server/domains/orders/service";
 import {
   buildCalcFromOrderItem,
-  cutRateContextFromProduct,
+  calcOptionsFromProduct,
   getPricingForOrder,
 } from "@/server/domains/calculation/from-entities";
 import { commercialPriceForOrderItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
 import type { OrderStatus } from "@prisma/client";
 import { z } from "zod";
+import { prisma } from "@/server/db/client";
+
+async function assertCanEditOrderComposition(orderId: string) {
+  const access = await getCurrentUserAccess();
+  if (!access) throw new Error("UNAUTHORIZED");
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { status: true },
+  });
+  if (!order) throw new Error("NOT_FOUND");
+  if (!canEditOrderComposition(access, order.status)) {
+    throw new Error("FORBIDDEN");
+  }
+  return { access, order };
+}
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1),
@@ -75,6 +90,11 @@ const draftItemSchema = z.object({
           sizeCodes: z.array(z.string()).optional().nullable(),
           sizeConsumption: z.record(z.string(), z.coerce.number().nonnegative()).optional(),
           purchasePrice: z.coerce.number().nonnegative().optional().nullable(),
+          colorSnapshot: z.string().trim().optional().nullable(),
+          cargoUsdPerKg: z.coerce.number().nonnegative().optional().nullable(),
+          usdUahRate: z.coerce.number().positive().optional().nullable(),
+          fabricDeliveryManual: z.boolean().optional(),
+          fabricDeliveryAmount: z.coerce.number().nonnegative().optional().nullable(),
         }),
       ),
       operations: z.array(
@@ -84,7 +104,13 @@ const draftItemSchema = z.object({
           sizeCodes: z.array(z.string()).optional().nullable(),
         }),
       ),
-      decorations: z.array(z.object({ decorationMethodId: z.string().min(1) })),
+      decorations: z.array(
+        z.object({
+          decorationMethodId: z.string().min(1),
+          setupCost: z.coerce.number().nonnegative().optional().nullable(),
+          unitRate: z.coerce.number().nonnegative().optional().nullable(),
+        }),
+      ),
     })
     .optional(),
 });
@@ -121,13 +147,22 @@ export async function createOrderAction(formData: FormData) {
         sizeCodes?: string[] | null;
         sizeConsumption?: Record<string, number>;
         purchasePrice?: number | null;
+        colorSnapshot?: string | null;
+        cargoUsdPerKg?: number | null;
+        usdUahRate?: number | null;
+        fabricDeliveryManual?: boolean;
+        fabricDeliveryAmount?: number | null;
       }>;
       operations: Array<{
         operationId: string;
         sizeCode?: string | null;
         sizeCodes?: string[] | null;
       }>;
-      decorations: Array<{ decorationMethodId: string }>;
+      decorations: Array<{
+        decorationMethodId: string;
+        setupCost?: number | null;
+        unitRate?: number | null;
+      }>;
     };
   }> = [];
 
@@ -210,6 +245,7 @@ export async function updateOrderSizesAction(formData: FormData) {
 
   const orderId = String(formData.get("orderId") ?? "");
   const orderItemId = String(formData.get("orderItemId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const sizeCodes = formData.getAll("sizeCode").map(String);
   const sizeNames = formData.getAll("sizeNameUk").map(String);
   const sizeQtys = formData.getAll("sizeQty").map((v) => Number(v));
@@ -233,6 +269,7 @@ export async function addOrderItemAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const productId = String(formData.get("productId") ?? "");
   const sizeCodes = formData.getAll("sizeCode").map(String);
   const sizeNames = formData.getAll("sizeNameUk").map(String);
@@ -271,6 +308,7 @@ export async function removeOrderItemAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   if (!orderItemId) return { ok: false as const, error: "VALIDATION" as const };
 
@@ -293,6 +331,7 @@ export async function addOrderMaterialAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const materialId = String(formData.get("materialId") ?? "");
   const consumptionPerUnit = Number(formData.get("consumptionPerUnit"));
@@ -323,6 +362,7 @@ export async function removeOrderMaterialAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const id = String(formData.get("id") ?? "");
   const sizeCodeRaw = String(formData.get("sizeCode") ?? "").trim();
   const sizeCode = sizeCodeRaw && sizeCodeRaw !== "ALL" ? sizeCodeRaw : null;
@@ -337,6 +377,7 @@ export async function addOrderOperationAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const operationId = String(formData.get("operationId") ?? "");
   const sizeCodeRaw = String(formData.get("sizeCode") ?? "").trim();
@@ -357,6 +398,7 @@ export async function removeOrderOperationAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const id = String(formData.get("id") ?? "");
   const sizeCodeRaw = String(formData.get("sizeCode") ?? "").trim();
   const sizeCode = sizeCodeRaw && sizeCodeRaw !== "ALL" ? sizeCodeRaw : null;
@@ -371,6 +413,7 @@ export async function addOrderDecorationAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const decorationMethodId = String(formData.get("decorationMethodId") ?? "");
 
@@ -389,8 +432,34 @@ export async function removeOrderDecorationAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const id = String(formData.get("id") ?? "");
   await removeOrderItemDecoration(id);
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true as const };
+}
+
+export async function updateOrderDecorationAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("manageOrders");
+
+  const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
+  const id = String(formData.get("id") ?? "");
+  const setupRaw = String(formData.get("setupCost") ?? "").trim();
+  const unitRaw = String(formData.get("unitRate") ?? "").trim();
+  const setupCost = setupRaw === "" ? undefined : Number(setupRaw);
+  const unitRate = unitRaw === "" ? undefined : Number(unitRaw);
+  if (
+    (setupCost != null && (Number.isNaN(setupCost) || setupCost < 0)) ||
+    (unitRate != null && (Number.isNaN(unitRate) || unitRate < 0))
+  ) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  const { updateOrderItemDecoration } = await import("@/server/domains/orders/service");
+  await updateOrderItemDecoration({ id, setupCost, unitRate });
   revalidatePath(`/orders/${orderId}`);
   return { ok: true as const };
 }
@@ -411,10 +480,15 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const id = String(formData.get("id") ?? "");
   const supplierRaw = formData.get("supplierId");
   const supplierId =
     supplierRaw === "" || supplierRaw == null ? undefined : String(supplierRaw);
+  const hasColorField = formData.has("colorSnapshot");
+  const colorSnapshot = hasColorField
+    ? String(formData.get("colorSnapshot") ?? "").trim() || null
+    : undefined;
   const cargoRaw = String(formData.get("cargoUsdPerKg") ?? "").trim();
   const cargoUsdPerKg = cargoRaw === "" ? null : Number(cargoRaw);
   const rateRaw = String(formData.get("usdUahRate") ?? "").trim();
@@ -435,6 +509,13 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
     consumptionRaw === "" ? undefined : Number(consumptionRaw);
   const wasteRaw = String(formData.get("wastePercent") ?? "").trim();
   const wastePercent = wasteRaw === "" ? undefined : Number(wasteRaw);
+  const thresholdRaw = String(formData.get("minWholesaleMetersOverride") ?? "").trim();
+  const hasThresholdField = formData.has("minWholesaleMetersOverride");
+  const minWholesaleMetersOverride = !hasThresholdField
+    ? undefined
+    : thresholdRaw === ""
+      ? null
+      : Number(thresholdRaw);
 
   if (!id) return { ok: false as const, error: "VALIDATION" as const };
   if (
@@ -458,10 +539,17 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
   ) {
     return { ok: false as const, error: "VALIDATION" as const };
   }
+  if (
+    minWholesaleMetersOverride != null &&
+    (Number.isNaN(minWholesaleMetersOverride) || minWholesaleMetersOverride < 0)
+  ) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
 
   await updateOrderItemMaterialTerms({
     id,
     ...(supplierId !== undefined ? { supplierId: supplierId || null } : {}),
+    ...(hasColorField ? { colorSnapshot } : {}),
     ...(formData.has("cargoUsdPerKg") ? { cargoUsdPerKg } : {}),
     ...(formData.has("usdUahRate") ? { usdUahRate } : {}),
     ...(costVatOverride !== undefined ? { costVatOverride } : {}),
@@ -469,6 +557,7 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
     ...(wastePercent != null ? { wastePercent } : {}),
     ...(fabricDeliveryAmount != null ? { fabricDeliveryAmount } : {}),
     fabricDeliveryManual,
+    ...(hasThresholdField ? { minWholesaleMetersOverride } : {}),
   });
 
   revalidatePath(`/orders/${orderId}`);
@@ -481,6 +570,7 @@ export async function updateOrderFabricDeliveryAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const amount = Number(formData.get("amount"));
   const manual = formData.get("manual") === "1";
@@ -500,6 +590,7 @@ export async function updateOrderMaterialConsumptionAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const id = String(formData.get("id") ?? "");
   const consumptionPerUnit = Number(formData.get("consumptionPerUnit"));
   const sizeCodeRaw = String(formData.get("sizeCode") ?? "").trim();
@@ -520,6 +611,7 @@ export async function updateOrderMaterialActualPriceAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const id = String(formData.get("id") ?? "");
   const raw = String(formData.get("actualPurchasePrice") ?? "").trim();
   const actualPurchasePrice = raw === "" ? null : Number(raw);
@@ -539,6 +631,7 @@ export async function copyOrderSizeSpecAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const fromSizeCode = String(formData.get("fromSizeCode") ?? "");
   const toSizeCodes = formData.getAll("toSizeCode").map(String).filter(Boolean);
@@ -576,7 +669,7 @@ export async function saveVersionAction(formData: FormData) {
       ...pricing,
       manualSellingPricePerUnit,
     },
-    { cutRate: cutRateContextFromProduct(item.product) },
+    calcOptionsFromProduct(item.product),
   );
 
   if (Number(calc.marginPercent) < pricing.minimumMarginPercent) {
@@ -651,9 +744,11 @@ export async function saveProposalAction(formData: FormData) {
   for (const line of lines) {
     const item = order.items.find((row) => row.id === line.orderItemId);
     if (!item) return { ok: false as const, error: "NOT_FOUND" as const };
-    const costCalc = buildCalcFromOrderItem(item, pricing, {
-      cutRate: cutRateContextFromProduct(item.product),
-    });
+    const costCalc = buildCalcFromOrderItem(
+      item,
+      pricing,
+      calcOptionsFromProduct(item.product),
+    );
     const commercial = commercialPriceForOrderItem(item, {
       discountPercent: line.discountPercent,
       fallbackPricePerUnit:
@@ -664,7 +759,7 @@ export async function saveProposalAction(formData: FormData) {
       const totalSellingValue = line.manualSellingPricePerUnit * item.totalQuantity;
       const profit = totalSellingValue - Number(costCalc.totalCost);
       marginPercent = totalSellingValue > 0 ? (profit / totalSellingValue) * 100 : 0;
-    } else if (commercial) {
+    } else if (commercial?.fromPriceList) {
       marginPercent = mergeCommercialAndCost(commercial, costCalc, item.totalQuantity).marginPercent;
     }
     if (marginPercent < pricing.minimumMarginPercent) {
@@ -745,6 +840,51 @@ export async function handOverAction(formData: FormData) {
   return { ok: true as const };
 }
 
+
+export async function submitOrderForCalculationAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("manageOrders");
+
+  const orderId = String(formData.get("orderId") ?? "");
+  if (!orderId) return { ok: false as const, error: "VALIDATION" as const };
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      status: true,
+      items: {
+        select: {
+          totalQuantity: true,
+          _count: { select: { materials: true, operations: true } },
+        },
+      },
+    },
+  });
+  if (!order) return { ok: false as const, error: "NOT_FOUND" as const };
+  if (order.status !== "DRAFT") {
+    return { ok: false as const, error: "NOT_DRAFT" as const };
+  }
+  if (order.items.length === 0) {
+    return { ok: false as const, error: "NO_ITEMS" as const };
+  }
+  const incomplete = order.items.some(
+    (item) =>
+      item.totalQuantity <= 0 ||
+      item._count.materials <= 0 ||
+      item._count.operations <= 0,
+  );
+  if (incomplete) {
+    return { ok: false as const, error: "INCOMPLETE" as const };
+  }
+
+  await updateOrderStatus(orderId, "CALCULATION", session.user.id);
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+  revalidatePath("/overview");
+  return { ok: true as const };
+}
+
 export async function setOrderStatusAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
@@ -775,7 +915,7 @@ export async function bulkCancelOrdersAction(formData: FormData) {
 export async function updateOrderMarginAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
-  await assertSessionPermission("manageOrders");
+  await assertSessionPermission("viewProductCosts");
 
   const orderId = String(formData.get("orderId") ?? "");
   const raw = formData.get("targetMarginPercent");

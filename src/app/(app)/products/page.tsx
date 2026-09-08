@@ -16,6 +16,11 @@ import { TableCard, TableToolbar } from "@/components/ui/Table";
 import { SearchField, FilterChips, ResetFilters } from "@/components/ui/Filters";
 import { ProductCreatePanel } from "@/components/products/ProductCreatePanel";
 import { ProductsTable, type ProductsTableRow } from "@/components/products/ProductsTable";
+import { ProductsCards } from "@/components/products/ProductsCards";
+import {
+  ProductsViewToggle,
+  type ProductsViewMode,
+} from "@/components/products/ProductsViewToggle";
 import { CatalogHealthBanner } from "@/components/catalog/CatalogHealthBanner";
 import { accessHas, getCurrentUserAccess } from "@/server/auth/access";
 
@@ -24,13 +29,16 @@ const PRICE_TIERS = [50, 100, 500];
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; state?: string }>;
+  searchParams: Promise<{ q?: string; state?: string; view?: string }>;
 }) {
   const access = await getCurrentUserAccess();
   if (!access) redirect("/login");
 
-  const { q, state } = await searchParams;
+  const { q, state, view: viewParam } = await searchParams;
+  const view: ProductsViewMode = viewParam === "cards" ? "cards" : "table";
   const canDelete = accessHas(access, "archiveRecords");
+  const canCreate = accessHas(access, "createInlineCatalog");
+  const showPrices = accessHas(access, "viewProductCosts");
 
   let summaries: Awaited<ReturnType<typeof listProductsSummary>> = [];
   let healthTips: Awaited<ReturnType<typeof getCatalogHealth>>["tips"] = [];
@@ -43,6 +51,7 @@ export default async function ProductsPage({
       targetRatePercent: 30,
       minimumMarginPercent: 15,
       roundingDecimals: 2,
+      sizeRules: [],
     })),
     listSizes().catch(() => []),
     listMaterials().catch(() => []),
@@ -106,6 +115,9 @@ export default async function ProductsPage({
     price: Number(material.purchasePrice),
     defaultWaste: Number(material.defaultWastePercent),
     name: material.nameUk,
+    materialType: material.type,
+    composition: material.composition?.trim() || null,
+    availableColors: material.availableColors ?? [],
   }));
   const operationCatalog = operations.map((operation) => ({
     id: operation.id,
@@ -117,6 +129,10 @@ export default async function ProductsPage({
       operation.standardOutputPerShift != null
         ? Number(operation.standardOutputPerShift)
         : null,
+    rateTiers: (operation.rateTiers ?? []).map((tier) => ({
+      minQuantity: tier.minQuantity,
+      ratePerUnit: Number(tier.ratePerUnit),
+    })),
   }));
   const decorationCatalog = decorations.map((decoration) => ({
     id: decoration.id,
@@ -128,45 +144,98 @@ export default async function ProductsPage({
   const rows: ProductsTableRow[] = filtered.map((product) => {
     const ready = isReady(product);
     const detail = detailById.get(product.id);
-    const commercialTiers = detail ? commercialPriceTiersFromProduct(detail) : [];
+    const commercialTiers =
+      showPrices && detail ? commercialPriceTiersFromProduct(detail) : [];
     const tierQtys =
       commercialTiers.length > 0 ? commercialTiers.map((tier) => tier.minQuantity) : PRICE_TIERS;
+
+    const compositionSummary =
+      [...new Set(
+        product.materials
+          .map((row) => row.material.nameUk.trim())
+          .filter(Boolean),
+      )]
+        .slice(0, 4)
+        .join(" · ") ||
+      product.category?.nameUk?.trim() ||
+      product.description?.trim() ||
+      null;
+
     return {
       id: product.id,
       nameUk: product.nameUk,
       internalCode: product.internalCode,
+      imageUrl: product.imageUrl,
       isBaseModel: product.isBaseModel,
+      compositionSummary,
       materialsCount: product._count.materials,
       operationsCount: product._count.operations,
       decorationsCount: product._count.decorations,
       ready,
       priceTiers: tierQtys,
-      prices: tierQtys.map((qty) => {
-        if (!ready || !detail) return null;
-        if (commercialTiers.length > 0) {
-          return resolveCommercialPricePerUnit({ quantity: qty, tiers: commercialTiers });
-        }
-        return Number(buildCalcFromProduct(detail, qty, pricing).sellingPricePerUnit);
-      }),
+      prices: showPrices
+        ? tierQtys.map((qty) => {
+            if (!ready || !detail) return null;
+            if (commercialTiers.length > 0) {
+              return resolveCommercialPricePerUnit({ quantity: qty, tiers: commercialTiers });
+            }
+            return Number(buildCalcFromProduct(detail, qty, pricing).sellingPricePerUnit);
+          })
+        : [],
     };
   });
+
+  const createPanel = canCreate ? (
+    <ProductCreatePanel
+      sizes={sizeOptions}
+      materialCatalog={materialCatalog}
+      operationCatalog={operationCatalog}
+      decorationCatalog={decorationCatalog}
+      unitOptions={unitOptions}
+      variant="primary"
+      size="sm"
+      triggerLabel="Новий виріб"
+    />
+  ) : undefined;
+
+  const emptyState = {
+    title: dbError
+      ? "Дані недоступні"
+      : term || state
+        ? "Нічого не знайдено"
+        : "Виробів ще немає",
+    description: dbError
+      ? undefined
+      : term || state
+        ? "Змініть запит або скиньте фільтри."
+        : canCreate
+          ? "Створіть виріб з фото, розмірами та комплектацією — він стане еталоном для замовлень."
+          : "Каталог виробів для підбору в замовлення. Ціни та калькуляція доступні адміністратору.",
+    action: !dbError ? createPanel : undefined,
+  };
 
   return (
     <div>
       <PageHeader
         title="Вироби"
-        description="Комерційний прайс — фіксовані ціни за тиражем для базових моделей. Без прайсу — розрахунковий орієнтир з собівартості."
+        description={
+          showPrices
+            ? "Комерційний прайс — фіксовані ціни за тиражем для базових моделей. Без прайсу — розрахунковий орієнтир з собівартості."
+            : "Каталог виробів для комплектації замовлення. Ціни та калькуляція приховані."
+        }
         actions={
-          <ProductCreatePanel
-            sizes={sizeOptions}
-            materialCatalog={materialCatalog}
-            operationCatalog={operationCatalog}
-            decorationCatalog={decorationCatalog}
-            unitOptions={unitOptions}
-            variant="primary"
-            size="md"
-            triggerLabel="Новий виріб"
-          />
+          canCreate ? (
+            <ProductCreatePanel
+              sizes={sizeOptions}
+              materialCatalog={materialCatalog}
+              operationCatalog={operationCatalog}
+              decorationCatalog={decorationCatalog}
+              unitOptions={unitOptions}
+              variant="primary"
+              size="md"
+              triggerLabel="Новий виріб"
+            />
+          ) : undefined
         }
       />
 
@@ -178,9 +247,9 @@ export default async function ProductsPage({
             <span className="mt-1 block text-[12.5px] opacity-80">{loadError}</span>
           ) : null}
         </Banner>
-      ) : (
+      ) : showPrices ? (
         <CatalogHealthBanner tips={healthTips} className="mb-4" />
-      )}
+      ) : null}
 
       <TableCard>
         <TableToolbar
@@ -189,6 +258,7 @@ export default async function ProductsPage({
               {filtered.length} з {summaries.length}
             </span>
           }
+          right={<ProductsViewToggle value={view} />}
           filters={
             <>
               <SearchField placeholder="Пошук за назвою або кодом" className="w-64" />
@@ -208,34 +278,21 @@ export default async function ProductsPage({
           }
         />
 
-        <ProductsTable
-          rows={rows}
-          canDelete={canDelete}
-          empty={{
-            title: dbError
-              ? "Дані недоступні"
-              : term || state
-                ? "Нічого не знайдено"
-                : "Виробів ще немає",
-            description: dbError
-              ? undefined
-              : term || state
-                ? "Змініть запит або скиньте фільтри."
-                : "Створіть виріб з фото, розмірами та комплектацією — він стане еталоном для замовлень.",
-            action: !dbError ? (
-              <ProductCreatePanel
-                sizes={sizeOptions}
-                materialCatalog={materialCatalog}
-                operationCatalog={operationCatalog}
-                decorationCatalog={decorationCatalog}
-                unitOptions={unitOptions}
-                variant="primary"
-                size="sm"
-                triggerLabel="Новий виріб"
-              />
-            ) : undefined,
-          }}
-        />
+        {view === "cards" ? (
+          <ProductsCards
+            rows={rows}
+            canDelete={canDelete}
+            showPrices={showPrices}
+            empty={emptyState}
+          />
+        ) : (
+          <ProductsTable
+            rows={rows}
+            canDelete={canDelete}
+            showPrices={showPrices}
+            empty={emptyState}
+          />
+        )}
       </TableCard>
     </div>
   );

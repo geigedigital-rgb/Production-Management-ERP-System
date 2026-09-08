@@ -27,6 +27,10 @@ export const materialFormSchema = z.object({
   defaultWastePercent: z.coerce.number().min(0).max(100).default(0),
   supplierCode: optionalString,
   colorOrAttribute: optionalString,
+  availableColors: z
+    .array(z.string().trim().min(1))
+    .optional()
+    .default([]),
   note: optionalString,
   densityGsm: optionalString,
   composition: optionalString,

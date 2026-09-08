@@ -71,6 +71,8 @@ export function SidePanel({
   description,
   footer,
   width = "md",
+  /** Stack above another open SidePanel (e.g. line details inside composition). */
+  elevated = false,
   children,
 }: {
   open: boolean;
@@ -79,13 +81,14 @@ export function SidePanel({
   description?: string;
   footer?: React.ReactNode;
   width?: "sm" | "md" | "lg" | "xl" | "2xl";
+  elevated?: boolean;
   children: React.ReactNode;
 }) {
   useOverlayBehaviour(open, onClose);
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className={cn("fixed inset-0 flex justify-end", elevated ? "z-[60]" : "z-50")}>
       <div
         className="anim-overlay absolute inset-0 bg-[rgba(15,23,32,0.4)] backdrop-blur-[1px]"
         onClick={onClose}

@@ -49,13 +49,21 @@ export function sortRows<T, K extends string>(
   rows: T[],
   sort: SortState<K>,
   accessors: Record<K, (row: T) => unknown>,
+  secondary?: { key: K; direction?: SortDirection },
 ): T[] {
   if (!sort) return rows;
   const accessor = accessors[sort.key];
   if (!accessor) return rows;
-  return [...rows].sort((left, right) =>
-    compareValues(accessor(left), accessor(right), sort.direction),
-  );
+  const secondaryAccessor = secondary ? accessors[secondary.key] : null;
+  return [...rows].sort((left, right) => {
+    const primary = compareValues(accessor(left), accessor(right), sort.direction);
+    if (primary !== 0 || !secondary || !secondaryAccessor) return primary;
+    return compareValues(
+      secondaryAccessor(left),
+      secondaryAccessor(right),
+      secondary.direction ?? "asc",
+    );
+  });
 }
 
 export function useRowSelection(ids: string[]) {

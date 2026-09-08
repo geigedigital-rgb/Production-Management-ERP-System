@@ -24,6 +24,7 @@ import {
   listUnits,
   resyncFabricPurchasePrices,
   updateMaterial,
+  updateMaterialAvailableColors,
 } from "@/server/domains/catalog/materials";
 import { prisma } from "@/server/db/client";
 import { materialFormSchema } from "@/server/domains/catalog/schemas";
@@ -157,6 +158,7 @@ export async function createMaterialAction(formData: FormData) {
           ? Number(result.material.minWholesaleMeters)
           : null,
       costVatOverride: result.material.costVatOverride,
+      availableColors: result.material.availableColors ?? [],
     },
   };
 }
@@ -177,12 +179,41 @@ export async function updateMaterialAction(formData: FormData) {
 
   await syncFabricGlobalsFromForm(formData);
 
-  const result = await updateMaterial(id, parsed.data);
+  const result = await updateMaterial(id, parsed.data, {
+    preservePurchaseTerms: formData.get("pricingManagedSeparately") === "1",
+  });
   revalidatePath("/settings/resources");
   revalidatePath("/settings/pricing");
   revalidatePath("/orders");
   revalidatePath("/products");
   return { ok: true as const, materialId: result.material.id };
+}
+
+export async function updateMaterialAvailableColorsAction(
+  materialId: string,
+  colors: string[],
+) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  const access = await getCurrentUserAccess();
+  if (
+    !access ||
+    (!accessHas(access, "createInlineCatalog") && !accessHas(access, "manageOrders"))
+  ) {
+    throw new Error("FORBIDDEN");
+  }
+
+  if (!materialId) return { ok: false as const, error: "VALIDATION" as const };
+
+  const updated = await updateMaterialAvailableColors(materialId, colors);
+  revalidatePath("/settings/resources");
+  revalidatePath("/orders");
+  revalidatePath("/products");
+  return {
+    ok: true as const,
+    materialId: updated.id,
+    availableColors: updated.availableColors,
+  };
 }
 
 /** Persist course/cargo from the material form into shared PricingSettings. */
@@ -260,6 +291,16 @@ export async function createOperationAction(formData: FormData) {
   if (!session?.user) throw new Error("UNAUTHORIZED");
   await assertSessionPermission("createInlineCatalog");
 
+  let rateTiers: unknown = [];
+  const rateTiersRaw = formData.get("rateTiersJson");
+  if (typeof rateTiersRaw === "string" && rateTiersRaw.trim()) {
+    try {
+      rateTiers = JSON.parse(rateTiersRaw);
+    } catch {
+      rateTiers = [];
+    }
+  }
+
   const parsed = operationFormSchema.safeParse({
     nameUk: formData.get("nameUk"),
     categoryId: formData.get("categoryId") || null,
@@ -268,6 +309,7 @@ export async function createOperationAction(formData: FormData) {
     shiftCost: formData.get("shiftCost") || null,
     standardOutputPerShift: formData.get("standardOutputPerShift") || null,
     note: formData.get("note") || null,
+    rateTiers,
   });
 
   if (!parsed.success) {
@@ -290,6 +332,10 @@ export async function createOperationAction(formData: FormData) {
         operation.standardOutputPerShift != null
           ? Number(operation.standardOutputPerShift)
           : null,
+      rateTiers: (operation.rateTiers ?? []).map((tier) => ({
+        minQuantity: tier.minQuantity,
+        ratePerUnit: Number(tier.ratePerUnit),
+      })),
     },
   };
 }
@@ -302,6 +348,16 @@ export async function updateOperationAction(formData: FormData) {
   const id = String(formData.get("id") || "");
   if (!id) return { ok: false as const, error: "VALIDATION" as const };
 
+  let rateTiers: unknown = [];
+  const rateTiersRaw = formData.get("rateTiersJson");
+  if (typeof rateTiersRaw === "string" && rateTiersRaw.trim()) {
+    try {
+      rateTiers = JSON.parse(rateTiersRaw);
+    } catch {
+      rateTiers = [];
+    }
+  }
+
   const parsed = operationFormSchema.safeParse({
     nameUk: formData.get("nameUk"),
     categoryId: formData.get("categoryId") || null,
@@ -310,6 +366,7 @@ export async function updateOperationAction(formData: FormData) {
     shiftCost: formData.get("shiftCost") || null,
     standardOutputPerShift: formData.get("standardOutputPerShift") || null,
     note: formData.get("note") || null,
+    rateTiers,
   });
 
   if (!parsed.success) {
@@ -455,6 +512,8 @@ export async function upsertMaterialSupplierOfferAction(formData: FormData) {
   if (!materialId) return { ok: false as const, error: "INVALID" as const };
 
   const { upsertMaterialSupplierOffer } = await import("@/server/domains/catalog/suppliers");
+  const { splitColorLabels } = await import("@/lib/trim-colors");
+  const colorsRaw = String(formData.get("availableColors") ?? "");
   await upsertMaterialSupplierOffer(materialId, {
     supplierNameUk: String(formData.get("supplierNameUk") ?? "") || null,
     isPrimary: formData.get("isPrimary") === "1",
@@ -468,14 +527,47 @@ export async function upsertMaterialSupplierOfferAction(formData: FormData) {
     priceKgUsdVat: formData.get("priceKgUsdVat")
       ? Number(formData.get("priceKgUsdVat"))
       : null,
+    priceMeterUahNoVat: formData.get("priceMeterUahNoVat")
+      ? Number(formData.get("priceMeterUahNoVat"))
+      : null,
+    priceMeterUahVat: formData.get("priceMeterUahVat")
+      ? Number(formData.get("priceMeterUahVat"))
+      : null,
     priceMeterUahCutVat: formData.get("priceMeterUahCutVat")
       ? Number(formData.get("priceMeterUahCutVat"))
+      : null,
+    rollWeightKg: formData.get("rollWeightKg")
+      ? Number(formData.get("rollWeightKg"))
+      : null,
+    metersPerRoll: formData.get("metersPerRoll")
+      ? Number(formData.get("metersPerRoll"))
       : null,
     minWholesaleMeters: formData.get("minWholesaleMeters")
       ? Number(formData.get("minWholesaleMeters"))
       : null,
+    wholesaleNote: String(formData.get("wholesaleNote") ?? "") || null,
+    availableColors: splitColorLabels(colorsRaw),
   });
   revalidatePath("/settings/resources");
+  revalidatePath("/products");
+  revalidatePath("/orders");
+  return { ok: true as const };
+}
+
+export async function setPrimaryMaterialSupplierOfferAction(formData: FormData) {
+  await assertSessionPermission("createInlineCatalog");
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false as const, error: "INVALID" as const };
+
+  const { setPrimaryMaterialSupplierOffer } = await import("@/server/domains/catalog/suppliers");
+  try {
+    await setPrimaryMaterialSupplierOffer(id);
+  } catch {
+    return { ok: false as const, error: "NOT_FOUND" as const };
+  }
+  revalidatePath("/settings/resources");
+  revalidatePath("/products");
+  revalidatePath("/orders");
   return { ok: true as const };
 }
 
@@ -496,16 +588,31 @@ export async function deleteMaterialSupplierOfferAction(formData: FormData) {
 export async function listMaterialSupplierOffersAction(materialId: string) {
   await assertSessionPermission("createInlineCatalog");
   const { listMaterialSupplierOffers } = await import("@/server/domains/catalog/suppliers");
-  const offers = await listMaterialSupplierOffers(materialId);
+  const { getFabricPricingGlobals } = await import("@/server/domains/catalog/materials");
+  const [offers, globals] = await Promise.all([
+    listMaterialSupplierOffers(materialId),
+    getFabricPricingGlobals(),
+  ]);
   return {
     ok: true as const,
+    usdUahRate: globals.usdUahRate,
+    defaultCargoUsdPerKg: globals.fabricCargoUsdPerKg,
     offers: offers.map((row) => ({
       id: row.id,
       isPrimary: row.isPrimary,
       supplierName: row.supplier.nameUk,
+      availableColors: row.availableColors ?? [],
+      cargoUsdPerKg: row.cargoUsdPerKg != null ? Number(row.cargoUsdPerKg) : null,
       priceKgUsd: row.priceKgUsd != null ? Number(row.priceKgUsd) : null,
+      priceKgUsdVat: row.priceKgUsdVat != null ? Number(row.priceKgUsdVat) : null,
+      priceMeterUahNoVat:
+        row.priceMeterUahNoVat != null ? Number(row.priceMeterUahNoVat) : null,
+      priceMeterUahVat: row.priceMeterUahVat != null ? Number(row.priceMeterUahVat) : null,
       priceMeterUahCutVat:
         row.priceMeterUahCutVat != null ? Number(row.priceMeterUahCutVat) : null,
+      minWholesaleMeters:
+        row.minWholesaleMeters != null ? Number(row.minWholesaleMeters) : null,
+      wholesaleNote: row.wholesaleNote,
       purchaseHint:
         row.priceMeterUahCutVat != null
           ? Number(row.priceMeterUahCutVat)

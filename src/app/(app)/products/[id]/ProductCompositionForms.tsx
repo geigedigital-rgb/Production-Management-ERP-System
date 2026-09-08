@@ -17,8 +17,18 @@ import {
   addProductOperationAction,
 } from "@/server/domains/products/actions";
 
-type Option = { id: string; label: string };
+type Option = { id: string; label: string; unit?: string; composition?: string | null };
 type UnitOption = { id: string; label: string };
+
+function unitFromMaterialLabel(label: string): string | null {
+  const match = label.match(/\(([^)]+)\)\s*$/);
+  return match?.[1]?.trim() || null;
+}
+
+function resolveMaterialUnit(option: Option | undefined): string | null {
+  if (!option) return null;
+  return option.unit?.trim() || unitFromMaterialLabel(option.label);
+}
 
 function MissingRecordHint({ children }: { children: React.ReactNode }) {
   return (
@@ -73,6 +83,7 @@ export function ProductAddMaterialBar({
   const [consumption, setConsumption] = useState("1");
   const [waste, setWaste] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const selectedUnit = resolveMaterialUnit(materials.find((row) => row.id === materialId));
 
   useEffect(() => {
     setMaterials(initialMaterials);
@@ -130,7 +141,7 @@ export function ProductAddMaterialBar({
             setMaterials((prev) =>
               prev.some((row) => row.id === created.id)
                 ? prev
-                : [...prev, { id: created.id, label }],
+                : [...prev, { id: created.id, label, unit: created.unit }],
             );
             setMaterialId(created.id);
             router.refresh();
@@ -149,14 +160,18 @@ export function ProductAddMaterialBar({
         >
           <option value="">Оберіть матеріал…</option>
           {materials.map((material) => (
-            <option key={material.id} value={material.id}>
+            <option
+              key={material.id}
+              value={material.id}
+              data-description={material.composition?.trim() || undefined}
+            >
               {material.label}
             </option>
           ))}
         </Select>
-        <label className="w-[72px]">
+        <label className="w-[88px]">
           <span className="mb-1 block text-[11px] font-medium text-[var(--color-text-tertiary)]">
-            Норма
+            {selectedUnit ? `Норма, ${selectedUnit}` : "Норма"}
           </span>
           <input
             type="number"
@@ -164,6 +179,11 @@ export function ProductAddMaterialBar({
             step="0.0001"
             value={consumption}
             onChange={(event) => setConsumption(event.target.value)}
+            title={
+              selectedUnit
+                ? `Скільки ${selectedUnit} іде на 1 виріб`
+                : "Оберіть матеріал — з’явиться одиниця виміру"
+            }
             className="h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
           />
         </label>
@@ -212,6 +232,7 @@ export function AddProductMaterialPanel({
   const [materials, setMaterials] = useState(initialMaterials);
   const [materialId, setMaterialId] = useState("");
   const router = useRouter();
+  const selectedUnit = resolveMaterialUnit(materials.find((row) => row.id === materialId));
 
   useEffect(() => {
     setMaterials(initialMaterials);
@@ -224,8 +245,8 @@ export function AddProductMaterialPanel({
       title="Матеріал у комплектацію"
       description={
         scoped
-          ? `Норма на 1 од. виробу. Матеріал додається лише для розміру ${sizeLabel ?? "обраного"}.`
-          : "Норма на 1 од. виробу. Scope «Усі» — матеріал для всієї розмірної сітки."
+          ? `Норма — у одиниці виміру матеріалу з каталогу, на 1 виріб. Лише розмір ${sizeLabel ?? "обраний"}.`
+          : "Норма — у одиниці виміру матеріалу з каталогу (м, шт, кг…), на 1 виріб."
       }
       triggerLabel="Додати…"
       submitLabel="Додати до виробу"
@@ -255,7 +276,11 @@ export function AddProductMaterialPanel({
             Оберіть матеріал…
           </option>
           {materials.map((material) => (
-            <option key={material.id} value={material.id}>
+            <option
+              key={material.id}
+              value={material.id}
+              data-description={material.composition?.trim() || undefined}
+            >
               {material.label}
             </option>
           ))}
@@ -265,11 +290,16 @@ export function AddProductMaterialPanel({
       <FormGroup label="Норма витрати" columns={2}>
         <Input
           name="consumptionPerUnit"
-          label="Норма на одиницю"
+          label={selectedUnit ? `Норма, ${selectedUnit} / виріб` : "Норма на 1 виріб"}
           type="number"
           step="0.0001"
           min="0"
           required
+          hint={
+            selectedUnit
+              ? `Одиниця з каталогу: ${selectedUnit}. Приклад: 0,02 ${selectedUnit} на одну футболку.`
+              : "Спочатку оберіть позицію — з’явиться одиниця виміру (м, шт…)."
+          }
         />
         <Input
           name="wastePercent"
@@ -297,7 +327,7 @@ export function AddProductMaterialPanel({
             setMaterials((prev) =>
               prev.some((row) => row.id === created.id)
                 ? prev
-                : [...prev, { id: created.id, label }],
+                : [...prev, { id: created.id, label, unit: created.unit }],
             );
             setMaterialId(created.id);
             router.refresh();

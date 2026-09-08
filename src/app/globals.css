@@ -333,6 +333,21 @@ table {
   font-variant-numeric: tabular-nums;
 }
 
+/* Pending manager choice (color / VAT) on order draft rows */
+@keyframes choice-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-warning-text) 42%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-warning-text) 8%, transparent);
+  }
+}
+
+.animate-choice-pulse {
+  animation: choice-pulse 1.65s ease-in-out infinite;
+}
+
 /* Overlay motion */
 @keyframes overlay-in {
   from {

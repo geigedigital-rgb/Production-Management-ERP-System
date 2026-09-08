@@ -12,6 +12,8 @@ import {
   effectiveSizeCodes,
   sizeCodesFromScopes,
   sizeConsumptionFromNorms,
+  sizeWasteFromNorms,
+  wasteForSize,
 } from "@/lib/size-bom";
 import {
   type CutRateTier,
@@ -20,6 +22,12 @@ import {
   resolveCutUnitRateForProduct,
   type CutRateProduct,
 } from "@/lib/cut-rate";
+import {
+  pickOperationQuantityTiers,
+  resolveQuantityTierRate,
+  type QuantityRateTier,
+} from "@/lib/quantity-tiers";
+import { resolveSizeCoeffs, isOversizeCode } from "@/lib/size-coeffs";
 
 export type CutRateContext = {
   optimalQty: number | null;
@@ -39,36 +47,118 @@ export function cutRateContextFromProduct(
   };
 }
 
+export type QuantityTierLookup = Record<string, QuantityRateTier[]>;
+
+export function quantityTiersByOperationIdFromProduct(
+  product:
+    | {
+        operations?: Array<{
+          operationId: string;
+          rateTiers?: Array<{ minQuantity: number; ratePerUnit: unknown }>;
+          operation: {
+            calculationMethod: string;
+            rateTiers?: Array<{ minQuantity: number; ratePerUnit: unknown }>;
+          };
+        }>;
+      }
+    | null
+    | undefined,
+): QuantityTierLookup {
+  const result: QuantityTierLookup = {};
+  for (const row of product?.operations ?? []) {
+    if (row.operation.calculationMethod !== "QUANTITY_TIER") continue;
+    const tiers = pickOperationQuantityTiers(row.rateTiers, row.operation.rateTiers);
+    if (tiers.length > 0) result[row.operationId] = tiers;
+  }
+  return result;
+}
+
+export function calcOptionsFromProduct(
+  product:
+    | (CutRateProduct & {
+        operations?: Array<{
+          operationId: string;
+          rateTiers?: Array<{ minQuantity: number; ratePerUnit: unknown }>;
+          operation: {
+            calculationMethod: string;
+            rateTiers?: Array<{ minQuantity: number; ratePerUnit: unknown }>;
+          };
+        }>;
+      })
+    | null
+    | undefined,
+): ResolveOrderOpRateOptions {
+  return {
+    cutRate: cutRateContextFromProduct(product),
+    quantityTiersByOperationId: quantityTiersByOperationIdFromProduct(product),
+  };
+}
+
 function orderItemTotalQuantity(item: OrderItemForCalc): number {
   return item.sizes.reduce((sum, row) => sum + row.quantity, 0);
 }
 
+export type ResolveOrderOpRateOptions = {
+  cutRate?: CutRateContext | null;
+  quantityTiersByOperationId?: QuantityTierLookup;
+};
+
 export function resolveOrderOperationUnitRate(
   row: OrderItemForCalc["operations"][number],
   totalQuantity: number,
-  cutRate: CutRateContext | null | undefined,
+  options?: ResolveOrderOpRateOptions | CutRateContext | null,
 ): number | null {
+  // Back-compat: older call sites passed CutRateContext as the 3rd argument.
+  const opts: ResolveOrderOpRateOptions =
+    options == null
+      ? {}
+      : "tiers" in options && "optimalQty" in options && !("cutRate" in options)
+        ? { cutRate: options as CutRateContext }
+        : (options as ResolveOrderOpRateOptions);
+
   const stored = row.unitRate != null ? Number(row.unitRate) : null;
-  if (!isCutOperationName(row.nameSnapshot) || !cutRate?.tiers.length) {
-    return stored;
+
+  if (isCutOperationName(row.nameSnapshot) && opts.cutRate?.tiers.length) {
+    return resolveCutRatePerUnit({
+      quantity: totalQuantity,
+      optimalQty: opts.cutRate.optimalQty,
+      tiers: opts.cutRate.tiers,
+      fallbackRate: stored ?? 0,
+    });
   }
-  return resolveCutRatePerUnit({
-    quantity: totalQuantity,
-    optimalQty: cutRate.optimalQty,
-    tiers: cutRate.tiers,
-    fallbackRate: stored ?? 0,
-  });
+
+  if (row.calculationMethod === "QUANTITY_TIER" && row.operationId) {
+    const tiers = opts.quantityTiersByOperationId?.[row.operationId] ?? [];
+    if (tiers.length > 0) {
+      return resolveQuantityTierRate({
+        quantity: totalQuantity,
+        tiers,
+        fallbackRate: stored ?? 0,
+      });
+    }
+  }
+
+  return stored;
 }
 
-type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProduct>>>;
+export type ProductDetailForCalc = NonNullable<Awaited<ReturnType<typeof getProduct>>>;
+type ProductDetail = ProductDetailForCalc;
 
 export async function getPricingDefaults() {
-  const pricing = await prisma.pricingSettings.findFirst();
+  const [pricing, sizeRules] = await Promise.all([
+    prisma.pricingSettings.findFirst(),
+    prisma.sizeRule.findMany({ where: { status: "ACTIVE" } }),
+  ]);
   return {
     pricingMethod: (pricing?.pricingMethod ?? "MARGIN") as "MARGIN" | "MARKUP",
     targetRatePercent: Number(pricing?.targetMarginPercent ?? 30),
     minimumMarginPercent: Number(pricing?.minimumMarginPercent ?? 15),
     roundingDecimals: 2,
+    sizeRules: sizeRules.map((row) => ({
+      sizeCode: row.sizeCode,
+      materialCoeff: Number(row.materialCoeff),
+      operationCoeff: Number(row.operationCoeff),
+    })),
   };
 }
 
@@ -93,19 +183,55 @@ export async function getPricingForOrder(orderId?: string | null) {
   };
 }
 
+function resolveProductOperationUnitRate(
+  row: ProductDetail["operations"][number],
+  quantity: number,
+  product: ProductDetail,
+): number | null {
+  const fallbackRate =
+    row.rateOverride != null
+      ? Number(row.rateOverride)
+      : row.operation.baseRate != null
+        ? Number(row.operation.baseRate)
+        : null;
+
+  if (isCutOperationName(row.operation.nameUk)) {
+    return resolveCutUnitRateForProduct(product, quantity, fallbackRate ?? 0);
+  }
+
+  if (row.operation.calculationMethod === "QUANTITY_TIER") {
+    const tiers = pickOperationQuantityTiers(row.rateTiers, row.operation.rateTiers);
+    return resolveQuantityTierRate({
+      quantity,
+      tiers,
+      fallbackRate: fallbackRate ?? 0,
+    });
+  }
+
+  return fallbackRate;
+}
+
 export function buildCalcFromProduct(
   product: ProductDetail,
   quantity: number,
-  pricing: { pricingMethod: "MARGIN" | "MARKUP"; targetRatePercent: number },
+  pricing: {
+    pricingMethod: "MARGIN" | "MARKUP";
+    targetRatePercent: number;
+    sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>;
+  },
 ): CalculationResult {
+  const sizeRules = pricing.sizeRules;
   const sizes =
     product.sizes.length > 0
-      ? product.sizes.map((row) => ({
-          sizeCode: row.size.code,
-          quantity: 0,
-          materialCoeff: 1,
-          operationCoeff: 1,
-        }))
+      ? product.sizes.map((row) => {
+          const coeffs = resolveSizeCoeffs(row.size.code, sizeRules);
+          return {
+            sizeCode: row.size.code,
+            quantity: 0,
+            materialCoeff: coeffs.materialCoeff,
+            operationCoeff: coeffs.operationCoeff,
+          };
+        })
       : [{ sizeCode: "ONE", quantity: 0, materialCoeff: 1, operationCoeff: 1 }];
 
   const base = Math.floor(quantity / sizes.length);
@@ -121,14 +247,19 @@ export function buildCalcFromProduct(
   const input: CalculationInput = {
     sizes,
     materials: product.materials.flatMap((row): MaterialLineInput[] => {
-      const waste = Number(row.wastePercent ?? row.material.defaultWastePercent);
+      const baseWaste = Number(row.wastePercent ?? row.material.defaultWastePercent);
       const price = Number(row.material.purchasePrice);
       const applies = effectiveSizeCodes(sizeCodesFromScopes(row.sizeScopes), sizeCodes);
       const sizeConsumption = sizeConsumptionFromNorms(row.sizeNorms);
+      const sizeWaste = sizeWasteFromNorms(row.sizeNorms);
       const consumptions = applies.map((code) =>
         consumptionForSize(Number(row.consumptionPerUnit), sizeConsumption, code),
       );
-      const shared = applies.length === sizeCodes.length && consumptions.every((value) => value === consumptions[0]);
+      const wastes = applies.map((code) => wasteForSize(baseWaste, sizeWaste, code));
+      const shared =
+        applies.length === sizeCodes.length &&
+        consumptions.every((value) => value === consumptions[0]) &&
+        wastes.every((value) => value === wastes[0]);
       if (shared) {
         return [
           {
@@ -136,33 +267,29 @@ export function buildCalcFromProduct(
             groupKey: row.materialId,
             sizeCode: null,
             consumptionPerUnit: consumptions[0] ?? Number(row.consumptionPerUnit),
-            wastePercent: waste,
+            wastePercent: wastes[0] ?? baseWaste,
             purchasePrice: price,
             applySizeCoeff: true,
           },
         ];
       }
-      return applies.map((code, index) => ({
-        id: `${row.id}:${code}`,
-        groupKey: row.materialId,
-        sizeCode: code,
-        consumptionPerUnit: consumptions[index]!,
-        wastePercent: waste,
-        purchasePrice: price,
-        applySizeCoeff: true,
-      }));
+      return applies.map((code, index) => {
+        const hasExplicitNorm = sizeConsumption[code] != null;
+        return {
+          id: `${row.id}:${code}`,
+          groupKey: row.materialId,
+          sizeCode: code,
+          consumptionPerUnit: consumptions[index]!,
+          wastePercent: wastes[index]!,
+          purchasePrice: price,
+          // Explicit per-size norm already embeds oversize uplift — don't apply coeff again.
+          applySizeCoeff: !hasExplicitNorm,
+        };
+      });
     }),
     operations: product.operations.flatMap((row): OperationLineInput[] => {
       const applies = effectiveSizeCodes(sizeCodesFromScopes(row.sizeScopes), sizeCodes);
-      const fallbackRate =
-        row.rateOverride != null
-          ? Number(row.rateOverride)
-          : row.operation.baseRate != null
-            ? Number(row.operation.baseRate)
-            : null;
-      const unitRate = isCutOperationName(row.operation.nameUk)
-        ? resolveCutUnitRateForProduct(product, quantity, fallbackRate ?? 0)
-        : fallbackRate;
+      const unitRate = resolveProductOperationUnitRate(row, quantity, product);
       const payload = {
         method: row.operation.calculationMethod as "UNIT_RATE" | "SHIFT_OUTPUT" | "QUANTITY_TIER",
         unitRate,
@@ -187,7 +314,10 @@ export function buildCalcFromProduct(
     }),
     decorations: product.decorations.map((row) => ({
       id: row.id,
-      setupCost: Number(row.decorationMethod.setupCost),
+      setupCost:
+        row.setupCostOverride != null
+          ? Number(row.setupCostOverride)
+          : Number(row.decorationMethod.setupCost),
       unitRate: Number(row.decorationMethod.unitRate),
     })),
     additionalCosts: product.additionalCosts.map((row) => ({
@@ -242,8 +372,9 @@ export function buildCalcFromOrderItem(
     pricingMethod: "MARGIN" | "MARKUP";
     targetRatePercent: number;
     manualSellingPricePerUnit?: number | null;
+    sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>;
   },
-  options?: { cutRate?: CutRateContext | null },
+  options?: ResolveOrderOpRateOptions,
 ): CalculationResult {
   const totalQuantity = orderItemTotalQuantity(item);
   const fabricDelivery = Number(item.fabricDeliveryAmount ?? 0);
@@ -257,29 +388,37 @@ export function buildCalcFromOrderItem(
       ? [{ id: "fabric-delivery", amount: fabricDelivery, isPerUnit: false }]
       : []),
   ];
+  const sizeRules = pricing.sizeRules;
 
   return calculateCosting({
-    sizes: item.sizes.map((s) => ({
-      sizeCode: s.sizeCode,
-      quantity: s.quantity,
-      materialCoeff: 1,
-      operationCoeff: 1,
-    })),
-    materials: item.materials.map((row) => ({
-      id: row.id,
-      groupKey: row.materialId ?? row.nameSnapshot ?? row.id,
-      sizeCode: row.sizeCode ?? null,
-      consumptionPerUnit: Number(row.consumptionPerUnit),
-      wastePercent: Number(row.wastePercent),
-      purchasePrice: Number(row.purchasePrice),
-      applySizeCoeff: true,
-    })),
+    sizes: item.sizes.map((s) => {
+      const coeffs = resolveSizeCoeffs(s.sizeCode, sizeRules);
+      return {
+        sizeCode: s.sizeCode,
+        quantity: s.quantity,
+        materialCoeff: coeffs.materialCoeff,
+        operationCoeff: coeffs.operationCoeff,
+      };
+    }),
+    materials: item.materials.map((row) => {
+      const sizeCode = row.sizeCode ?? null;
+      return {
+        id: row.id,
+        groupKey: row.materialId ?? row.nameSnapshot ?? row.id,
+        sizeCode,
+        consumptionPerUnit: Number(row.consumptionPerUnit),
+        wastePercent: Number(row.wastePercent),
+        purchasePrice: Number(row.purchasePrice),
+        // Size-specific oversize lines should already carry absolute consumption.
+        applySizeCoeff: !(sizeCode != null && isOversizeCode(sizeCode)),
+      };
+    }),
     operations: item.operations.map((row) => ({
       id: row.id,
       groupKey: row.operationId ?? row.nameSnapshot ?? row.id,
       sizeCode: row.sizeCode ?? null,
       method: row.calculationMethod,
-      unitRate: resolveOrderOperationUnitRate(row, totalQuantity, options?.cutRate),
+      unitRate: resolveOrderOperationUnitRate(row, totalQuantity, options),
       shiftCost: row.shiftCost != null ? Number(row.shiftCost) : null,
       standardOutput: row.standardOutput != null ? Number(row.standardOutput) : null,
       applySizeCoeff: true,

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import { ALL_SIZES, type SizeRef, type SizeScope } from "@/lib/size-bom";
+import { isOversizeCode } from "@/lib/size-coeffs";
 
 export function SizeScopeTabs({
   sizes,
@@ -35,10 +36,12 @@ export function SizeScopeTabs({
       {sizes.map((size) => {
         const active = value === size.code;
         const mark = customized?.has(size.code);
+        const oversize = isOversizeCode(size.code);
         return (
           <button
             key={size.code}
             type="button"
+            title={oversize ? "Крупний розмір: автонадбавка в розрахунку" : undefined}
             onClick={() => onChange(size.code)}
             className={cn(
               "inline-flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-[12.5px] font-semibold transition-colors",
@@ -48,6 +51,9 @@ export function SizeScopeTabs({
             )}
           >
             {size.nameUk ?? size.code}
+            {oversize ? (
+              <span className="text-[10px] font-medium text-[var(--color-warning-text)]">+</span>
+            ) : null}
             {mark ? (
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-warning-text)]" aria-hidden />
             ) : null}

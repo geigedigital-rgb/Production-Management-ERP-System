@@ -54,6 +54,7 @@ async function upsertMaterial(
     metersPerRoll?: number | null;
     /** Extra name variants to rematch (e.g. old "name · dens · supplier"). */
     legacyNames?: string[];
+    availableColors?: string[];
   },
 ) {
   const legacyOnly = [
@@ -143,6 +144,7 @@ async function upsertMaterial(
         colorOrAttribute: data.colorOrAttribute ?? null,
         note: data.note ?? null,
         status: data.status ?? "ACTIVE",
+        availableColors: data.availableColors ?? [],
         ...fabricFields,
       },
       include: { unitOfMeasure: true },
@@ -160,6 +162,7 @@ async function upsertMaterial(
       colorOrAttribute: data.colorOrAttribute ?? null,
       note: data.note ?? null,
       status: data.status ?? "ACTIVE",
+      availableColors: data.availableColors ?? [],
       ...fabricFields,
     },
     include: { unitOfMeasure: true },
@@ -426,15 +429,8 @@ async function main() {
       name: "Андрій Менеджер",
       role: "MANAGER",
       isActive: true,
-      permissions: [
-        "manageOrders",
-        "manageClients",
-        "createInlineCatalog",
-        "adjustPriceInRange",
-        "saveVersions",
-        "generateQuotations",
-        "changeOrderStatus",
-      ],
+      // Compose-only: orders + clients. Calc / catalogs / costs — admin.
+      permissions: ["manageOrders", "manageClients"],
     },
     create: {
       email: "manager@example.com",
@@ -442,15 +438,7 @@ async function main() {
       name: "Андрій Менеджер",
       passwordHash,
       role: "MANAGER",
-      permissions: [
-        "manageOrders",
-        "manageClients",
-        "createInlineCatalog",
-        "adjustPriceInRange",
-        "saveVersions",
-        "generateQuotations",
-        "changeOrderStatus",
-      ],
+      permissions: ["manageOrders", "manageClients"],
     },
   });
 
@@ -480,6 +468,8 @@ async function main() {
     { code: "L", nameUk: "L", sortOrder: 4 },
     { code: "XL", nameUk: "XL", sortOrder: 5 },
     { code: "XXL", nameUk: "XXL", sortOrder: 6 },
+    { code: "3XL", nameUk: "3XL", sortOrder: 7 },
+    { code: "4XL", nameUk: "4XL", sortOrder: 8 },
   ];
   for (const size of sizes) {
     await prisma.size.upsert({
@@ -657,17 +647,24 @@ async function main() {
   await prisma.sizeRule.createMany({
     data: [
       {
-        sizeCode: "XL",
-        materialCoeff: 1.05,
-        operationCoeff: 1.02,
+        sizeCode: "XXL",
+        materialCoeff: 1.15,
+        operationCoeff: 1.2,
         surchargePercent: 0,
         appliesTo: "SELECTED",
       },
       {
-        sizeCode: "XXL",
-        materialCoeff: 1.1,
-        operationCoeff: 1.05,
-        surchargePercent: 3,
+        sizeCode: "3XL",
+        materialCoeff: 1.15,
+        operationCoeff: 1.2,
+        surchargePercent: 0,
+        appliesTo: "SELECTED",
+      },
+      {
+        sizeCode: "4XL",
+        materialCoeff: 1.15,
+        operationCoeff: 1.2,
+        surchargePercent: 0,
         appliesTo: "SELECTED",
       },
     ],

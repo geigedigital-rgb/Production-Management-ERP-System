@@ -55,3 +55,18 @@ export async function assertSessionPermission(permission: Permission): Promise<U
 export function accessHas(access: UserAccess | null, permission: Permission): boolean {
   return access?.permissions.includes(permission) ?? false;
 }
+
+/** After DRAFT, BOM edits require calc rights (admin). Managers assemble only in DRAFT. */
+export function canEditOrderComposition(
+  access: UserAccess | null,
+  orderStatus: string,
+): boolean {
+  if (!access) return false;
+  if (!accessHas(access, "manageOrders")) return false;
+  if (orderStatus === "DRAFT") return true;
+  return accessHas(access, "saveVersions");
+}
+
+export function canViewOrderCosts(access: UserAccess | null): boolean {
+  return accessHas(access, "viewProductCosts") || accessHas(access, "saveVersions");
+}

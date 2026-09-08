@@ -23,7 +23,7 @@ import {
   type MaterialCatalogOption,
   type OperationCatalogOption,
 } from "@/components/orders/DraftCompositionEditor";
-import { syncDraftMaterialPrices } from "@/lib/draft-composition";
+import { syncDraftMaterialPrices, compositionMissingMaterialChoices, isPackagingSku } from "@/lib/draft-composition";
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
 import {
   IconAlert,
@@ -34,6 +34,15 @@ import {
 } from "@/components/ui/Icons";
 import { createOrderAction } from "@/server/domains/orders/actions";
 import { cn, formatMoneyUah } from "@/lib/utils";
+import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
+import {
+  OrderChevronPipeline,
+  OrderDetailSection,
+  OrderFactsStrip,
+  OrderWorkspaceHeader,
+  OrderWorkspaceShell,
+} from "@/components/orders/OrderWorkspaceLayout";
+import { IconClients } from "@/components/ui/Icons";
 
 type ClientOption = { id: string; label: string };
 type SizeOption = { id: string; label: string; code?: string };
@@ -79,6 +88,7 @@ export function OrderCreateForm({
   defaultTargetMargin = 30,
   pricingMethod = "MARGIN",
   companyCostMode = "NET",
+  fabricGlobals,
   initialClientId,
   initialProductId,
 }: {
@@ -92,6 +102,7 @@ export function OrderCreateForm({
   defaultTargetMargin?: number;
   pricingMethod?: "MARGIN" | "MARKUP";
   companyCostMode?: MaterialCostVatMode;
+  fabricGlobals?: { usdUahRate: number; fabricCargoUsdPerKg: number };
   initialClientId?: string;
   initialProductId?: string;
 }) {
@@ -102,6 +113,7 @@ export function OrderCreateForm({
   const [operationCatalog, setOperationCatalog] = useState(initialOperationCatalog);
   const [decorationCatalog, setDecorationCatalog] = useState(initialDecorationCatalog);
   const [clientId, setClientId] = useState(initialClientId || "");
+  const [deadline, setDeadline] = useState("");
   const [targetMargin, setTargetMargin] = useState(String(defaultTargetMargin));
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [stagingProductId, setStagingProductId] = useState(initialProductId || "");
@@ -132,11 +144,41 @@ export function OrderCreateForm({
     ? stagingProduct.sizes
     : [{ code: "ONE", nameUk: "Без розміру" }];
 
-  const stagingTotal = stagingSizes.reduce((sum, size) => sum + (stagingQty[size.code] || 0), 0);
-  const stagingReady = Boolean(stagingProductId && stagingComposition && stagingTotal > 0);
+  const stagingTotalQty =
+    stagingSizes.reduce((sum, size) => sum + (stagingQty[size.code] || 0), 0) +
+    (stagingQty.ONE && !stagingSizes.some((size) => size.code === "ONE")
+      ? stagingQty.ONE
+      : 0);
+  const stagingUsesTotalOnly =
+    (stagingQty.ONE ?? 0) > 0 &&
+    stagingSizes.every((size) => size.code === "ONE" || !(stagingQty[size.code] > 0));
+  const stagingEffectiveSizes = stagingUsesTotalOnly
+    ? [{ code: "ONE", nameUk: "Тираж (орієнтовно)" }]
+    : stagingSizes;
+  const stagingTotal = stagingUsesTotalOnly
+    ? stagingQty.ONE || 0
+    : stagingTotalQty;
+  const stagingIncompleteMaterials =
+    stagingComposition && stagingTotal > 0
+      ? compositionMissingMaterialChoices(stagingComposition, {
+          enableLinePricingControls: true,
+          companyCostMode,
+        })
+      : [];
+  const stagingReady = Boolean(
+    stagingProductId &&
+      stagingComposition &&
+      stagingTotal > 0 &&
+      stagingIncompleteMaterials.length === 0,
+  );
 
   const linesQty = lines.reduce(
-    (sum, line) => sum + line.sizes.reduce((s, size) => s + (line.quantities[size.code] || 0), 0),
+    (sum, line) =>
+      sum +
+      line.sizes.reduce((s, size) => s + (line.quantities[size.code] || 0), 0) +
+      (line.quantities.ONE && !line.sizes.some((size) => size.code === "ONE")
+        ? line.quantities.ONE
+        : 0),
     0,
   );
   const estimate = lines.reduce((sum, line) => {
@@ -172,12 +214,16 @@ export function OrderCreateForm({
 
   function addOrSaveStaging() {
     if (!stagingProduct || !stagingComposition || stagingTotal <= 0) return;
+    if (stagingIncompleteMaterials.length > 0) {
+      setError("Підтвердіть параметри всіх матеріалів (колір, ПДВ тощо) перед додаванням позиції.");
+      return;
+    }
     const payload: DraftLine = {
       key: editingKey ?? newKey(),
       productId: stagingProduct.id,
       label: stagingProduct.label,
       quantities: { ...stagingQty },
-      sizes: stagingSizes.map((size) => ({ ...size })),
+      sizes: stagingEffectiveSizes.map((size) => ({ ...size })),
       comment: stagingComment.trim(),
       materialsCount: stagingComposition.materials.length,
       operationsCount: stagingComposition.operations.length,
@@ -239,6 +285,16 @@ export function OrderCreateForm({
             sizeCodes: row.sizeCodes ?? null,
             sizeConsumption: row.sizeConsumption,
             purchasePrice: row.price,
+            colorSnapshot: isPackagingSku(row)
+              ? null
+              : row.lineColor?.trim() || null,
+            cargoUsdPerKg: row.cargoUsdPerKg ?? null,
+            usdUahRate: row.usdUahRate ?? null,
+            fabricDeliveryManual: Boolean(row.fabricDeliveryManual),
+            fabricDeliveryAmount:
+              row.fabricDeliveryManual && row.fabricDeliveryAmount != null
+                ? Number(row.fabricDeliveryAmount)
+                : null,
           })),
           operations: line.composition.operations.map((row) => ({
             operationId: row.operationId,
@@ -246,6 +302,8 @@ export function OrderCreateForm({
           })),
           decorations: line.composition.decorations.map((row) => ({
             decorationMethodId: row.decorationMethodId,
+            setupCost: row.setupCost,
+            unitRate: row.unitRate,
           })),
         },
       })),
@@ -271,12 +329,61 @@ export function OrderCreateForm({
   }
 
   return (
-    <form id="order-create-form" action={onSubmit} className="pb-16">
+    <form id="order-create-form" action={onSubmit} className="space-y-4 pb-16">
+      <OrderWorkspaceShell
+        header={
+          <OrderWorkspaceHeader
+            title="Нове замовлення"
+            badge={<OrderStatusBadge status="DRAFT" dot />}
+            subtitle="Зберіть позиції, підтвердіть склад і створіть замовлення"
+            meta={
+              selectedClient ? (
+                <p className="text-[13px] text-[var(--color-primary-700)]">{selectedClient.label}</p>
+              ) : (
+                <p className="text-[13px] text-[var(--color-text-tertiary)]">Клієнт ще не обраний</p>
+              )
+            }
+          />
+        }
+        facts={
+          <OrderFactsStrip
+            facts={[
+              {
+                label: "Клієнт",
+                value: selectedClient?.label ?? "—",
+              },
+              {
+                label: "Дедлайн",
+                value: deadline ? new Date(deadline).toLocaleDateString("uk-UA") : "—",
+              },
+              {
+                label: "Позиції",
+                value: String(lines.length),
+              },
+              {
+                label: "Кількість",
+                value: `${linesQty} шт`,
+              },
+              {
+                label: "Орієнтир",
+                value: estimate > 0 ? formatMoneyUah(estimate) : "—",
+              },
+              {
+                label: "Маржа",
+                value: `${targetMargin.replace(",", ".")}%`,
+              },
+            ]}
+          />
+        }
+        pipeline={<OrderChevronPipeline status="DRAFT" nextTitle="1/5 · Оберіть клієнта і додайте позиції" />}
+      />
+
       <SplitWorkspace
         className="xl:grid-cols-[minmax(0,1fr)_minmax(200px,232px)]"
         left={
           <>
-            <div className="space-y-4 rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
+            <OrderDetailSection icon={<IconClients size={16} />} title="Дані замовлення">
+            <div className="space-y-4">
               <FormGroup
                 label="Клієнт"
                 columns={1}
@@ -310,7 +417,13 @@ export function OrderCreateForm({
 
               <FormGroup label="Терміни" columns={2}>
                 <Input name="title" label="Назва запиту" placeholder="Необовʼязково" />
-                <Input name="deadline" label="Дедлайн" type="date" />
+                <Input
+                  name="deadline"
+                  label="Дедлайн"
+                  type="date"
+                  value={deadline}
+                  onChange={(event) => setDeadline(event.target.value)}
+                />
               </FormGroup>
 
               <FormGroup label="Маржа замовлення" columns={1}>
@@ -348,6 +461,7 @@ export function OrderCreateForm({
                 </div>
               </FormGroup>
             </div>
+            </OrderDetailSection>
 
             {stagingProduct && stagingComposition ? (
               <DraftCompositionEditor
@@ -361,9 +475,17 @@ export function OrderCreateForm({
                 decorationOptions={decorationCatalog}
                 unitOptions={unitOptions}
                 companyCostMode={companyCostMode}
+                fabricGlobals={fabricGlobals}
                 onMaterialCatalogAdd={(option) =>
                   setMaterialCatalog((prev) =>
                     prev.some((row) => row.id === option.id) ? prev : [...prev, option],
+                  )
+                }
+                onMaterialCatalogColorsChange={(materialId, colors) =>
+                  setMaterialCatalog((prev) =>
+                    prev.map((row) =>
+                      row.id === materialId ? { ...row, availableColors: colors } : row,
+                    ),
                   )
                 }
                 onOperationCatalogAdd={(option) =>

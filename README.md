@@ -54,3 +54,27 @@ Default seed users:
 ## Spec
 
 See [production_management_service_base_spec.md](./production_management_service_base_spec.md).
+
+## Deploy (Railway)
+
+1. Service connects to this GitHub repo (`main`).
+2. Set Variables (see `.env.example`):
+
+| Variable | Notes |
+|----------|--------|
+| `DATABASE_URL` | Postgres connection (Supabase pooled or Railway Postgres) |
+| `DIRECT_URL` | Same or direct (for `prisma migrate deploy`) |
+| `AUTH_SECRET` | `openssl rand -base64 32` |
+| `AUTH_URL` | Public HTTPS URL of the Railway service |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | For product image uploads |
+| `APP_TIMEZONE` | `Europe/Kyiv` |
+
+3. Build: `npm run build` (`prisma generate` + `next build`).
+4. Start: `npm run start` (`prisma migrate deploy` + `next start`).
+5. After first successful deploy, run seed once if the DB is empty:
+
+```bash
+railway run npm run db:seed
+```

@@ -92,3 +92,55 @@ export async function updateCompanySettingsAction(formData: FormData) {
   revalidatePath("/settings/company");
   return { ok: true as const };
 }
+
+/** Company-wide XXL / 3XL / 4XL uplift vs base norms (+% materials / +% operations). */
+export async function updateOversizeCoeffsAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const materialPct = Number(formData.get("materialPct"));
+  const operationPct = Number(formData.get("operationPct"));
+  if (
+    Number.isNaN(materialPct) ||
+    Number.isNaN(operationPct) ||
+    materialPct < 0 ||
+    operationPct < 0 ||
+    materialPct > 200 ||
+    operationPct > 200
+  ) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  const { OVERSIZE_CODES, pctToCoeff } = await import("@/lib/size-coeffs");
+  const materialCoeff = pctToCoeff(materialPct);
+  const operationCoeff = pctToCoeff(operationPct);
+
+  for (const sizeCode of OVERSIZE_CODES) {
+    const existing = await prisma.sizeRule.findFirst({
+      where: { sizeCode, status: "ACTIVE" },
+    });
+    if (existing) {
+      await prisma.sizeRule.update({
+        where: { id: existing.id },
+        data: { materialCoeff, operationCoeff },
+      });
+    } else {
+      await prisma.sizeRule.create({
+        data: {
+          sizeCode,
+          materialCoeff,
+          operationCoeff,
+          surchargePercent: 0,
+          appliesTo: "SELECTED",
+          status: "ACTIVE",
+        },
+      });
+    }
+  }
+
+  revalidatePath("/products");
+  revalidatePath("/orders");
+  revalidatePath("/settings/pricing");
+  return { ok: true as const };
+}

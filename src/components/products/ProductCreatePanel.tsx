@@ -182,7 +182,9 @@ export function ProductCreatePanel({
             ? "Фото має бути до 5 МБ."
             : result.error === "TYPE"
               ? "Потрібен файл зображення."
-              : "Не вдалося завантажити фото. Можна вставити посилання нижче.",
+              : "message" in result && result.message
+                ? `Не вдалося завантажити фото: ${result.message}. Можна вставити посилання нижче.`
+                : "Не вдалося завантажити фото. Можна вставити посилання нижче.",
         );
         return;
       }
@@ -445,9 +447,25 @@ export function ProductCreatePanel({
               operationOptions={operationCatalog}
               decorationOptions={decorationCatalog}
               unitOptions={unitOptions}
+              cutRatePreview={
+                hasCutOperation
+                  ? {
+                      optimalQty: cutOptimalQty.trim() ? Number(cutOptimalQty) : null,
+                      tiers: cutTiers,
+                    }
+                  : undefined
+              }
+              cutRateHint="тарифи у блоці «Крій за тиражем» нижче"
               onMaterialCatalogAdd={(option) =>
                 setMaterialCatalog((prev) =>
                   prev.some((row) => row.id === option.id) ? prev : [...prev, option],
+                )
+              }
+              onMaterialCatalogColorsChange={(materialId, colors) =>
+                setMaterialCatalog((prev) =>
+                  prev.map((row) =>
+                    row.id === materialId ? { ...row, availableColors: colors } : row,
+                  ),
                 )
               }
               onOperationCatalogAdd={(option) =>

@@ -38,6 +38,7 @@ export type OperationsTableRow = {
   note: string;
   unitCostLabel: string;
   unitCostValue: number | null;
+  rateTiers: Array<{ minQuantity: number; ratePerUnit: number }>;
 };
 
 type SortKey = "name" | "method" | "shiftCost" | "output" | "unitCost";
@@ -128,6 +129,7 @@ export function OperationsTable({
                 shiftCost: row.shiftCost,
                 standardOutputPerShift: row.standardOutput,
                 note: row.note,
+                rateTiers: row.rateTiers,
               };
               return (
                 <TR

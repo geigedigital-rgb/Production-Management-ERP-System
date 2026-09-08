@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { IconClose, IconSearch } from "@/components/ui/Icons";
@@ -34,26 +34,57 @@ export function SearchField({
   paramKey = "q",
   placeholder = "Пошук",
   className,
+  debounceMs = 400,
 }: {
   paramKey?: string;
   placeholder?: string;
   className?: string;
+  debounceMs?: number;
 }) {
   const { setParam, searchParams, pending } = useParamWriter();
-  const initial = searchParams.get(paramKey) ?? "";
-  const [value, setValue] = useState(initial);
-  const [syncedInitial, setSyncedInitial] = useState(initial);
+  const inputRef = useRef<HTMLInputElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** URL value we pushed — ignore echo sync while it matches. */
+  const pendingUrlValueRef = useRef<string | null>(null);
 
-  if (syncedInitial !== initial) {
-    setSyncedInitial(initial);
-    setValue(initial);
-  }
+  const [value, setValue] = useState(() => searchParams.get(paramKey) ?? "");
+
+  useEffect(() => {
+    const fromUrl = searchParams.get(paramKey) ?? "";
+
+    if (pendingUrlValueRef.current !== null && fromUrl === pendingUrlValueRef.current) {
+      pendingUrlValueRef.current = null;
+      return;
+    }
+
+    if (document.activeElement === inputRef.current) return;
+
+    setValue(fromUrl);
+  }, [paramKey, searchParams]);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   const push = (next: string) => {
     setValue(next);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setParam(paramKey, next.trim() || null), 300);
+    timer.current = setTimeout(() => {
+      const trimmed = next.trim();
+      pendingUrlValueRef.current = trimmed;
+      setParam(paramKey, trimmed || null);
+    }, debounceMs);
+  };
+
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+    setValue("");
+    pendingUrlValueRef.current = "";
+    setParam(paramKey, null);
+    inputRef.current?.focus();
   };
 
   return (
@@ -70,6 +101,7 @@ export function SearchField({
         />
       )}
       <input
+        ref={inputRef}
         value={value}
         onChange={(event) => push(event.target.value)}
         placeholder={placeholder}
@@ -83,10 +115,7 @@ export function SearchField({
         <button
           type="button"
           aria-label="Очистити пошук"
-          onClick={() => {
-            setValue("");
-            setParam(paramKey, null);
-          }}
+          onClick={clear}
           className="absolute top-1/2 right-2 -translate-y-1/2 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
         >
           <IconClose size={14} />

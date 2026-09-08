@@ -22,6 +22,7 @@ export default async function MaterialsSettingsPage({
 }) {
   const access = await getCurrentUserAccess();
   if (!access) redirect("/login");
+  if (!accessHas(access, "manageCatalogs")) redirect("/overview");
 
   const { q, type, kind } = await searchParams;
 

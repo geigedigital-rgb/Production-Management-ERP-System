@@ -127,11 +127,13 @@ export function StatusBadge({
   children,
   tone = "neutral",
   dot,
+  pulse,
   title,
 }: {
   children: React.ReactNode;
   tone?: "neutral" | "accent" | "success" | "danger" | "warning" | "info";
   dot?: boolean;
+  pulse?: boolean;
   /** Native hover tooltip */
   title?: string;
 }) {
@@ -141,6 +143,7 @@ export function StatusBadge({
       className={cn(
         "inline-flex items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-badge)] border px-2 py-0.5 text-[11.5px] font-medium",
         title && "cursor-help",
+        pulse && "animate-choice-pulse",
         tone === "neutral" &&
           "border-[var(--color-border)] bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)]",
         tone === "accent" &&

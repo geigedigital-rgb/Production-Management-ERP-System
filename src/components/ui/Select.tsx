@@ -15,7 +15,13 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { IconCheck, IconChevronDown, IconSearch } from "@/components/ui/Icons";
 
-export type SelectOption = { value: string; label: string; disabled?: boolean };
+export type SelectOption = {
+  value: string;
+  label: string;
+  /** Secondary line in the dropdown (e.g. material composition). */
+  description?: string;
+  disabled?: boolean;
+};
 
 function labelFromNode(node: React.ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
@@ -31,7 +37,14 @@ function optionsFromChildren(children: React.ReactNode): SelectOption[] {
   const options: SelectOption[] = [];
   Children.forEach(children, (child) => {
     if (child == null || typeof child === "boolean") return;
-    if (!isValidElement<{ value?: string | number; disabled?: boolean; children?: React.ReactNode }>(child)) {
+    if (
+      !isValidElement<{
+        value?: string | number;
+        disabled?: boolean;
+        children?: React.ReactNode;
+        "data-description"?: string;
+      }>(child)
+    ) {
       return;
     }
     if (child.type === Fragment) {
@@ -39,9 +52,11 @@ function optionsFromChildren(children: React.ReactNode): SelectOption[] {
       return;
     }
     if (child.type !== "option") return;
+    const description = child.props["data-description"]?.trim() || undefined;
     options.push({
       value: String(child.props.value ?? ""),
       label: labelFromNode(child.props.children),
+      description,
       disabled: Boolean(child.props.disabled),
     });
   });
@@ -140,9 +155,11 @@ export function Select({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return options;
-    return options.filter(
-      (option) => option.value !== "" && option.label.toLowerCase().includes(q),
-    );
+    return options.filter((option) => {
+      if (option.value === "") return false;
+      const haystack = `${option.label} ${option.description ?? ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
   }, [options, query]);
 
   function commit(next: string) {
@@ -199,11 +216,15 @@ export function Select({
     if (!open) return;
     const selectedIdx = visible.findIndex((option) => option.value === selectedValue);
     setActiveIndex(selectedIdx >= 0 ? selectedIdx : 0);
+  }, [open, selectedValue, visible]);
+
+  useEffect(() => {
+    if (!open) return;
     requestAnimationFrame(() => {
       if (withSearch) searchRef.current?.focus();
       else listRef.current?.focus();
     });
-  }, [open, selectedValue, withSearch]);
+  }, [open, withSearch]);
 
   useEffect(() => {
     if (!open || activeIndex < 0) return;
@@ -315,7 +336,21 @@ export function Select({
                         if (!option.disabled) commit(option.value);
                       }}
                     >
-                      <span className="min-w-0 truncate">{option.label}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{option.label}</span>
+                        {option.description ? (
+                          <span
+                            className={cn(
+                              "mt-0.5 block truncate text-[11.5px] font-normal",
+                              isSelected
+                                ? "text-[var(--color-primary-700)]/80"
+                                : "text-[var(--color-text-quiet)]",
+                            )}
+                          >
+                            {option.description}
+                          </span>
+                        ) : null}
+                      </span>
                       {isSelected && !isPlaceholder ? (
                         <IconCheck size={14} className="shrink-0 text-[var(--color-primary-700)]" />
                       ) : null}
@@ -388,6 +423,9 @@ export function Select({
 
       {error ? <span className="text-[12px] text-[var(--color-danger-text)]">{error}</span> : null}
       {!error && hint ? <span className="type-caption">{hint}</span> : null}
+      {!error && !hint && selected?.description ? (
+        <span className="type-caption">{selected.description}</span>
+      ) : null}
       {menu}
     </div>
   );

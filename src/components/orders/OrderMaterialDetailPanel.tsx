@@ -9,9 +9,21 @@ import { Select } from "@/components/ui/Field";
 import { Banner } from "@/components/ui/Banner";
 import { formatMoneyUah, formatUnit } from "@/lib/utils";
 import {
+  effectiveOversizeConsumption,
+  isOversizeCode,
+  oversizeMaterialPct,
+  oversizeUpliftCaption,
+} from "@/lib/size-coeffs";
+import {
+  fabricPricingModeLabel,
+  resolveOrderFabricPurchasePrice,
+} from "@/lib/fabric-pricing";
+import {
   getOrderMaterialDetailAction,
   updateOrderMaterialTermsAction,
 } from "@/server/domains/orders/actions";
+import { SupplierColorFields } from "@/components/catalog/SupplierColorFields";
+import { reconcileColorForSupplier } from "@/lib/supplier-colors";
 
 type MaterialDetail = NonNullable<
   Extract<Awaited<ReturnType<typeof getOrderMaterialDetailAction>>, { ok: true }>["detail"]
@@ -31,13 +43,13 @@ function vatLabel(mode: VatMode) {
 function previewForSupplier(detail: MaterialDetail, supplierId: string): FabricPreview | null {
   if (!detail.isFabric) return null;
   if (supplierId) {
-    return detail.offers.find((offer) => offer.supplierId === supplierId) ?? detail.catalogPreview;
+    const offer = detail.offers.find((row) => row.supplierId === supplierId);
+    if (offer && "purchasePricePerMeter" in offer && typeof offer.purchasePricePerMeter === "number") {
+      return offer as unknown as FabricPreview;
+    }
+    return detail.catalogPreview ?? null;
   }
-  return detail.catalogPreview;
-}
-
-function priceForVat(preview: FabricPreview, vat: VatMode) {
-  return vat === "NET" ? preview.purchasePriceNet : preview.purchasePriceGross;
+  return detail.catalogPreview ?? null;
 }
 
 function deliveryFromCargo(
@@ -177,11 +189,13 @@ export function OrderMaterialDetailPanel({
   const [error, setError] = useState<string | null>(null);
 
   const [supplierId, setSupplierId] = useState("");
+  const [colorSnapshot, setColorSnapshot] = useState<string | null>(null);
   const [vatMode, setVatMode] = useState<VatMode>("NET");
   const [cargoUsdPerKg, setCargoUsdPerKg] = useState("");
   const [usdUahRate, setUsdUahRate] = useState("");
   const [deliveryManual, setDeliveryManual] = useState(false);
   const [deliveryAmount, setDeliveryAmount] = useState("");
+  const [thresholdOverride, setThresholdOverride] = useState("");
 
   useEffect(() => {
     if (!orderItemMaterialId) {
@@ -200,6 +214,7 @@ export function OrderMaterialDetailPanel({
       const loaded = result.detail;
       setDetail(loaded);
       setSupplierId(loaded.supplierId ?? "");
+      setColorSnapshot(loaded.colorSnapshot ?? null);
       if (loaded.isFabric && loaded.companyCostVatMode) {
         setVatMode(loaded.costVatOverride ?? loaded.companyCostVatMode);
       }
@@ -210,8 +225,13 @@ export function OrderMaterialDetailPanel({
         loaded.defaultUsdUahRate != null &&
         Math.abs(loaded.usdUahRate - loaded.defaultUsdUahRate) > 0.0001;
       setUsdUahRate(hasRateOverride ? String(loaded.usdUahRate) : "");
-      setDeliveryManual(loaded.fabricDeliveryManual);
-      setDeliveryAmount(String(loaded.fabricDeliveryAmount));
+      setDeliveryManual(Boolean(loaded.fabricDeliveryManual));
+      setDeliveryAmount(String(loaded.fabricDeliveryAmount ?? 0));
+      setThresholdOverride(
+        loaded.minWholesaleMetersOverride != null
+          ? String(loaded.minWholesaleMetersOverride)
+          : "",
+      );
     });
   }, [orderItemMaterialId]);
 
@@ -227,7 +247,35 @@ export function OrderMaterialDetailPanel({
         ? round1(metersNeeded / metersPerKg)
         : base.kgNeeded;
 
-    const purchasePrice = priceForVat(base, vatMode);
+    const overrideParsed = parseOptionalNumber(thresholdOverride);
+    const catalogThreshold = base.catalogMinWholesaleMeters ?? null;
+    const hasCut = Boolean(base.hasCutPrice ?? detail.hasCutPrice);
+    const hasWholesale = Boolean(
+      base.hasWholesalePrice ??
+        detail.hasWholesalePrice ??
+        ((base.wholesalePurchasePriceNet ?? base.wholesalePurchasePrice ?? 0) > 0),
+    );
+    const effectiveThreshold =
+      overrideParsed != null && overrideParsed > 0
+        ? overrideParsed
+        : hasCut && catalogThreshold != null && catalogThreshold > 0
+          ? catalogThreshold
+          : null;
+
+    const wholesaleForVat =
+      vatMode === "NET"
+        ? (base.wholesalePurchasePriceNet ?? base.wholesalePurchasePrice ?? 0)
+        : (base.wholesalePurchasePriceGross ?? base.wholesalePurchasePrice ?? 0);
+    const priced = resolveOrderFabricPurchasePrice({
+      metersNeeded,
+      wholesalePurchasePrice: wholesaleForVat,
+      cutPurchasePrice: base.cutPurchasePrice,
+      minWholesaleMeters: effectiveThreshold,
+    });
+    const purchasePrice = priced.purchasePrice;
+    const pricingMode = priced.pricingMode;
+    const pricingModeLabel = fabricPricingModeLabel(pricingMode);
+
     const cargoParsed = parseOptionalNumber(cargoUsdPerKg);
     const cargo =
       cargoParsed != null && cargoParsed >= 0
@@ -237,7 +285,7 @@ export function OrderMaterialDetailPanel({
     const rate =
       rateParsed != null && rateParsed > 0
         ? rateParsed
-        : detail.defaultUsdUahRate ?? detail.usdUahRate;
+        : (detail.defaultUsdUahRate ?? detail.usdUahRate ?? 0);
     const deliveryComputed = deliveryFromCargo(kgNeeded, cargo, rate);
     const materialPartyCost = Math.round(purchasePrice * metersNeeded * 100) / 100;
 
@@ -250,9 +298,15 @@ export function OrderMaterialDetailPanel({
       kgNeeded,
       deliveryComputed,
       materialPartyCost,
-      pricingModeLabel: base.pricingModeLabel,
+      pricingMode,
+      pricingModeLabel,
+      hasCutPrice: hasCut,
+      hasWholesalePrice: hasWholesale,
+      effectiveThreshold,
+      catalogMinWholesaleMeters: catalogThreshold,
+      thresholdIsOverride: overrideParsed != null && overrideParsed > 0,
     };
-  }, [detail, supplierId, vatMode, cargoUsdPerKg, usdUahRate]);
+  }, [detail, supplierId, vatMode, cargoUsdPerKg, usdUahRate, thresholdOverride]);
 
   useEffect(() => {
     if (!live || deliveryManual) return;
@@ -261,6 +315,21 @@ export function OrderMaterialDetailPanel({
 
   function handleSupplierChange(nextSupplierId: string) {
     setSupplierId(nextSupplierId);
+    if (detail) {
+      const offers = (detail.offers ?? []).map((offer) => ({
+        supplierId: offer.supplierId,
+        isPrimary: offer.isPrimary,
+        availableColors: ("availableColors" in offer ? offer.availableColors : []) ?? [],
+      }));
+      setColorSnapshot(
+        reconcileColorForSupplier({
+          color: colorSnapshot,
+          supplierId: nextSupplierId || null,
+          offers,
+          materialFallback: detail.materialAvailableColors ?? [],
+        }),
+      );
+    }
     if (!detail?.isFabric) return;
     const preview = previewForSupplier(detail, nextSupplierId);
     if (preview?.cargoUsdPerKg != null) {
@@ -270,14 +339,23 @@ export function OrderMaterialDetailPanel({
 
   function apply() {
     if (!detail) return;
-    if (!detail.isFabric) {
-      onClose();
-      return;
-    }
     const formData = new FormData();
     formData.set("orderId", orderId);
     formData.set("id", detail.id);
     formData.set("supplierId", supplierId);
+    formData.set("colorSnapshot", colorSnapshot ?? "");
+    if (!detail.isFabric) {
+      startTransition(async () => {
+        const result = await updateOrderMaterialTermsAction(formData);
+        if (!result.ok) {
+          setError("Не вдалося зберегти постачальника / колір.");
+          return;
+        }
+        router.refresh();
+        onClose();
+      });
+      return;
+    }
     formData.set("cargoUsdPerKg", cargoUsdPerKg);
     formData.set("usdUahRate", usdUahRate);
     formData.set(
@@ -289,6 +367,7 @@ export function OrderMaterialDetailPanel({
       "fabricDeliveryAmount",
       deliveryManual ? deliveryAmount : String(live?.deliveryComputed ?? detail.fabricDeliveryComputed),
     );
+    formData.set("minWholesaleMetersOverride", thresholdOverride.trim());
     startTransition(async () => {
       const result = await updateOrderMaterialTermsAction(formData);
       if (!result.ok) {
@@ -335,26 +414,21 @@ export function OrderMaterialDetailPanel({
           {detail.isFabric && live ? (
             <>
               <Section title="Закупівля">
-                {detail.offers.length > 0 ? (
-                  <Select
-                    label="Постачальник"
-                    value={supplierId}
-                    disabled={locked}
-                    onChange={(event) => handleSupplierChange(event.target.value)}
-                  >
-                    <option value="">Каталог (основний)</option>
-                    {detail.offers.map((offer) => (
-                      <option key={offer.offerId} value={offer.supplierId}>
-                        {offer.supplierName}
-                        {offer.isPrimary ? " · основний" : ""}
-                      </option>
-                    ))}
-                  </Select>
-                ) : (
-                  <p className="type-caption">
-                    {detail.supplierName ?? "Постачальник не заданий у каталозі"}
-                  </p>
-                )}
+                <SupplierColorFields
+                  supplierId={supplierId || null}
+                  color={colorSnapshot}
+                  offers={(detail.offers ?? []).map((offer) => ({
+                    supplierId: offer.supplierId,
+                    supplierName: offer.supplierName,
+                    isPrimary: offer.isPrimary,
+                    availableColors:
+                      ("availableColors" in offer ? offer.availableColors : []) ?? [],
+                  }))}
+                  materialFallbackColors={detail.materialAvailableColors ?? []}
+                  disabled={locked || pending}
+                  onSupplierChange={(next) => handleSupplierChange(next ?? "")}
+                  onColorChange={setColorSnapshot}
+                />
 
                 <div className="space-y-1.5">
                   <span className="block text-[11px] font-medium text-[var(--color-text-tertiary)]">
@@ -370,7 +444,8 @@ export function OrderMaterialDetailPanel({
                     ]}
                   />
                   <p className="type-caption">
-                    За замовчуванням у компанії: {vatLabel(detail.companyCostVatMode)}
+                    За замовчуванням у компанії:{" "}
+                    {vatLabel(detail.companyCostVatMode ?? "NET")}
                   </p>
                 </div>
 
@@ -422,6 +497,130 @@ export function OrderMaterialDetailPanel({
                   {detail.consumption} {formatUnit(detail.unit)}/од. × (1 + {detail.waste}%) ×{" "}
                   {lineQuantity(detail)} шт = {live.metersNeeded} м
                 </p>
+                {(() => {
+                  const oversizeQty = Object.entries(detail.quantitiesBySize ?? {}).filter(
+                    ([code, qty]) => isOversizeCode(code) && qty > 0,
+                  );
+                  if (oversizeQty.length === 0) return null;
+                  const base = detail.consumption;
+                  const effective = effectiveOversizeConsumption(base);
+                  return (
+                    <div className="mt-2 space-y-1 rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2.5 py-2">
+                      <p className="text-[11.5px] font-medium text-[var(--color-text-secondary)]">
+                        Крупні розміри в тиражі
+                      </p>
+                      <p className="type-caption">
+                        База {base} {formatUnit(detail.unit)}/од. → XXL+ ≈ {effective}{" "}
+                        {formatUnit(detail.unit)}/од. (+{oversizeMaterialPct()}% у калькуляції).{" "}
+                        {oversizeUpliftCaption()}.
+                      </p>
+                      <p className="type-caption">
+                        {oversizeQty
+                          .map(([code, qty]) => `${code}: ${qty} шт`)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </Section>
+
+              <Section title="Гурт">
+                {(() => {
+                  const hasWholesale = Boolean(live.hasWholesalePrice);
+                  const hasCut = Boolean(live.hasCutPrice);
+                  const threshold = live.effectiveThreshold;
+                  const atWholesale =
+                    !hasCut ||
+                    live.pricingMode === "wholesale" ||
+                    (threshold != null && live.metersNeeded >= threshold);
+                  const modeLabel =
+                    !hasCut || atWholesale
+                      ? "Гурт (опт)"
+                      : live.pricingMode === "cut"
+                        ? "Відріз"
+                        : "Стандарт (до межі гурту)";
+                  const catalogHint =
+                    live.catalogMinWholesaleMeters != null
+                      ? `${live.catalogMinWholesaleMeters} м`
+                      : "не задана";
+
+                  return (
+                    <>
+                      <dl className="grid gap-2 text-[13px] sm:grid-cols-2">
+                        <div>
+                          <dt className="text-[var(--color-text-tertiary)]">Межа зараз</dt>
+                          <dd className="tabular font-medium">
+                            {threshold != null ? `${threshold} м` : "—"}
+                            {live.thresholdIsOverride ? (
+                              <span className="ml-1.5 text-[11px] font-normal text-[var(--color-text-tertiary)]">
+                                · для замовлення
+                              </span>
+                            ) : null}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[var(--color-text-tertiary)]">Режим зараз</dt>
+                          <dd className="font-medium">{modeLabel}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-[var(--color-text-tertiary)]">Витрата партії</dt>
+                          <dd className="tabular font-medium">{live.metersNeeded} м</dd>
+                        </div>
+                      </dl>
+
+                      {hasWholesale && !locked ? (
+                        <div className="space-y-1.5 border-t border-[var(--color-divider)] pt-3">
+                          <NumberField
+                            label="Межа витрати для цього замовлення"
+                            value={thresholdOverride}
+                            placeholder={
+                              live.catalogMinWholesaleMeters != null
+                                ? String(live.catalogMinWholesaleMeters)
+                                : "напр. 50"
+                            }
+                            suffix="м"
+                            step="0.1"
+                            disabled={pending}
+                            onChange={setThresholdOverride}
+                          />
+                          <p className="type-caption">
+                            Порожньо = з каталогу ({catalogHint}). Зміна лише для цієї позиції
+                            замовлення.
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {detail.wholesaleNote ? (
+                        <p className="type-caption">Примітка: {detail.wholesaleNote}</p>
+                      ) : null}
+                      {!hasWholesale ? (
+                        <p className="type-caption">
+                          Немає гуртової ціни в каталозі — межу задати неможливо.
+                        </p>
+                      ) : !hasCut ? (
+                        <p className="type-caption">
+                          У каталозі лише гуртова ціна — ₴/м не перемикається. Межу все одно можна
+                          зафіксувати для цього замовлення.
+                          {threshold != null
+                            ? live.metersNeeded >= threshold
+                              ? ` Витрата ≥ ${threshold} м.`
+                              : ` До межі ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м.`
+                            : ""}
+                        </p>
+                      ) : threshold != null ? (
+                        <p className="type-caption">
+                          {atWholesale
+                            ? `Витрата ≥ ${threshold} м — гуртова ціна й доставка за партією.`
+                            : `До гурту ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м.`}
+                        </p>
+                      ) : (
+                        <p className="type-caption">
+                          Задайте межу вище або в картці матеріалу (умови постачальника).
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               </Section>
 
               <Section title="Доставка">
@@ -518,8 +717,23 @@ export function OrderMaterialDetailPanel({
               </Section>
             </>
           ) : detail && !detail.isFabric ? (
-            <Section title="Матеріал">
-              <dl className="grid gap-2 text-[13px] sm:grid-cols-2">
+            <Section title="Постачальник і колір">
+              <SupplierColorFields
+                supplierId={supplierId || null}
+                color={colorSnapshot}
+                offers={(detail.offers ?? []).map((offer) => ({
+                  supplierId: offer.supplierId,
+                  supplierName: offer.supplierName,
+                  isPrimary: offer.isPrimary,
+                  availableColors:
+                    ("availableColors" in offer ? offer.availableColors : []) ?? [],
+                }))}
+                materialFallbackColors={detail.materialAvailableColors ?? []}
+                disabled={locked || pending}
+                onSupplierChange={(next) => handleSupplierChange(next ?? "")}
+                onColorChange={setColorSnapshot}
+              />
+              <dl className="mt-3 grid gap-2 text-[13px] sm:grid-cols-2">
                 <div>
                   <dt className="text-[var(--color-text-tertiary)]">Ціна закупівлі</dt>
                   <dd className="tabular font-semibold">{formatMoneyUah(detail.purchasePrice)}</dd>

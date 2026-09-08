@@ -39,11 +39,19 @@ yarn-error.log*
 .env*.local
 !.env.example
 
-# vercel
+# vercel / railway
 .vercel
+.railway
+
+# local catalog import dumps (keep prisma/catalog/data)
+/Каталог*.csv
+/Каталог*.xlsx
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
 /src/generated/prisma
+
+# local file upload fallback
+/public/uploads

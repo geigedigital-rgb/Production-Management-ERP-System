@@ -9,6 +9,7 @@ export type OrderItemCommercialInput = {
     unitRate: { toString(): string } | number;
   }>;
   product?: {
+    isBaseModel?: boolean;
     commercialPriceTiers: Array<{ minQuantity: number; pricePerUnit: unknown }>;
   } | null;
 };
@@ -21,7 +22,9 @@ export function commercialPriceForOrderItem(
   },
 ) {
   const tiers = commercialPriceTiersFromProduct(item.product);
-  if (tiers.length === 0 && options?.fallbackPricePerUnit == null) return null;
+  // Commercial layer applies only when the product has a fixed price ladder.
+  // Cost-calc selling already includes decorations in COGS — do not add them again.
+  if (tiers.length === 0) return null;
 
   return buildCommercialOrderLinePrice({
     quantity: item.totalQuantity,
@@ -63,16 +66,13 @@ export function draftLineFromItem(
   costCalc: CalculationResult,
   discountPercent?: number | null,
 ) {
-  const commercial = commercialPriceForOrderItem(item, {
-    discountPercent,
-    fallbackPricePerUnit: Number(costCalc.sellingPricePerUnit),
-  });
+  const commercial = commercialPriceForOrderItem(item, { discountPercent });
 
-  if (commercial) {
+  if (commercial?.fromPriceList) {
     const merged = mergeCommercialAndCost(commercial, costCalc, item.totalQuantity);
     return {
       ...merged,
-      fromPriceList: commercial.fromPriceList,
+      fromPriceList: true,
     };
   }
 

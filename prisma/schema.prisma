@@ -125,7 +125,10 @@ model Material {
   purchasePrice      Decimal      @db.Decimal(14, 4)
   defaultWastePercent Decimal     @default(0) @db.Decimal(8, 4)
   supplierCode       String?
+  /// Legacy free-text attribute (type/size etc.). Prefer structured fields when present.
   colorOrAttribute   String?
+  /// Colors available for this SKU (legacy fallback). Prefer MaterialSupplier.availableColors.
+  availableColors    String[]     @default([]) @map("available_colors")
   priceEffectiveDate DateTime?
   note               String?
   status             RecordStatus @default(ACTIVE)
@@ -179,6 +182,7 @@ model Supplier {
 
   materialOffers MaterialSupplier[]
   orderItemMaterials OrderItemMaterial[]
+  productMaterials ProductMaterial[]
 
   @@unique([nameUk])
   @@index([status])
@@ -204,6 +208,8 @@ model MaterialSupplier {
   metersPerRoll        Decimal? @db.Decimal(14, 4)
   minWholesaleMeters   Decimal? @db.Decimal(14, 4)
   wholesaleNote        String?
+  /// Colors available when this supplier is selected (product + order).
+  availableColors      String[] @default([]) @map("available_colors")
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -230,11 +236,26 @@ model Operation {
   updatedAt            DateTime            @updatedAt
 
   category Category? @relation(fields: [categoryId], references: [id])
+  rateTiers OperationRateTier[]
   productOperations ProductOperation[]
   orderItemOperations OrderItemOperation[]
 
   @@index([nameUk])
   @@map("operations")
+}
+
+/// Quantity ladder for QUANTITY_TIER operations (₴/unit when qty >= minQuantity).
+model OperationRateTier {
+  id           String  @id @default(cuid())
+  operationId  String
+  minQuantity  Int
+  ratePerUnit  Decimal @db.Decimal(14, 4)
+
+  operation Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@unique([operationId, minQuantity])
+  @@index([operationId])
+  @@map("operation_rate_tiers")
 }
 
 model DecorationMethod {
@@ -346,22 +367,30 @@ model ProductMaterial {
   consumptionPerUnit Decimal @db.Decimal(14, 6)
   wastePercent       Decimal? @db.Decimal(8, 4)
   note               String?
+  /// Preferred supplier for this BOM line (palette + terms).
+  supplierId         String?
+  /// Default color for this product line (from the chosen supplier palette).
+  colorSnapshot      String?
 
   product    Product                    @relation(fields: [productId], references: [id], onDelete: Cascade)
   material   Material                   @relation(fields: [materialId], references: [id])
+  supplier   Supplier?                  @relation(fields: [supplierId], references: [id])
   sizeNorms  ProductMaterialSizeNorm[]
   sizeScopes ProductMaterialSizeScope[]
 
   @@index([productId])
+  @@index([supplierId])
   @@map("product_materials")
 }
 
-/// Per-size consumption override. Missing size uses ProductMaterial.consumptionPerUnit.
+/// Per-size consumption/waste override. Missing size uses ProductMaterial base fields.
 model ProductMaterialSizeNorm {
-  id                 String  @id @default(cuid())
+  id                 String   @id @default(cuid())
   productMaterialId  String
   sizeId             String
-  consumptionPerUnit Decimal @db.Decimal(14, 6)
+  consumptionPerUnit Decimal  @db.Decimal(14, 6)
+  /// Null = use ProductMaterial.wastePercent (or material default).
+  wastePercent       Decimal? @db.Decimal(8, 4)
 
   productMaterial ProductMaterial @relation(fields: [productMaterialId], references: [id], onDelete: Cascade)
   size            Size            @relation(fields: [sizeId], references: [id])
@@ -394,9 +423,24 @@ model ProductOperation {
   product    Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
   operation  Operation                   @relation(fields: [operationId], references: [id])
   sizeScopes ProductOperationSizeScope[]
+  rateTiers  ProductOperationRateTier[]
 
   @@index([productId])
   @@map("product_operations")
+}
+
+/// Product-level override of QUANTITY_TIER rates (copied from OperationRateTier by default).
+model ProductOperationRateTier {
+  id                 String  @id @default(cuid())
+  productOperationId String
+  minQuantity        Int
+  ratePerUnit        Decimal @db.Decimal(14, 4)
+
+  productOperation ProductOperation @relation(fields: [productOperationId], references: [id], onDelete: Cascade)
+
+  @@unique([productOperationId, minQuantity])
+  @@index([productOperationId])
+  @@map("product_operation_rate_tiers")
 }
 
 /// If an operation has no scope rows, it applies to every size of the product.
@@ -416,6 +460,8 @@ model ProductDecoration {
   id                 String @id @default(cuid())
   productId          String
   decorationMethodId String
+  /// null = use DecorationMethod.setupCost from catalog.
+  setupCostOverride  Decimal? @db.Decimal(14, 4) @map("setup_cost_override")
   note               String?
 
   product          Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -538,6 +584,8 @@ model OrderItemMaterial {
   /// Selected supplier for this order line (null = catalog primary).
   supplierId             String?
   supplierNameSnapshot   String?
+  /// Color chosen for this order line (from the selected supplier's palette).
+  colorSnapshot          String?
   /// Override cargo $/kg for delivery on this line only.
   cargoUsdPerKg          Decimal? @db.Decimal(14, 4)
   /// Override USD/UAH rate for delivery on this line only.
@@ -547,6 +595,8 @@ model OrderItemMaterial {
   fabricDeliveryAmount   Decimal  @default(0) @db.Decimal(14, 4)
   fabricDeliveryComputed Decimal? @db.Decimal(14, 4)
   fabricDeliveryManual   Boolean  @default(false)
+  /// Order-only override of гурт threshold (м). Null = catalog / offer default.
+  minWholesaleMetersOverride Decimal? @db.Decimal(14, 4)
   sortOrder          Int     @default(0)
   /// Null = every size on this line. Set = only this size code.
   sizeCode           String?

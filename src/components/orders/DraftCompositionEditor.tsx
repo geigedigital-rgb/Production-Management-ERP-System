@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/Page";
 import { SizeRun } from "@/components/orders/SizeRun";
@@ -14,7 +15,7 @@ import {
   type MaterialCatalogOption,
   type OperationCatalogOption,
 } from "@/components/composition/DraftCompositionForms";
-import { syncDraftMaterialPrices } from "@/lib/draft-composition";
+import { syncDraftMaterialPrices, compositionMissingMaterialChoices } from "@/lib/draft-composition";
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
 
 export {
@@ -27,6 +28,8 @@ export {
 } from "@/components/composition/DraftCompositionForms";
 
 export { cloneComposition, materialUnitCost } from "@/lib/draft-composition";
+
+const TOTAL_SIZE = { code: "ONE", nameUk: "Тираж (орієнтовно)" };
 
 /**
  * Left-workspace: review/edit product composition before adding the line to the order list.
@@ -43,6 +46,7 @@ export function DraftCompositionEditor({
   decorationOptions = [],
   unitOptions = [],
   onMaterialCatalogAdd,
+  onMaterialCatalogColorsChange,
   onOperationCatalogAdd,
   onDecorationCatalogAdd,
   onQuantitiesChange,
@@ -52,6 +56,7 @@ export function DraftCompositionEditor({
   onConfirm,
   confirmDisabled,
   companyCostMode = "NET",
+  fabricGlobals,
 }: {
   product: CatalogProduct;
   composition: DraftComposition;
@@ -63,6 +68,7 @@ export function DraftCompositionEditor({
   decorationOptions?: DecorationCatalogOption[];
   unitOptions?: Array<{ id: string; label: string }>;
   onMaterialCatalogAdd?: (option: MaterialCatalogOption) => void;
+  onMaterialCatalogColorsChange?: (materialId: string, colors: string[]) => void;
   onOperationCatalogAdd?: (option: OperationCatalogOption) => void;
   onDecorationCatalogAdd?: (option: DecorationCatalogOption) => void;
   onQuantitiesChange: (code: string, quantity: number) => void;
@@ -72,15 +78,62 @@ export function DraftCompositionEditor({
   onConfirm: () => void;
   confirmDisabled?: boolean;
   companyCostMode?: MaterialCostVatMode;
+  fabricGlobals?: { usdUahRate: number; fabricCargoUsdPerKg: number };
 }) {
-  const sizes = product.sizes.length
+  const productSizes = product.sizes.length
     ? product.sizes
     : [{ code: "ONE", nameUk: "Без розміру" }];
-  const ready = composition.materials.length > 0 && composition.operations.length > 0;
-  const materialsChanged =
-    composition.materials.length !== product.composition.materials.length ||
-    composition.operations.length !== product.composition.operations.length ||
-    composition.decorations.length !== product.composition.decorations.length;
+  const hasRealSizes = product.sizes.length > 0;
+  const startsAsTotal =
+    !hasRealSizes ||
+    ((quantities.ONE ?? 0) > 0 &&
+      productSizes.every((size) => size.code === "ONE" || !(quantities[size.code] > 0)));
+  const [qtyMode, setQtyMode] = useState<"bySize" | "total">(
+    hasRealSizes && !startsAsTotal ? "bySize" : "total",
+  );
+
+  const sizes = qtyMode === "total" ? [TOTAL_SIZE] : productSizes;
+  const compositionReady = composition.materials.length > 0 && composition.operations.length > 0;
+  const incompleteMaterials = compositionMissingMaterialChoices(composition, {
+    enableLinePricingControls: true,
+    companyCostMode,
+  });
+  const choicesComplete = incompleteMaterials.length === 0;
+  const compositionReadyLabel = !compositionReady
+    ? "Потрібен склад"
+    : !choicesComplete
+      ? `Потрібен вибір · ${incompleteMaterials.length}`
+      : null;
+
+  function applyQtyMode(next: "bySize" | "total") {
+    if (next === qtyMode) return;
+    setQtyMode(next);
+    if (next === "total") {
+      const total = productSizes.reduce((sum, size) => sum + (quantities[size.code] || 0), 0);
+      const fromOne = quantities.ONE || 0;
+      const value = total > 0 ? total : fromOne;
+      for (const size of productSizes) {
+        if (size.code !== "ONE") onQuantitiesChange(size.code, 0);
+      }
+      onQuantitiesChange("ONE", value);
+      onCompositionChange(
+        syncDraftMaterialPrices(composition, { ONE: value }, companyCostMode),
+      );
+      return;
+    }
+    const total = quantities.ONE || 0;
+    onQuantitiesChange("ONE", 0);
+    if (productSizes.length === 1) {
+      onQuantitiesChange(productSizes[0]!.code, total);
+      onCompositionChange(
+        syncDraftMaterialPrices(
+          composition,
+          { [productSizes[0]!.code]: total },
+          companyCostMode,
+        ),
+      );
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -97,20 +150,17 @@ export function DraftCompositionEditor({
               <h3 className="type-subsection truncate">
                 {editing ? "Редагування складу" : "Склад позиції"}
               </h3>
-              <StatusBadge tone={ready ? "success" : "warning"} dot>
-                {ready ? "Готовий" : "Потрібен склад"}
-              </StatusBadge>
+              {compositionReadyLabel ? (
+                <StatusBadge tone="warning" dot>
+                  {compositionReadyLabel}
+                </StatusBadge>
+              ) : null}
             </div>
-            <p className="mt-0.5 truncate text-[13px] font-semibold text-[var(--color-text-primary)]">
+            <p className="type-caption mt-0.5 truncate">
               {product.nameUk ?? product.label}
-            </p>
-            {product.internalCode ? (
-              <p className="type-caption mt-0.5 tabular">{product.internalCode}</p>
-            ) : null}
-            <p className="type-caption mt-1 text-[var(--color-text-tertiary)]">
-              Еталон не змінюється
-              {materialsChanged ? " · склад уже відрізняється" : ""} · додавайте рядки в таблицях
-              нижче
+              {!choicesComplete
+                ? " · оберіть колір і ПДВ у рядках з маркером"
+                : " · додавайте рядки в таблицях нижче"}
             </p>
           </div>
         </div>
@@ -127,17 +177,19 @@ export function DraftCompositionEditor({
       <DraftCompositionBomEditor
         composition={composition}
         onCompositionChange={onCompositionChange}
-        sizes={sizes}
+        sizes={productSizes}
         materialOptions={materialOptions}
         operationOptions={operationOptions}
         decorationOptions={decorationOptions}
         unitOptions={unitOptions}
         onMaterialCatalogAdd={onMaterialCatalogAdd}
+        onMaterialCatalogColorsChange={onMaterialCatalogColorsChange}
         onOperationCatalogAdd={onOperationCatalogAdd}
         onDecorationCatalogAdd={onDecorationCatalogAdd}
         quantitiesBySize={quantities}
         enableLinePricingControls
         companyCostMode={companyCostMode}
+        fabricGlobals={fabricGlobals}
       />
 
       <div className="sticky bottom-14 z-10 space-y-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 shadow-[var(--shadow-card)]">
@@ -145,6 +197,32 @@ export function DraftCompositionEditor({
           <span className="shrink-0 text-[11px] font-medium text-[var(--color-text-tertiary)]">
             К-сть
           </span>
+          {hasRealSizes ? (
+            <div className="inline-flex rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-0.5">
+              <button
+                type="button"
+                onClick={() => applyQtyMode("total")}
+                className={`rounded-[5px] px-2 py-0.5 text-[11px] font-medium ${
+                  qtyMode === "total"
+                    ? "bg-white text-[var(--color-text-primary)] shadow-sm"
+                    : "text-[var(--color-text-secondary)]"
+                }`}
+              >
+                Загальний тираж
+              </button>
+              <button
+                type="button"
+                onClick={() => applyQtyMode("bySize")}
+                className={`rounded-[5px] px-2 py-0.5 text-[11px] font-medium ${
+                  qtyMode === "bySize"
+                    ? "bg-white text-[var(--color-text-primary)] shadow-sm"
+                    : "text-[var(--color-text-secondary)]"
+                }`}
+              >
+                По розмірах
+              </button>
+            </div>
+          ) : null}
           <SizeRun
             sizes={sizes}
             quantities={quantities}
@@ -158,9 +236,19 @@ export function DraftCompositionEditor({
             }}
           />
           {confirmDisabled ? (
-            <span className="type-caption text-[var(--color-warning-text)]">вкажіть кількість</span>
+            <span className="type-caption text-[var(--color-text-tertiary)]">
+              {incompleteMaterials.length > 0
+                ? `${incompleteMaterials.length} без параметрів`
+                : "вкажіть кількість"}
+            </span>
           ) : null}
         </div>
+        {qtyMode === "total" && hasRealSizes ? (
+          <p className="type-caption text-[var(--color-text-tertiary)]">
+            Орієнтовний розрахунок без розкладки по розмірах. Точну сітку задайте пізніше у
+            комплектації замовлення.
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-2">
           <input
             type="text"

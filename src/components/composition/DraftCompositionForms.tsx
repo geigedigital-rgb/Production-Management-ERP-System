@@ -28,12 +28,17 @@ export type MaterialCatalogOption = {
   price: number;
   defaultWaste: number;
   materialType?: string | null;
+  composition?: string | null;
   priceMeterUahNoVat?: number | null;
   priceMeterUahVat?: number | null;
   priceMeterUahCutVat?: number | null;
   metersPerRoll?: number | null;
   minWholesaleMeters?: number | null;
   costVatOverride?: "NET" | "GROSS" | null;
+  availableColors?: string[];
+  metersPerKg?: number | null;
+  priceKgUsdCargo?: number | null;
+  wholesaleNote?: string | null;
 };
 
 export type OperationCatalogOption = {
@@ -43,6 +48,7 @@ export type OperationCatalogOption = {
   unitRate: number | null;
   shiftCost: number | null;
   standardOutput: number | null;
+  rateTiers?: Array<{ minQuantity: number; ratePerUnit: number }>;
 };
 
 export type DecorationCatalogOption = {
@@ -136,6 +142,13 @@ export function DraftAddMaterialForm({
       ...pricing,
       costVatMode: showPricing ? costVatMode : pricing.costVatMode,
       priceMode: showPricing ? priceMode : pricing.priceMode,
+      availableColors: option.availableColors ?? [],
+      metersPerKg: option.metersPerKg ?? null,
+      wholesaleNote: option.wholesaleNote ?? null,
+      fabricDeliveryManual: false,
+      fabricDeliveryAmount: null,
+      cargoUsdPerKg: null,
+      usdUahRate: null,
     };
     const { purchasePrice } = resolveDraftMaterialPrice(draft, quantitiesBySize, companyCostMode);
     onAdd({ ...draft, price: purchasePrice });
@@ -176,14 +189,18 @@ export function DraftAddMaterialForm({
           >
             <option value="">Оберіть матеріал…</option>
             {options.map((row) => (
-              <option key={row.id} value={row.id}>
+              <option
+                key={row.id}
+                value={row.id}
+                data-description={row.composition?.trim() || undefined}
+              >
                 {row.label}
               </option>
             ))}
           </Select>
-          <label className="w-[72px]">
+          <label className="w-[88px]">
             <span className="mb-1 block text-[11px] font-medium text-[var(--color-text-tertiary)]">
-              Норма
+              {selected ? `Норма, ${selected.unit}` : "Норма"}
             </span>
             <input
               type="number"
@@ -191,6 +208,11 @@ export function DraftAddMaterialForm({
               step="0.0001"
               value={consumption}
               onChange={(event) => setConsumption(event.target.value)}
+              title={
+                selected
+                  ? `Скільки ${selected.unit} іде на 1 виріб`
+                  : "Оберіть матеріал — з’явиться одиниця виміру"
+              }
               className="h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
             />
           </label>
@@ -234,21 +256,30 @@ export function DraftAddMaterialForm({
         >
           <option value="">Оберіть…</option>
           {options.map((row) => (
-            <option key={row.id} value={row.id}>
+            <option
+              key={row.id}
+              value={row.id}
+              data-description={row.composition?.trim() || undefined}
+            >
               {row.label}
             </option>
           ))}
         </Select>
       </FormGroup>
       {pricingBlock}
-      <FormGroup label="Норма" columns={2}>
+      <FormGroup label="Норма витрати" columns={2}>
         <Input
-          label="На одиницю"
+          label={selected ? `Норма, ${selected.unit} / виріб` : "Норма на 1 виріб"}
           type="number"
           min={0}
           step="0.0001"
           value={consumption}
           onChange={(event) => setConsumption(event.target.value)}
+          hint={
+            selected
+              ? `Одиниця з каталогу: ${selected.unit}. Скільки ${selected.unit} іде на один виріб.`
+              : "Спочатку оберіть матеріал — з’явиться одиниця виміру."
+          }
         />
         <Input
           label="Відходи %"
@@ -289,6 +320,7 @@ export function DraftAddOperationForm({
       unitRate: option.unitRate,
       shiftCost: option.shiftCost,
       standardOutput: option.standardOutput,
+      rateTiers: option.rateTiers,
     });
     setOperationId("");
   }

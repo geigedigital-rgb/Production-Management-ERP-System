@@ -44,6 +44,7 @@ export function OrderItemsTable({
   handedOver,
   rows,
   catalog,
+  showPrices = true,
 }: {
   orderId: string;
   activeTab: string;
@@ -52,6 +53,7 @@ export function OrderItemsTable({
   handedOver?: boolean;
   rows: OrderItemRow[];
   catalog: AddableProduct[];
+  showPrices?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -85,8 +87,7 @@ export function OrderItemsTable({
           <div className="min-w-0">
             <p className="type-subsection">Позиції замовлення</p>
             <p className="type-caption mt-0.5">
-              Кожен рядок — окремий виріб. Натисніть рядок, щоб редагувати його склад, калькуляцію
-              та версії.
+              Кожен рядок — окремий виріб. Натисніть рядок, щоб переглянути або змінити склад.
             </p>
           </div>
         }
@@ -105,7 +106,7 @@ export function OrderItemsTable({
           <TH align="right">К-сть</TH>
           <TH>Склад</TH>
           <TH>Версія</TH>
-          <TH align="right">Ціна / од.</TH>
+          {showPrices ? <TH align="right">Ціна / од.</TH> : null}
           <TH>Стан</TH>
           {!locked ? <TH width="44px" /> : null}
         </THead>
@@ -154,9 +155,11 @@ export function OrderItemsTable({
                 <TD nowrap className="text-[var(--color-text-secondary)]">
                   {row.versionLabel}
                 </TD>
-                <TD numeric nowrap>
-                  {row.unitPrice != null ? formatMoneyUah(row.unitPrice) : "—"}
-                </TD>
+                {showPrices ? (
+                  <TD numeric nowrap>
+                    {row.unitPrice != null ? formatMoneyUah(row.unitPrice) : "—"}
+                  </TD>
+                ) : null}
                 <TD>
                   <StatusBadge tone={tone} dot>
                     {state}
@@ -194,7 +197,7 @@ export function OrderItemsTable({
             <TD numeric nowrap className="font-semibold">
               {totalQty} шт
             </TD>
-            <TD colSpan={locked ? 4 : 5} />
+            <TD colSpan={(showPrices ? 4 : 3) + (locked ? 0 : 1)} />
           </TR>
         </TFoot>
       </Table>

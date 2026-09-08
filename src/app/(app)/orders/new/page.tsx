@@ -30,15 +30,6 @@ export default async function NewOrderPage({
   return (
     <div className="space-y-4">
       <Breadcrumbs items={[{ label: "Замовлення", href: "/orders" }, { label: "Нове замовлення" }]} />
-
-      <div>
-        <h1 className="type-page-title">Нове замовлення</h1>
-        <p className="type-body-secondary mt-1 max-w-2xl">
-          Оберіть клієнта, додайте вироби в таблицю позицій, за потреби підправте склад кожного —
-          і створіть замовлення. Пізніше в картці замовлення можна додати ще вироби.
-        </p>
-      </div>
-
       <OrderCreateForm
         initialClientId={params.clientId}
         initialProductId={params.productId}
@@ -63,6 +54,7 @@ export default async function NewOrderPage({
           defaultWaste: Number(material.defaultWastePercent),
           name: material.nameUk,
           materialType: material.type,
+          composition: material.composition?.trim() || null,
           priceMeterUahNoVat:
             material.priceMeterUahNoVat != null ? Number(material.priceMeterUahNoVat) : null,
           priceMeterUahVat:
@@ -73,7 +65,16 @@ export default async function NewOrderPage({
           minWholesaleMeters:
             material.minWholesaleMeters != null ? Number(material.minWholesaleMeters) : null,
           costVatOverride: material.costVatOverride,
+          availableColors: material.availableColors ?? [],
+          metersPerKg: material.metersPerKg != null ? Number(material.metersPerKg) : null,
+          priceKgUsdCargo:
+            material.priceKgUsdCargo != null ? Number(material.priceKgUsdCargo) : null,
+          wholesaleNote: material.wholesaleNote ?? null,
         }))}
+        fabricGlobals={{
+          usdUahRate: fabricGlobals.usdUahRate,
+          fabricCargoUsdPerKg: fabricGlobals.fabricCargoUsdPerKg,
+        }}
         operationCatalog={operations.map((operation) => ({
           id: operation.id,
           label: operation.nameUk,
@@ -84,6 +85,10 @@ export default async function NewOrderPage({
             operation.standardOutputPerShift != null
               ? Number(operation.standardOutputPerShift)
               : null,
+          rateTiers: (operation.rateTiers ?? []).map((tier) => ({
+            minQuantity: tier.minQuantity,
+            ratePerUnit: Number(tier.ratePerUnit),
+          })),
         }))}
         decorationCatalog={decorations.map((decoration) => ({
           id: decoration.id,
