@@ -3,6 +3,7 @@
 import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Select } from "@/components/ui/Field";
+import { ColorSelect } from "@/components/ui/ColorSelect";
 import { SpecColorPicker } from "@/components/composition/SpecColorPicker";
 import {
   colorsForSupplier,
@@ -69,7 +70,6 @@ export function SupplierColorFields({
   }
 
   if (compact) {
-    const selectedSwatch = color?.trim() ? swatchForColorLabel(color) : null;
     const nativeSelectClass =
       "h-7 min-w-0 max-w-full rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-primary-500)] disabled:opacity-60";
 
@@ -100,34 +100,13 @@ export function SupplierColorFields({
               Немає кольорів
             </span>
           ) : (
-            <>
-              {selectedSwatch ? (
-                <span
-                  className={cn(
-                    "size-3.5 shrink-0 rounded-full ring-1 ring-black/15",
-                    selectedSwatch.bordered &&
-                      "border border-[var(--color-border-strong)]",
-                  )}
-                  style={{ backgroundColor: selectedSwatch.swatch }}
-                  aria-hidden
-                />
-              ) : null}
-              <select
-                className={cn(nativeSelectClass, "max-w-[8rem] flex-1 basis-[6rem]")}
-                value={color ?? ""}
-                disabled={disabled}
-                aria-label="Колір"
-                title="Колір"
-                onChange={(event) => onColorChange(event.target.value || null)}
-              >
-                <option value="">Колір…</option>
-                {palette.map((label) => (
-                  <option key={label} value={label}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </>
+            <ColorSelect
+              value={color}
+              options={palette}
+              disabled={disabled}
+              onChange={onColorChange}
+              className="flex-1 basis-[7.5rem]"
+            />
           )
         ) : (
           <span className="text-[11px] text-[var(--color-text-quiet)]">
