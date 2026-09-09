@@ -12,12 +12,17 @@ const baseSegments = [
 export function CostStructure({
   calc,
   fabricDeliveryAmount = 0,
+  fixedCostAmount = 0,
 }: {
   calc: CalculationResult;
   fabricDeliveryAmount?: number;
+  fixedCostAmount?: number;
 }) {
   const total = Number(calc.totalCost) || 1;
-  const otherAdditional = Math.max(0, Number(calc.additionalCostsSubtotal) - fabricDeliveryAmount);
+  const otherAdditional = Math.max(
+    0,
+    Number(calc.additionalCostsSubtotal) - fabricDeliveryAmount - fixedCostAmount,
+  );
   const rows = [
     ...baseSegments
       .map((segment) => ({
@@ -26,6 +31,17 @@ export function CostStructure({
         share: (Number(calc[segment.key]) / total) * 100,
       }))
       .filter((row) => row.value > 0),
+    ...(fixedCostAmount > 0
+      ? [
+          {
+            key: "fixedCosts",
+            label: "Постійні витрати",
+            color: "var(--color-warning-text)",
+            value: fixedCostAmount,
+            share: (fixedCostAmount / total) * 100,
+          },
+        ]
+      : []),
     ...(fabricDeliveryAmount > 0
       ? [
           {

@@ -1,13 +1,11 @@
 import { SegmentedTabs } from "@/components/ui/Tabs";
 import { ProductSizeBom } from "@/components/products/ProductSizeBom";
-import { ProductCutRateEditor } from "@/components/products/ProductCutRateEditor";
-import { ProductPriceEditor } from "@/components/products/ProductPriceEditor";
+import { ProductPriceCutPanel } from "@/components/products/ProductPriceCutPanel";
+import type { TirageCostHint } from "@/components/products/ProductPriceFields";
 
 export type ProductDetailTab = "composition" | "pricing";
 
 type BomProps = React.ComponentProps<typeof ProductSizeBom>;
-type CutProps = React.ComponentProps<typeof ProductCutRateEditor>;
-type PriceProps = React.ComponentProps<typeof ProductPriceEditor>;
 
 export function ProductDetailTabs({
   productId,
@@ -22,8 +20,17 @@ export function ProductDetailTabs({
   activeTab: ProductDetailTab;
   compositionCount: number;
   bom: BomProps;
-  cut: CutProps;
-  price: PriceProps;
+  cut: {
+    productId: string;
+    optimalQty: number | null;
+    tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
+  };
+  price: {
+    productId: string;
+    isBaseModel: boolean;
+    tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+    costHints?: TirageCostHint[];
+  };
   showPricing?: boolean;
 }) {
   const effectiveTab = showPricing ? activeTab : "composition";
@@ -54,7 +61,7 @@ export function ProductDetailTabs({
               ? showPricing
                 ? "Матеріали, операції та нанесення для собівартості"
                 : "Склад виробу (без цін і калькуляції)"
-              : "Крій за тиражем і комерційний прайс"}
+              : "Спільні тиражі: крій і прайс в одній таблиці"}
           </p>
         </div>
         {tabs.length > 1 ? <SegmentedTabs items={tabs} active={effectiveTab} /> : null}
@@ -63,10 +70,14 @@ export function ProductDetailTabs({
       {effectiveTab === "composition" ? (
         <ProductSizeBom {...bom} />
       ) : (
-        <div className="space-y-4">
-          <ProductCutRateEditor {...cut} />
-          <ProductPriceEditor {...price} />
-        </div>
+        <ProductPriceCutPanel
+          productId={productId}
+          optimalQty={cut.optimalQty}
+          cutTiers={cut.tiers}
+          isBaseModel={price.isBaseModel}
+          priceTiers={price.tiers}
+          costHints={price.costHints}
+        />
       )}
     </div>
   );

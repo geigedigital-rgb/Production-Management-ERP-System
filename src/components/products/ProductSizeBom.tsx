@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -43,6 +44,7 @@ import {
   updateProductDecorationSetupCostAction,
   updateProductMaterialConsumptionAction,
   updateProductMaterialWasteAction,
+  updateProductOperationRateAction,
 } from "@/server/domains/products/actions";
 import {
   AddProductDecorationPanel,
@@ -87,6 +89,8 @@ type OperationView = {
   method: string;
   methodCode: string;
   unitCost: number;
+  catalogRate?: number;
+  rateOverride?: number | null;
   sizeCodes: string[] | null;
   rateTiers: Array<{ minQuantity: number; ratePerUnit: number }>;
   isCut?: boolean;
@@ -247,6 +251,17 @@ export function ProductSizeBom({
     if (activeSize) formData.set("sizeId", activeSize.id);
     startTransition(async () => {
       await removeProductOperationAction(formData);
+      router.refresh();
+    });
+  }
+
+  function saveOperationRate(id: string, rateOverride: number) {
+    const formData = new FormData();
+    formData.set("productId", productId);
+    formData.set("id", id);
+    formData.set("rateOverride", String(rateOverride));
+    startTransition(async () => {
+      await updateProductOperationRateAction(formData);
       router.refresh();
     });
   }
@@ -615,7 +630,60 @@ export function ProductSizeBom({
                       className={cn("font-medium", row.isCut && "!whitespace-normal")}
                       title={cutCell?.title}
                     >
-                      {cutCell ? cutCell.primary : formatMoneyUah(row.unitCost)}
+                      {row.isCut && cutCell ? (
+                        <div className="text-right">
+                          <div>{cutCell.primary}</div>
+                          <Link
+                            href={`/products/${productId}?tab=pricing`}
+                            className="type-caption text-[var(--color-primary-700)] hover:underline"
+                          >
+                            редагувати крій →
+                          </Link>
+                        </div>
+                      ) : row.methodCode === "QUANTITY_TIER" ? (
+                        <span className="inline-flex flex-col items-end gap-0.5">
+                          <span className="tabular">{formatMoneyUah(row.unitCost)}</span>
+                          <span className="text-[10px] text-[var(--color-text-tertiary)]">
+                            сітка ставок нижче
+                          </span>
+                        </span>
+                      ) : readOnly ? (
+                        <span className="tabular">{formatMoneyUah(row.unitCost)}</span>
+                      ) : (
+                        <span className="inline-flex flex-col items-end gap-0.5">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            <input
+                              key={`${row.id}-rate-${row.rateOverride ?? "catalog"}`}
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              defaultValue={
+                                row.rateOverride != null ? row.rateOverride : row.unitCost
+                              }
+                              disabled={pending}
+                              title={
+                                row.rateOverride != null
+                                  ? `Перевизначення на виробі (довідник ${formatMoneyUah(row.catalogRate ?? 0)})`
+                                  : "Ставка на виробі. Змініть — збережеться окремо від довідника."
+                              }
+                              onBlur={(event) => {
+                                const next = Math.max(0, Number(event.target.value) || 0);
+                                const current =
+                                  row.rateOverride != null ? row.rateOverride : row.unitCost;
+                                if (Math.abs(next - current) < 0.0001) return;
+                                saveOperationRate(row.id, next);
+                              }}
+                              className={inputClass + " w-[72px]"}
+                            />
+                            <span className="text-[12px] text-[var(--color-text-secondary)]">₴</span>
+                          </span>
+                          {row.rateOverride != null ? (
+                            <span className="text-[10px] text-[var(--color-text-tertiary)]">
+                              довідн. {formatMoneyUah(row.catalogRate ?? 0)}
+                            </span>
+                          ) : null}
+                        </span>
+                      )}
                     </TD>
                   ) : null}
                   {!readOnly ? (

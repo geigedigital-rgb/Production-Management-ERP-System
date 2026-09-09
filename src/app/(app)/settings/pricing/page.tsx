@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { auth } from "@/server/auth";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/Page";
 import { Input } from "@/components/ui/Input";
@@ -8,7 +7,6 @@ import { Banner } from "@/components/ui/Banner";
 import { SettingsForm } from "@/components/ui/SettingsForm";
 import { accessHas, getCurrentUserAccess } from "@/server/auth/access";
 import { updatePricingSettingsAction } from "@/server/domains/settings/actions";
-import { PricingPreview } from "./PricingPreview";
 
 export default async function PricingSettingsPage() {
   const access = await getCurrentUserAccess();
@@ -17,15 +15,13 @@ export default async function PricingSettingsPage() {
   const canEdit = accessHas(access, "managePricingRules");
   const pricing = await prisma.pricingSettings.findFirst().catch(() => null);
 
-  const target = Number(pricing?.targetMarginPercent ?? 30);
   const minimum = Number(pricing?.minimumMarginPercent ?? 15);
-  const method = pricing?.pricingMethod ?? "MARGIN";
 
   return (
     <div>
       <PageHeader
         title="Ціноутворення"
-        description="Базові правила для всього проєкту. Кожне замовлення може мати свою цільову маржу — вона перекриває ці значення лише в межах цього замовлення."
+        description="Продажна ціна фіксується в базовому прайсі виробу (націнка на пошив × тираж). Тут — контроль мінімальної маржі, знижок і закупівельних параметрів тканин."
       />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start">
@@ -35,39 +31,23 @@ export default async function PricingSettingsPage() {
               id="pricing-rules"
               action={updatePricingSettingsAction}
               readOnly={!canEdit}
-              description="Впливає лише на нові розрахунки та активну собівартість тканин у каталозі"
+              description="Не додає % до собівартості автоматично — клієнтська ціна береться з прайсу виробу"
             >
-              <FormGroup label="Метод ціноутворення" columns={1}>
-                <Select name="pricingMethod" label="Метод" defaultValue={method}>
-                  <option value="MARGIN">Маржа — відсоток від ціни продажу</option>
-                  <option value="MARKUP">Націнка — відсоток від собівартості</option>
-                </Select>
-              </FormGroup>
+              {/* Kept for schema compatibility; selling uplift is disabled in calc (rate = 0). */}
+              <input type="hidden" name="pricingMethod" value="MARKUP" />
+              <input type="hidden" name="targetMarginPercent" value="0" />
 
-              <FormGroup label="Рівні прибутковості" columns={2}>
-                <Input
-                  name="targetMarginPercent"
-                  label="Цільова ставка, %"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="99"
-                  defaultValue={target}
-                  hint="Базовий рівень для нових замовлень; у замовленні можна змінити"
-                />
+              <FormGroup label="Контроль пропозицій" columns={2}>
                 <Input
                   name="minimumMarginPercent"
-                  label="Мінімальна маржа, %"
+                  label="Мінімальна фактична маржа, %"
                   type="number"
                   step="0.1"
                   min="0"
                   max="99"
                   defaultValue={minimum}
-                  hint="Нижче — потрібне підтвердження адміністратора"
+                  hint="Від собівартості до ціни з прайсу; нижче — підтвердження адміна"
                 />
-              </FormGroup>
-
-              <FormGroup label="Обмеження менеджера" columns={2}>
                 <Input
                   name="managerMaxDiscountPercent"
                   label="Максимальна знижка, %"
@@ -77,7 +57,10 @@ export default async function PricingSettingsPage() {
                   max="100"
                   defaultValue={Number(pricing?.managerMaxDiscountPercent ?? 0)}
                 />
-                <Select name="roundingRule" label="Округлення" defaultValue={pricing?.roundingRule ?? "ROUND_2"}>
+              </FormGroup>
+
+              <FormGroup label="Округлення" columns={2}>
+                <Select name="roundingRule" label="Округлення грошей" defaultValue={pricing?.roundingRule ?? "ROUND_2"}>
                   <option value="ROUND_2">До копійок (0.01)</option>
                   <option value="ROUND_1">До 0.10 ₴</option>
                   <option value="ROUND_0">До гривні</option>
@@ -129,17 +112,20 @@ export default async function PricingSettingsPage() {
         </div>
 
         <div className="space-y-4">
-          <PricingPreview formId="pricing-rules" initial={{ method, target, minimum }} />
+          <Banner tone="info" title="Як формується ціна клієнту">
+            1) У картці виробу («Прайс і крій») крій змінюється з тиражем автоматично.
+            2) Націнку ставите вручну як множник до пошиву (не до тканини) і фіксуєте прайс.
+            3) У замовленні продажна ціна береться з цього прайсу; собівартість лишається для планування.
+          </Banner>
 
           <Banner tone="info" title="ПДВ у собівартості">
             У каталозі тканин зберігаються обидві ціни (з ПДВ і без). У калькуляцію виробу йде та,
-            яку обрано вище. На окремій тканині можна зробити виняток. Збережені версії замовлень не
-            змінюються.
+            яку обрано вище. На окремій тканині можна зробити виняток.
           </Banner>
 
           <Banner tone="warning" title="Зміна правил не переписує історію">
-            Погоджені версії та специфікації зберігають зафіксовані ціни. Щоб застосувати нові правила до
-            замовлення, збережіть нову версію калькуляції.
+            Погоджені версії та специфікації зберігають зафіксовані ціни. Щоб застосувати новий прайс,
+            оновіть прайс на виробі і збережіть нову версію пропозиції.
           </Banner>
         </div>
       </div>

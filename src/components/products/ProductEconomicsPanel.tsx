@@ -65,7 +65,7 @@ export function ProductEconomicsPanel({
         subtitle={
           pending
             ? "Перерахунок…"
-            : `Собівартість при ${quantity} шт. Комерційний прайс — у вкладці «Прайс і крій».`
+            : `Тираж ${quantity} шт · продаж = прайс або собівартість + націнка на пошив`
         }
         minimumMarginPercent={minimumMarginPercent}
         className="border-0 shadow-none"

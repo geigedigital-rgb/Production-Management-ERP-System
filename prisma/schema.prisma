@@ -541,6 +541,8 @@ model OrderItem {
   fabricDeliveryAmount   Decimal  @default(0) @db.Decimal(14, 4)
   fabricDeliveryComputed Decimal? @db.Decimal(14, 4)
   fabricDeliveryManual   Boolean  @default(false)
+  /// Null = company FixedCostSettings.sewerCount. Overrides only the PV coefficient for this line.
+  sewerCountOverride     Int?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -729,6 +731,29 @@ model PricingSettings {
   updatedAt             DateTime      @updatedAt
 
   @@map("pricing_settings")
+}
+
+/// Singleton company params for fixed-overhead allocation (постійні витрати).
+model FixedCostSettings {
+  id                  String   @id @default(cuid())
+  workingDaysPerMonth Int      @default(21)
+  sewerCount          Int      @default(5)
+  dailySewerPay       Decimal  @default(1500) @db.Decimal(14, 4)
+  updatedAt           DateTime @updatedAt
+
+  @@map("fixed_cost_settings")
+}
+
+model FixedCostArticle {
+  id            String   @id @default(cuid())
+  nameUk        String
+  monthlyAmount Decimal  @db.Decimal(14, 4)
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("fixed_cost_articles")
 }
 
 model QuantityTierRule {

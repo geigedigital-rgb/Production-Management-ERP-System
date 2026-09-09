@@ -8,10 +8,24 @@ const globalForPrisma = globalThis as unknown as {
   prismaClientVersion?: string;
 };
 
-/** Bump when Prisma schema changes so dev HMR does not keep a stale client. */
-const PRISMA_CLIENT_VERSION = "20260907190000_size_norm_waste";
+/**
+ * Bump when Prisma schema changes so dev HMR does not keep a stale client.
+ * Also bump after `prisma generate` if a previous bump raced ahead of generation.
+ */
+const PRISMA_CLIENT_VERSION = "20260908140000_fixed_costs_v3";
 
-if (globalForPrisma.prismaClientVersion !== PRISMA_CLIENT_VERSION) {
+function clientHasFixedCosts(client: PrismaClient | undefined): boolean {
+  if (!client) return false;
+  return "fixedCostSettings" in client && "fixedCostArticle" in client;
+}
+
+function shouldRecreateClient(): boolean {
+  if (globalForPrisma.prismaClientVersion !== PRISMA_CLIENT_VERSION) return true;
+  if (!clientHasFixedCosts(globalForPrisma.prisma)) return true;
+  return false;
+}
+
+if (shouldRecreateClient()) {
   const stale = globalForPrisma.prisma;
   globalForPrisma.prisma = undefined;
   globalForPrisma.prismaClientVersion = PRISMA_CLIENT_VERSION;

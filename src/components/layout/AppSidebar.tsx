@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import {
+  IconCalc,
   IconChevronLeft,
   IconChevronRight,
   IconClients,
@@ -33,6 +34,7 @@ type NavItem = {
     | "materials"
     | "operations"
     | "applications"
+    | "fixedCosts"
     | "pricing"
     | "users"
     | "company"
@@ -66,6 +68,12 @@ const catalogs: NavItem[] = [
     href: "/settings/applications",
     labelKey: "applications",
     icon: IconDecoration,
+    requiredPermission: "manageCatalogs",
+  },
+  {
+    href: "/settings/fixed-costs",
+    labelKey: "fixedCosts",
+    icon: IconCalc,
     requiredPermission: "manageCatalogs",
   },
 ];

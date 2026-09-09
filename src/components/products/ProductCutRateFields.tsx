@@ -2,38 +2,60 @@
 
 import { useMemo, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { resolveCutRatePerUnit } from "@/lib/cut-rate";
-import { formatMoneyUah } from "@/lib/utils";
+import { resolveCutRatePerUnit, resolveOptimalCutQty } from "@/lib/cut-rate";
+import { cn, formatMoneyUah } from "@/lib/utils";
 
 export type CutRateTierDraft = { minQuantity: number; ratePerUnit: number };
 
 export const DEFAULT_CUT_RATE_TIERS: CutRateTierDraft[] = [
   { minQuantity: 10, ratePerUnit: 0 },
+  { minQuantity: 20, ratePerUnit: 0 },
+  { minQuantity: 30, ratePerUnit: 0 },
   { minQuantity: 50, ratePerUnit: 0 },
+  { minQuantity: 60, ratePerUnit: 0 },
   { minQuantity: 100, ratePerUnit: 0 },
+  { minQuantity: 150, ratePerUnit: 0 },
+  { minQuantity: 200, ratePerUnit: 0 },
+  { minQuantity: 250, ratePerUnit: 0 },
 ];
 
+function CompactInput({
+  className,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={cn(
+        "h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[13px] tabular text-[var(--color-text-primary)] outline-none transition-colors",
+        "hover:border-[var(--color-border-strong)] focus:border-[var(--color-primary-500)] focus:ring-2 focus:ring-[var(--color-primary-100)]",
+        className,
+      )}
+    />
+  );
+}
+
 export function ProductCutRateFields({
-  optimalQty,
-  onOptimalQtyChange,
   tiers,
   onTiersChange,
   previewQty = 40,
   footer,
 }: {
-  optimalQty: string;
-  onOptimalQtyChange: (value: string) => void;
   tiers: CutRateTierDraft[];
   onTiersChange: (tiers: CutRateTierDraft[]) => void;
   previewQty?: number;
   footer?: ReactNode;
 }) {
+  const optimalQty = resolveOptimalCutQty({
+    optimalQty: null,
+    tiers,
+  });
+
   const previewRate = useMemo(
     () =>
       resolveCutRatePerUnit({
         quantity: previewQty,
-        optimalQty: optimalQty ? Number(optimalQty) : null,
+        optimalQty,
         tiers,
         fallbackRate: tiers[tiers.length - 1]?.ratePerUnit ?? 0,
       }),
@@ -42,76 +64,78 @@ export function ProductCutRateFields({
 
   return (
     <div className="space-y-3">
-      <div className="grid max-w-xs gap-2">
-        <Input
-          label="Оптимальний тираж, шт"
-          type="number"
-          min={1}
-          value={optimalQty}
-          onChange={(event) => onOptimalQtyChange(event.target.value)}
-        />
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="erp-table w-full min-w-[320px] text-left text-[13px]">
-          <thead>
-            <tr className="border-b border-[var(--color-table-section-border)]">
-              <th className="py-1.5">Тираж від, шт</th>
-              <th className="py-1.5">₴ / шт крою</th>
-              <th className="w-16" />
+      <p className="type-caption">
+        Оптимум крою — остання сходинка тиражу ({optimalQty ?? "—"}) шт. Далі ₴/шт не падає.
+      </p>
+      <div className="overflow-x-auto rounded-[8px] border border-[var(--color-border)]">
+        <table className="w-full min-w-[320px] border-collapse text-left text-[13px]">
+          <thead className="bg-[var(--color-surface-subtle)]">
+            <tr className="border-b border-[var(--color-border)]">
+              <th className="px-3 py-2 font-medium text-[var(--color-text-secondary)]">
+                Тираж від
+              </th>
+              <th className="px-3 py-2 font-medium text-[var(--color-text-secondary)]">
+                ₴ / шт крою
+              </th>
+              <th className="w-10 px-2 py-2" />
             </tr>
           </thead>
           <tbody>
-            {tiers.map((row, index) => (
-              <tr key={index} className="border-b border-[var(--color-border-muted)]">
-                <td className="py-1.5 pr-2">
-                  <input
+            {tiers.map((tier, index) => (
+              <tr
+                key={`${tier.minQuantity}-${index}`}
+                className="border-b border-[var(--color-border)] last:border-b-0"
+              >
+                <td className="px-3 py-2">
+                  <CompactInput
                     type="number"
                     min={1}
-                    className="field-input w-full"
-                    value={row.minQuantity}
+                    value={tier.minQuantity || ""}
                     onChange={(event) => {
                       const next = [...tiers];
-                      next[index] = { ...row, minQuantity: Number(event.target.value) };
+                      next[index] = {
+                        ...tier,
+                        minQuantity: Number(event.target.value) || 0,
+                      };
                       onTiersChange(next);
                     }}
                   />
                 </td>
-                <td className="py-1.5 pr-2">
-                  <input
+                <td className="px-3 py-2">
+                  <CompactInput
                     type="number"
                     min={0}
                     step="0.01"
-                    className="field-input w-full"
-                    value={row.ratePerUnit}
+                    value={tier.ratePerUnit || ""}
                     onChange={(event) => {
                       const next = [...tiers];
-                      next[index] = { ...row, ratePerUnit: Number(event.target.value) };
+                      next[index] = {
+                        ...tier,
+                        ratePerUnit: Number(event.target.value) || 0,
+                      };
                       onTiersChange(next);
                     }}
                   />
                 </td>
-                <td className="py-1.5">
-                  <Button
+                <td className="px-2 py-2">
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="sm"
+                    className="text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
                     onClick={() => onTiersChange(tiers.filter((_, i) => i !== index))}
-                    disabled={tiers.length <= 1}
+                    aria-label="Видалити сходинку"
                   >
-                    ✕
-                  </Button>
+                    ×
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Button
           type="button"
-          variant="secondary"
+          variant="ghost"
           size="sm"
           onClick={() =>
             onTiersChange([
@@ -123,13 +147,13 @@ export function ProductCutRateFields({
             ])
           }
         >
-          Додати сходинку
+          + Тираж
         </Button>
-        {footer}
-        <span className="type-caption">
-          Приклад: {previewQty} шт → {formatMoneyUah(previewRate)} / шт
-        </span>
+        <p className="type-caption">
+          Приклад: {previewQty} шт → {formatMoneyUah(previewRate)} / шт крою
+        </p>
       </div>
+      {footer}
     </div>
   );
 }

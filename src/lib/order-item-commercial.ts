@@ -1,12 +1,21 @@
 import { commercialPriceTiersFromProduct } from "@/lib/commercial-price";
 import { buildCommercialOrderLinePrice } from "@/lib/commercial-order-line";
 import type { CalculationResult } from "@/server/domains/calculation/engine";
+import {
+  calcWithClientPrice,
+  resolveSewingPerUnitFromOperations,
+} from "@/lib/product-selling";
 
 export type OrderItemCommercialInput = {
   totalQuantity: number;
   decorations: Array<{
     setupCost: { toString(): string } | number;
     unitRate: { toString(): string } | number;
+  }>;
+  operations?: Array<{
+    nameSnapshot?: string | null;
+    unitRate?: { toString(): string } | number | null;
+    calculationMethod?: string;
   }>;
   product?: {
     isBaseModel?: boolean;
@@ -22,8 +31,6 @@ export function commercialPriceForOrderItem(
   },
 ) {
   const tiers = commercialPriceTiersFromProduct(item.product);
-  // Commercial layer applies only when the product has a fixed price ladder.
-  // Cost-calc selling already includes decorations in COGS — do not add them again.
   if (tiers.length === 0) return null;
 
   return buildCommercialOrderLinePrice({
@@ -72,18 +79,49 @@ export function draftLineFromItem(
     const merged = mergeCommercialAndCost(commercial, costCalc, item.totalQuantity);
     return {
       ...merged,
-      fromPriceList: true,
+      fromPriceList: true as const,
+      priceSource: "pricelist" as const,
     };
   }
 
+  const sewingPerUnit = resolveSewingPerUnitFromOperations(
+    (item.operations ?? []).map((row) => ({
+      nameSnapshot: row.nameSnapshot,
+      unitRate: row.unitRate != null ? Number(row.unitRate) : null,
+    })),
+  );
+
+  const { calc, resolved } = calcWithClientPrice({
+    costCalc,
+    quantity: item.totalQuantity,
+    product: item.product,
+    sewingPerUnit,
+  });
+
+  let sellingPricePerUnit = Number(calc.sellingPricePerUnit);
+  let totalSellingValue = Number(calc.totalSellingValue);
+  let marginPercent = Number(calc.marginPercent);
+
+  if (discountPercent != null && discountPercent > 0 && resolved.source !== "cost") {
+    const factor = 1 - Math.min(99, discountPercent) / 100;
+    totalSellingValue = Math.round(totalSellingValue * factor * 100) / 100;
+    sellingPricePerUnit =
+      item.totalQuantity > 0
+        ? Math.round((totalSellingValue / item.totalQuantity) * 100) / 100
+        : sellingPricePerUnit;
+    const profit = totalSellingValue - Number(costCalc.totalCost);
+    marginPercent = totalSellingValue > 0 ? (profit / totalSellingValue) * 100 : 0;
+  }
+
   return {
-    fromPriceList: false,
-    basePricePerUnit: null as number | null,
+    fromPriceList: resolved.source === "pricelist",
+    priceSource: resolved.source,
+    basePricePerUnit: sellingPricePerUnit,
     decorationPerUnit: null as number | null,
-    sellingPricePerUnit: Number(costCalc.sellingPricePerUnit),
-    totalSellingValue: Number(costCalc.totalSellingValue),
+    sellingPricePerUnit,
+    totalSellingValue,
     costPerUnit: Number(costCalc.costPerUnit),
-    marginPercent: Number(costCalc.marginPercent),
-    discountPercent: 0,
+    marginPercent,
+    discountPercent: discountPercent ?? 0,
   };
 }

@@ -576,6 +576,38 @@ export async function setProductOperationRateTiers(input: {
   });
 }
 
+export async function setProductOperationRateOverride(input: {
+  productOperationId: string;
+  rateOverride: number | null;
+}) {
+  const rate =
+    input.rateOverride == null || !Number.isFinite(input.rateOverride)
+      ? null
+      : Math.max(0, input.rateOverride);
+
+  return prisma.productOperation.update({
+    where: { id: input.productOperationId },
+    data: { rateOverride: rate },
+    include: productOperationInclude,
+  });
+}
+
+export async function setProductOperationStandardOverride(input: {
+  productOperationId: string;
+  standardOverride: number | null;
+}) {
+  const value =
+    input.standardOverride == null || !Number.isFinite(input.standardOverride)
+      ? null
+      : Math.max(0, input.standardOverride);
+
+  return prisma.productOperation.update({
+    where: { id: input.productOperationId },
+    data: { standardOverride: value },
+    include: productOperationInclude,
+  });
+}
+
 export async function setProductMaterialConsumption(id: string, consumptionPerUnit: number) {
   return prisma.productMaterial.update({
     where: { id },
@@ -979,7 +1011,7 @@ export async function setProductCommercialPrices(input: {
 
 export async function setProductCutRates(input: {
   productId: string;
-  optimalQty: number | null;
+  optimalQty?: number | null;
   tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
 }) {
   const tiers = input.tiers
@@ -990,10 +1022,15 @@ export async function setProductCutRates(input: {
   const unique = new Map<number, number>();
   for (const tier of tiers) unique.set(tier.minQuantity, tier.ratePerUnit);
 
+  const sortedQtys = [...unique.keys()].sort((a, b) => a - b);
+  const derivedOptimal = sortedQtys.length > 0 ? sortedQtys[sortedQtys.length - 1]! : null;
+  const optimalQty =
+    input.optimalQty != null && input.optimalQty > 0 ? input.optimalQty : derivedOptimal;
+
   await prisma.$transaction(async (tx) => {
     await tx.product.update({
       where: { id: input.productId },
-      data: { optimalQty: input.optimalQty },
+      data: { optimalQty },
     });
     await tx.productCutRateTier.deleteMany({ where: { productId: input.productId } });
     if (unique.size > 0) {
@@ -1007,7 +1044,7 @@ export async function setProductCutRates(input: {
     }
 
     // Keep Розкрій rateOverride aligned with optimal-run rate for order snapshots.
-    if (input.optimalQty != null && unique.has(input.optimalQty)) {
+    if (optimalQty != null && unique.has(optimalQty)) {
       const cutOps = await tx.productOperation.findMany({
         where: { productId: input.productId, operation: { nameUk: "Розкрій" } },
         select: { id: true },
@@ -1015,7 +1052,7 @@ export async function setProductCutRates(input: {
       for (const op of cutOps) {
         await tx.productOperation.update({
           where: { id: op.id },
-          data: { rateOverride: unique.get(input.optimalQty)! },
+          data: { rateOverride: unique.get(optimalQty)! },
         });
       }
     }

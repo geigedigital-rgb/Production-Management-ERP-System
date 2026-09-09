@@ -27,6 +27,7 @@ import {
   ProductCutRateFields,
   type CutRateTierDraft,
 } from "@/components/products/ProductCutRateFields";
+import { resolveOptimalCutQty } from "@/lib/cut-rate";
 import {
   DEFAULT_COMMERCIAL_PRICE_TIERS,
   ProductPriceFields,
@@ -118,7 +119,6 @@ export function ProductCreatePanel({
   const [materialCatalog, setMaterialCatalog] = useState(initialMaterials);
   const [operationCatalog, setOperationCatalog] = useState(initialOperations);
   const [decorationCatalog, setDecorationCatalog] = useState(initialDecorations);
-  const [cutOptimalQty, setCutOptimalQty] = useState("");
   const [cutTiers, setCutTiers] = useState<CutRateTierDraft[]>([]);
   const [isBaseModel, setIsBaseModel] = useState(true);
   const [priceTiers, setPriceTiers] = useState<CommercialPriceTierDraft[]>([]);
@@ -153,7 +153,6 @@ export function ProductCreatePanel({
     setPreviewUrl(null);
     setSelectedSizes([]);
     setComposition(emptyComposition());
-    setCutOptimalQty("");
     setCutTiers([]);
     setIsBaseModel(true);
     setPriceTiers([]);
@@ -217,11 +216,11 @@ export function ProductCreatePanel({
         })),
       }),
     );
-    if (hasCutOperation && (cutOptimalQty.trim() || cutTiers.some((row) => row.ratePerUnit > 0))) {
+    if (hasCutOperation && cutTiers.some((row) => row.ratePerUnit > 0 || row.minQuantity > 0)) {
       formData.set(
         "cutRatesJson",
         JSON.stringify({
-          optimalQty: cutOptimalQty.trim() || null,
+          optimalQty: resolveOptimalCutQty({ optimalQty: null, tiers: cutTiers }),
           tiers: cutTiers,
         }),
       );
@@ -450,7 +449,7 @@ export function ProductCreatePanel({
               cutRatePreview={
                 hasCutOperation
                   ? {
-                      optimalQty: cutOptimalQty.trim() ? Number(cutOptimalQty) : null,
+                      optimalQty: resolveOptimalCutQty({ optimalQty: null, tiers: cutTiers }),
                       tiers: cutTiers,
                     }
                   : undefined
@@ -503,16 +502,10 @@ export function ProductCreatePanel({
               <div>
                 <SectionTitle>Крій за тиражем</SectionTitle>
                 <p className="type-caption mt-1">
-                  Оптимальний тираж і ставки крою на 1 шт. Збережуться разом із виробом — у
-                  замовленнях ціна крою зменшуватиметься до optimal і не падатиме вище.
+                  Ставки крою на 1 шт. Оптимум — остання сходинка тиражу; далі ₴/шт не падає.
                 </p>
               </div>
-              <ProductCutRateFields
-                optimalQty={cutOptimalQty}
-                onOptimalQtyChange={setCutOptimalQty}
-                tiers={cutTiers}
-                onTiersChange={setCutTiers}
-              />
+              <ProductCutRateFields tiers={cutTiers} onTiersChange={setCutTiers} />
             </section>
           ) : (
             <p className="type-caption rounded-[var(--radius-control)] border border-dashed border-[var(--color-border)] px-3 py-2.5">

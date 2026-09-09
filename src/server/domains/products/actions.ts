@@ -27,6 +27,7 @@ import {
   setProductCommercialPrices,
   setProductImageUrl,
   setProductOperationRateTiers,
+  setProductOperationRateOverride,
   parseCommercialPriceTiersInput,
   toCompositionTemplate,
   duplicateProduct,
@@ -491,6 +492,36 @@ export async function updateProductOperationRateTiersAction(formData: FormData) 
   return { ok: true as const };
 }
 
+export async function updateProductOperationRateAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(formData.get("productId") ?? "");
+  const id = String(formData.get("id") ?? "");
+  const rateRaw = formData.get("rateOverride");
+  const clear = String(formData.get("clear") ?? "") === "1";
+
+  if (!productId || !id) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  const rateOverride = clear
+    ? null
+    : rateRaw === "" || rateRaw == null
+      ? null
+      : Number(rateRaw);
+
+  if (rateOverride != null && (!Number.isFinite(rateOverride) || rateOverride < 0)) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  await setProductOperationRateOverride({ productOperationId: id, rateOverride });
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/products");
+  return { ok: true as const };
+}
+
 export async function updateProductCommercialPricesAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
@@ -538,7 +569,32 @@ export async function previewProductEconomicsAction(productId: string, quantity:
     "@/server/domains/calculation/from-entities"
   );
   const pricing = await getPricingDefaults();
-  const calc = buildCalcFromProduct(product, qty, pricing);
+  const { fixedCostOptionsFromDb } = await import("@/server/domains/fixed-costs/service");
+  const fixedCosts = await fixedCostOptionsFromDb();
+  const costCalc = buildCalcFromProduct(product, qty, { ...pricing, fixedCosts });
+  const {
+    calcWithClientPrice,
+    resolveSewingPerUnitFromOperations,
+  } = await import("@/lib/product-selling");
+  const sewingPerUnit = resolveSewingPerUnitFromOperations(
+    product.operations.map((row) => ({
+      nameUk: row.operation.nameUk,
+      rateOverride: row.rateOverride != null ? Number(row.rateOverride) : null,
+      baseRate: row.operation.baseRate != null ? Number(row.operation.baseRate) : null,
+      unitRate:
+        row.rateOverride != null
+          ? Number(row.rateOverride)
+          : row.operation.baseRate != null
+            ? Number(row.operation.baseRate)
+            : null,
+    })),
+  );
+  const { calc } = calcWithClientPrice({
+    costCalc,
+    quantity: qty,
+    product,
+    sewingPerUnit,
+  });
 
   return { ok: true as const, calc, quantity: qty };
 }

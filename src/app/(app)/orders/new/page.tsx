@@ -33,8 +33,6 @@ export default async function NewOrderPage({
       <OrderCreateForm
         initialClientId={params.clientId}
         initialProductId={params.productId}
-        defaultTargetMargin={pricing.targetRatePercent}
-        pricingMethod={pricing.pricingMethod}
         companyCostMode={fabricGlobals.materialCostVatMode}
         clients={clients.map((client) => ({ id: client.id, label: client.companyName }))}
         sizeOptions={sizes.map((size) => ({

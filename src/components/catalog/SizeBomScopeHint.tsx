@@ -9,12 +9,37 @@ export function SizeBomScopeHint({
   hasOversizeSizes,
   materialPct = 15,
   operationPct = 20,
+  compact = false,
 }: {
   sizeScope: SizeScope;
   hasOversizeSizes: boolean;
   materialPct?: number;
   operationPct?: number;
+  compact?: boolean;
 }) {
+  if (compact) {
+    if (sizeScope === ALL_SIZES) {
+      return (
+        <p className="type-caption">
+          База S–XL
+          {hasOversizeSizes
+            ? ` · XXL+ авто +${materialPct}% мат. / +${operationPct}% оп.`
+            : ""}
+        </p>
+      );
+    }
+    if (isOversizeCode(sizeScope)) {
+      return (
+        <p className="type-caption">
+          {sizeScope}: норма вже з +{materialPct}%. Зміна = своя норма розміру.
+        </p>
+      );
+    }
+    return (
+      <p className="type-caption">Лише {sizeScope}. Решта — з «Усі».</p>
+    );
+  }
+
   if (sizeScope === ALL_SIZES) {
     return (
       <p className="type-caption">

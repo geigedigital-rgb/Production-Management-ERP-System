@@ -16,7 +16,23 @@ import { Banner } from "@/components/ui/Banner";
 import { formatMoneyUah } from "@/lib/utils";
 import type { CalculationResult } from "@/server/domains/calculation/engine";
 import type { DecorationRow, FabricDeliveryRow, MaterialRow, OperationRow } from "./ConfigurationTab";
-import { isOversizeCode, oversizeMaterialPct, oversizeOperationPct, oversizeUpliftCaption, resolveSizeCoeffs } from "@/lib/size-coeffs";
+import {
+  isOversizeCode,
+  oversizeMaterialPct,
+  oversizeOperationPct,
+  oversizeUpliftCaption,
+  resolveSizeCoeffs,
+} from "@/lib/size-coeffs";
+import {
+  FIXED_COST_LINE_NAME_UK,
+  fixedCostValidationMessage,
+  type FixedCostAllocation,
+  type FixedCostValidationError,
+} from "@/lib/fixed-costs";
+import {
+  OrderFixedCostError,
+  OrderSewerCountControl,
+} from "@/components/orders/OrderSewerCountControl";
 
 /**
  * Line-item breakdown for the calculation tab.
@@ -30,10 +46,14 @@ export function CalculationTab({
   decorations,
   fabricDeliveryLines = [],
   fabricDeliveryAmount = 0,
-  pricingMethod,
-  targetRatePercent,
+  fixedCostAllocation = null,
+  fixedCostError = null,
+  orderId,
+  orderItemId,
+  companySewerCount,
+  sewerCountOverride = null,
+  canEditSewerCount = false,
   minimumMarginPercent,
-  isOrderOverride,
   corridorHint,
   hasCommercialPriceList = false,
   commercialSellingPricePerUnit,
@@ -48,8 +68,15 @@ export function CalculationTab({
   decorations: DecorationRow[];
   fabricDeliveryLines?: FabricDeliveryRow[];
   fabricDeliveryAmount?: number;
-  pricingMethod: "MARGIN" | "MARKUP";
-  targetRatePercent: number;
+  fixedCostAllocation?: FixedCostAllocation | null;
+  fixedCostError?: FixedCostValidationError | null;
+  orderId: string;
+  orderItemId: string;
+  companySewerCount: number;
+  sewerCountOverride?: number | null;
+  canEditSewerCount?: boolean;
+  pricingMethod?: "MARGIN" | "MARKUP";
+  targetRatePercent?: number;
   minimumMarginPercent: number;
   isOrderOverride?: boolean;
   corridorHint?: { title: string; detail: string; href?: string; label?: string } | null;
@@ -71,9 +98,10 @@ export function CalculationTab({
       ...row,
       ...resolveSizeCoeffs(row.sizeCode),
     }));
+  const fixedCostTotal = fixedCostAllocation?.fixedCostTotal ?? 0;
   const otherAdditionalCosts = Math.max(
     0,
-    Number(calc.additionalCostsSubtotal) - fabricDeliveryAmount,
+    Number(calc.additionalCostsSubtotal) - fabricDeliveryAmount - fixedCostTotal,
   );
   const fabricDeliveryRows = fabricDeliveryLines.filter((row) => row.amount > 0);
   const materialsSubtotal = Number(calc.materialsSubtotal);
@@ -90,8 +118,8 @@ export function CalculationTab({
     <div className="space-y-4">
       {hasCommercialPriceList ? (
         <Banner tone="info" title="Два шари розрахунку">
-          Комерційна ціна для клієнта — з фіксованого прайсу (+ брендування у пропозиції). Таблиця нижче —
-          внутрішня собівартість для планування виробництва; вона не змінює ціну в КП.
+          Комерційна ціна для клієнта — з фіксованого прайсу (+ брендування у пропозиції). Таблиця
+          нижче — внутрішня собівартість для планування виробництва; вона не змінює ціну в КП.
         </Banner>
       ) : null}
       {corridorHint ? (
@@ -109,8 +137,25 @@ export function CalculationTab({
           {corridorHint.detail}
         </Banner>
       ) : null}
+      {fixedCostError ? (
+        <Banner
+          tone="danger"
+          title="Постійні витрати не налаштовані"
+          action={
+            <Link href="/settings/fixed-costs" className="btn-primary btn-primary-sm">
+              Довідник
+            </Link>
+          }
+        >
+          {fixedCostValidationMessage(fixedCostError)} Розрахунок / збереження пропозиції
+          недоступні, доки параметри не виправлені.
+        </Banner>
+      ) : null}
       {belowMinimum ? (
-        <Banner tone="danger" title={`Маржа ${commercialMargin.toFixed(1)}% нижче мінімуму ${minimumMarginPercent}%`}>
+        <Banner
+          tone="danger"
+          title={`Маржа ${commercialMargin.toFixed(1)}% нижче мінімуму ${minimumMarginPercent}%`}
+        >
           Збереження пропозиції з такою ціною доступне лише адміністратору.
         </Banner>
       ) : null}
@@ -120,9 +165,8 @@ export function CalculationTab({
           left={<span className="type-subsection">Деталі статей</span>}
           right={
             <span className="type-caption tabular">
-              на {totalQuantity} шт · {pricingMethod === "MARGIN" ? "маржа" : "націнка"}{" "}
-              {targetRatePercent}%
-              {isOrderOverride ? " · це замовлення" : " · база"}
+              на {totalQuantity} шт
+              {hasCommercialPriceList ? " · ціна з прайсу виробу" : " · без прайсу (собівартість)"}
             </span>
           }
         />
@@ -237,6 +281,63 @@ export function CalculationTab({
                 perUnit={formatMoneyUah(perUnit(operationsSubtotal))}
                 total={formatMoneyUah(operationsSubtotal)}
               />
+            ) : null}
+
+            <TableSectionHeader title={FIXED_COST_LINE_NAME_UK} />
+            <TR muted>
+              <TD colSpan={4} className="py-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <OrderSewerCountControl
+                    orderId={orderId}
+                    orderItemId={orderItemId}
+                    companySewerCount={companySewerCount}
+                    sewerCountOverride={sewerCountOverride}
+                    locked={!canEditSewerCount}
+                  />
+                  <OrderFixedCostError error={fixedCostError} />
+                </div>
+              </TD>
+            </TR>
+            {fixedCostAllocation && fixedCostAllocation.fixedCostTotal > 0 ? (
+              <>
+                {fixedCostAllocation.bySize.length > 1 ? (
+                  fixedCostAllocation.bySize.map((row) => (
+                    <TR key={`pv-${row.sizeCode}`}>
+                      <TD className="font-medium">{FIXED_COST_LINE_NAME_UK}</TD>
+                      <TD className="text-[var(--color-text-secondary)]">
+                        Коеф. {fixedCostAllocation.metrics.coefficient.toFixed(1)}
+                        <span className="type-caption ml-1.5">{row.sizeCode}</span>
+                      </TD>
+                      <TD numeric className="text-[var(--color-text-secondary)]">
+                        {formatMoneyUah(row.fixedCostPerUnit)}
+                      </TD>
+                      <TD numeric>{formatMoneyUah(row.fixedCostTotal)}</TD>
+                    </TR>
+                  ))
+                ) : (
+                  <TR>
+                    <TD className="font-medium">{FIXED_COST_LINE_NAME_UK}</TD>
+                    <TD className="text-[var(--color-text-secondary)]">
+                      Коеф. {fixedCostAllocation.metrics.coefficient.toFixed(1)}
+                    </TD>
+                    <TD numeric className="text-[var(--color-text-secondary)]">
+                      {formatMoneyUah(fixedCostAllocation.fixedCostPerUnit)}
+                    </TD>
+                    <TD numeric>{formatMoneyUah(fixedCostAllocation.fixedCostTotal)}</TD>
+                  </TR>
+                )}
+                <TableSectionSubtotal
+                  label="Разом постійні витрати"
+                  perUnit={formatMoneyUah(fixedCostAllocation.fixedCostPerUnit)}
+                  total={formatMoneyUah(fixedCostAllocation.fixedCostTotal)}
+                />
+              </>
+            ) : !fixedCostError ? (
+              <TR muted>
+                <TD colSpan={4} className="type-caption">
+                  Немає «Пошив» — ПВ = 0.
+                </TD>
+              </TR>
             ) : null}
 
             {decorations.length > 0 ? (

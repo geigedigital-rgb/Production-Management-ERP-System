@@ -224,7 +224,7 @@ export async function getOwnerDashboard(input: {
   ]);
 
   const pricing = {
-    targetRatePercent: Number(pricingRow?.targetMarginPercent ?? 30),
+    targetRatePercent: 0,
     minimumMarginPercent: Number(pricingRow?.minimumMarginPercent ?? 15),
   };
 
@@ -512,8 +512,10 @@ export async function getOwnerDashboard(input: {
 
   const staleCount = active.filter(staleOf).length;
   const discountCount = active.filter((order) => {
-    if (order.targetMarginPercent == null) return false;
-    return num(order.targetMarginPercent) + 0.0001 < pricing.targetRatePercent;
+    const margin = order.items.reduce((sum, item) => sum + num(item.versions[0]?.marginPercent), 0);
+    const n = order.items.filter((item) => item.versions[0]).length;
+    if (n === 0) return false;
+    return margin / n + 0.0001 < pricing.minimumMarginPercent;
   }).length;
   const noNormCatalog = operations.filter((row) => {
     if (row.calculationMethod === "SHIFT_OUTPUT") {

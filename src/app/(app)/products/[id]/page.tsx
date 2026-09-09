@@ -13,6 +13,11 @@ import { ProductSizesEditor } from "@/components/products/ProductSizesEditor";
 import { DuplicateProductButton } from "@/components/products/DuplicateProductButton";
 import { IconCheckCircle, IconCircle, IconOrders, IconSizes } from "@/components/ui/Icons";
 import { buildCalcFromProduct, getPricingDefaults } from "@/server/domains/calculation/from-entities";
+import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
+import {
+  calcWithClientPrice,
+  resolveSewingPerUnitFromOperations,
+} from "@/lib/product-selling";
 import { ProductDetailTabs, type ProductDetailTab } from "@/components/products/ProductDetailTabs";
 import { prisma } from "@/server/db/client";
 import { getCurrentUserAccess, accessHas } from "@/server/auth/access";
@@ -22,11 +27,12 @@ import {
   sizeWasteFromNorms,
 } from "@/lib/size-bom";
 import { operationMethodLabel } from "@/lib/operation-labels";
-import { isCutOperationName, summarizeCutOperationDisplay } from "@/lib/cut-rate";
+import { isCutOperationName, resolveCutUnitRateForProduct, summarizeCutOperationDisplay } from "@/lib/cut-rate";
 import {
   pickOperationQuantityTiers,
   resolveQuantityTierRate,
 } from "@/lib/quantity-tiers";
+import { SHARED_PRODUCT_TIRAGE_QTYS, isSewOperationName } from "@/lib/sewing-markup";
 
 /** Fixed ops use catalog preview qty; cut is shown separately from tier block. */
 const TIER_PREVIEW_QTY = 100;
@@ -70,6 +76,8 @@ function mapOperationRow(
   method: string;
   methodCode: string;
   unitCost: number;
+  catalogRate: number;
+  rateOverride: number | null;
   sizeCodes: string[] | null;
   rateTiers: Array<{ minQuantity: number; ratePerUnit: number }>;
   isCut: boolean;
@@ -78,6 +86,8 @@ function mapOperationRow(
 } {
   const sizeCodes = sizeCodesFromScopes(row.sizeScopes);
   const rateTiers = pickOperationQuantityTiers(row.rateTiers, row.operation.rateTiers);
+  const catalogRate = Number(row.operation.baseRate ?? 0);
+  const rateOverride = row.rateOverride != null ? Number(row.rateOverride) : null;
 
   if (isCutOperationName(row.operation.nameUk)) {
     const fallbackRate = operationFallbackRate(row);
@@ -96,6 +106,8 @@ function mapOperationRow(
       method: cutDisplay.methodLabel,
       methodCode: row.operation.calculationMethod,
       unitCost: 0,
+      catalogRate,
+      rateOverride,
       sizeCodes,
       rateTiers,
       isCut: true,
@@ -115,6 +127,8 @@ function mapOperationRow(
     method,
     methodCode: row.operation.calculationMethod,
     unitCost: operationUnitCost(row),
+    catalogRate,
+    rateOverride,
     sizeCodes,
     rateTiers,
     isCut: false,
@@ -138,7 +152,7 @@ export default async function ProductDetailPage({
   const product = await getProduct(id);
   if (!product) notFound();
 
-  const [materials, units, operations, decorations, pricing, usedIn, access, sizeCatalog] =
+  const [materials, units, operations, decorations, pricing, usedIn, access, sizeCatalog, fixedCosts] =
     await Promise.all([
       listMaterials(),
       listUnits(),
@@ -164,7 +178,9 @@ export default async function ProductDetailPage({
       }),
       getCurrentUserAccess(),
       listSizes(),
+      fixedCostOptionsFromDb(),
     ]);
+  const pricingWithFixed = { ...pricing, fixedCosts };
   const canDuplicate = accessHas(access, "saveAsStandardProduct");
   const canEditSizes = accessHas(access, "createInlineCatalog");
   const canViewCosts = accessHas(access, "viewProductCosts");
@@ -172,7 +188,69 @@ export default async function ProductDetailPage({
   const resolvedTab: ProductDetailTab =
     canViewCosts && activeTab === "pricing" ? "pricing" : "composition";
 
-  const calc = buildCalcFromProduct(product, ECONOMICS_PREVIEW_QTY, pricing);
+  const sewRow =
+    product.operations.find((row) => isSewOperationName(row.operation.nameUk)) ??
+    product.operations
+      .filter((row) => !isCutOperationName(row.operation.nameUk))
+      .sort((a, b) => operationFallbackRate(b) - operationFallbackRate(a))[0] ??
+    null;
+  const cutRow = product.operations.find((row) => isCutOperationName(row.operation.nameUk));
+  const priceQtySet = new Set<number>([
+    ...SHARED_PRODUCT_TIRAGE_QTYS,
+    ...(product.cutRateTiers ?? []).map((tier) => tier.minQuantity),
+    ...(product.commercialPriceTiers ?? []).map((tier) => tier.minQuantity),
+  ]);
+  const priceQtys = [...priceQtySet].filter((qty) => qty > 0).sort((a, b) => a - b);
+  const tirageCostHints = canViewCosts
+    ? priceQtys.map((qty) => {
+        const calc = buildCalcFromProduct(product, qty, pricingWithFixed);
+        let sewingPerUnit = 0;
+        if (sewRow) {
+          const fallback = operationFallbackRate(sewRow);
+          if (sewRow.operation.calculationMethod === "QUANTITY_TIER") {
+            sewingPerUnit = resolveQuantityTierRate({
+              quantity: qty,
+              tiers: pickOperationQuantityTiers(sewRow.rateTiers, sewRow.operation.rateTiers),
+              fallbackRate: fallback,
+            });
+          } else if (sewRow.operation.calculationMethod === "SHIFT_OUTPUT") {
+            sewingPerUnit = operationUnitCost(sewRow);
+          } else {
+            sewingPerUnit = fallback;
+          }
+        }
+        const cutPerUnit = cutRow
+          ? resolveCutUnitRateForProduct(product, qty, operationFallbackRate(cutRow))
+          : 0;
+        return {
+          minQuantity: qty,
+          costPerUnit: Number(calc.costPerUnit),
+          sewingPerUnit,
+          cutPerUnit,
+        };
+      })
+    : [];
+
+  const costCalc = buildCalcFromProduct(product, ECONOMICS_PREVIEW_QTY, pricingWithFixed);
+  const economicsSewing = resolveSewingPerUnitFromOperations(
+    product.operations.map((row) => ({
+      nameUk: row.operation.nameUk,
+      rateOverride: row.rateOverride != null ? Number(row.rateOverride) : null,
+      baseRate: row.operation.baseRate != null ? Number(row.operation.baseRate) : null,
+      unitRate:
+        row.rateOverride != null
+          ? Number(row.rateOverride)
+          : row.operation.baseRate != null
+            ? Number(row.operation.baseRate)
+            : null,
+    })),
+  );
+  const { calc } = calcWithClientPrice({
+    costCalc,
+    quantity: ECONOMICS_PREVIEW_QTY,
+    product,
+    sewingPerUnit: economicsSewing,
+  });
   const operationRows = product.operations.map((row) => mapOperationRow(row, product));
   const hasCutOperation = operationRows.some((row) => row.isCut);
   const operationsSubtotalFixed = operationRows
@@ -426,6 +504,7 @@ export default async function ProductDetailPage({
                 minQuantity: tier.minQuantity,
                 pricePerUnit: Number(tier.pricePerUnit),
               })),
+              costHints: tirageCostHints,
             }}
           />
       </ProductDetailPreviewShell>

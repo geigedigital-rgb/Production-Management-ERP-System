@@ -10,6 +10,7 @@ import type { getProduct } from "@/server/domains/products/service";
 import {
   consumptionForSize,
   effectiveSizeCodes,
+  linesForSize,
   sizeCodesFromScopes,
   sizeConsumptionFromNorms,
   sizeWasteFromNorms,
@@ -28,6 +29,15 @@ import {
   type QuantityRateTier,
 } from "@/lib/quantity-tiers";
 import { resolveSizeCoeffs, isOversizeCode } from "@/lib/size-coeffs";
+import { isSewOperationName } from "@/lib/sewing-markup";
+import {
+  FIXED_COST_ADDITIONAL_ID,
+  type FixedCostAllocation,
+} from "@/lib/fixed-costs";
+import {
+  buildFixedCostAllocation,
+  fixedCostAdditionalLine,
+} from "@/server/domains/fixed-costs/service";
 
 export type CutRateContext = {
   optimalQty: number | null;
@@ -150,8 +160,10 @@ export async function getPricingDefaults() {
     prisma.sizeRule.findMany({ where: { status: "ACTIVE" } }),
   ]);
   return {
-    pricingMethod: (pricing?.pricingMethod ?? "MARGIN") as "MARGIN" | "MARKUP",
-    targetRatePercent: Number(pricing?.targetMarginPercent ?? 30),
+    // Selling price is driven by product commercial tiers (sewing markup × tirage),
+    // not by a company-wide % on total cost. Keep rate at 0 so cost calc selling = cost.
+    pricingMethod: "MARKUP" as const,
+    targetRatePercent: 0,
     minimumMarginPercent: Number(pricing?.minimumMarginPercent ?? 15),
     roundingDecimals: 2,
     sizeRules: sizeRules.map((row) => ({
@@ -162,25 +174,11 @@ export async function getPricingDefaults() {
   };
 }
 
-/** Project defaults with optional order-level target margin override. */
+/** Project defaults. Order-level % margin override is retired (price list owns selling). */
 export async function getPricingForOrder(orderId?: string | null) {
   const defaults = await getPricingDefaults();
-  if (!orderId) return { ...defaults, isOrderOverride: false };
-
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { targetMarginPercent: true },
-  });
-
-  if (order?.targetMarginPercent == null) {
-    return { ...defaults, isOrderOverride: false };
-  }
-
-  return {
-    ...defaults,
-    targetRatePercent: Number(order.targetMarginPercent),
-    isOrderOverride: true,
-  };
+  void orderId;
+  return { ...defaults, isOrderOverride: false };
 }
 
 function resolveProductOperationUnitRate(
@@ -211,6 +209,13 @@ function resolveProductOperationUnitRate(
   return fallbackRate;
 }
 
+export type FixedCostCalcOptions = {
+  workingDaysPerMonth: number;
+  companySewerCount: number;
+  dailySewerPay: number;
+  monthlyTotal: number;
+};
+
 export function buildCalcFromProduct(
   product: ProductDetail,
   quantity: number,
@@ -218,6 +223,7 @@ export function buildCalcFromProduct(
     pricingMethod: "MARGIN" | "MARKUP";
     targetRatePercent: number;
     sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>;
+    fixedCosts?: FixedCostCalcOptions | null;
   },
 ): CalculationResult {
   const sizeRules = pricing.sizeRules;
@@ -329,6 +335,44 @@ export function buildCalcFromProduct(
     targetRatePercent: pricing.targetRatePercent,
   };
 
+  if (pricing.fixedCosts) {
+    const sewingSizes = sizes.map((size) => {
+      let sewingPerUnit = 0;
+      for (const row of product.operations) {
+        if (!isSewOperationName(row.operation.nameUk)) continue;
+        const applies = effectiveSizeCodes(sizeCodesFromScopes(row.sizeScopes), sizeCodes);
+        if (!applies.includes(size.sizeCode)) continue;
+        const method = row.operation.calculationMethod;
+        let unit = 0;
+        if (method === "SHIFT_OUTPUT") {
+          const output =
+            row.standardOverride != null
+              ? Number(row.standardOverride)
+              : row.operation.standardOutputPerShift != null
+                ? Number(row.operation.standardOutputPerShift)
+                : 0;
+          unit = output > 0 ? Number(row.operation.shiftCost ?? 0) / output : 0;
+        } else {
+          unit = resolveProductOperationUnitRate(row, quantity, product) ?? 0;
+        }
+        sewingPerUnit += unit * (size.operationCoeff ?? 1);
+      }
+      return {
+        sizeCode: size.sizeCode,
+        quantity: size.quantity,
+        sewingPerUnit,
+      };
+    });
+    const allocation = buildFixedCostAllocation({
+      ...pricing.fixedCosts,
+      sewerCountOverride: null,
+      sizes: sewingSizes,
+    });
+    if (allocation && allocation.fixedCostTotal > 0) {
+      input.additionalCosts.push(fixedCostAdditionalLine(allocation));
+    }
+  }
+
   return calculateCosting(input);
 }
 
@@ -364,7 +408,68 @@ export type OrderItemForCalc = {
     isPerUnit: boolean;
   }>;
   fabricDeliveryAmount?: number | { toString(): string } | null;
+  sewerCountOverride?: number | null;
 };
+
+export type BuildCalcOrderOptions = ResolveOrderOpRateOptions & {
+  fixedCosts?: FixedCostCalcOptions | null;
+};
+
+/** Sewing ₴/шт per size (Пошиття ops only), with oversize operation coeff. */
+export function resolveOrderSewingPerUnitBySize(
+  item: OrderItemForCalc,
+  options?: ResolveOrderOpRateOptions,
+  sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>,
+): Array<{ sizeCode: string; quantity: number; sewingPerUnit: number }> {
+  const totalQuantity = orderItemTotalQuantity(item);
+  return item.sizes.map((size) => {
+    const coeffs = resolveSizeCoeffs(size.sizeCode, sizeRules);
+    const ops = linesForSize(
+      item.operations.map((row) => ({
+        id: row.id,
+        groupKey: row.operationId ?? row.nameSnapshot ?? row.id,
+        sizeCode: row.sizeCode ?? null,
+        nameSnapshot: row.nameSnapshot,
+        calculationMethod: row.calculationMethod,
+        unitRate: row.unitRate,
+        shiftCost: row.shiftCost,
+        standardOutput: row.standardOutput,
+      })),
+      size.sizeCode,
+    ).filter((row) => isSewOperationName(row.nameSnapshot));
+
+    let sewingPerUnit = 0;
+    for (const row of ops) {
+      let unit = 0;
+      if (row.calculationMethod === "SHIFT_OUTPUT") {
+        const output = Number(row.standardOutput ?? 0);
+        unit = output > 0 ? Number(row.shiftCost ?? 0) / output : 0;
+      } else {
+        unit = resolveOrderOperationUnitRate(row, totalQuantity, options) ?? 0;
+      }
+      sewingPerUnit += unit * coeffs.operationCoeff;
+    }
+    return {
+      sizeCode: size.sizeCode,
+      quantity: size.quantity,
+      sewingPerUnit,
+    };
+  });
+}
+
+export function resolveFixedCostAllocationForOrderItem(
+  item: OrderItemForCalc,
+  fixedCosts: FixedCostCalcOptions,
+  options?: ResolveOrderOpRateOptions,
+  sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>,
+): FixedCostAllocation | null {
+  const sewingSizes = resolveOrderSewingPerUnitBySize(item, options, sizeRules);
+  return buildFixedCostAllocation({
+    ...fixedCosts,
+    sewerCountOverride: item.sewerCountOverride,
+    sizes: sewingSizes,
+  });
+}
 
 export function buildCalcFromOrderItem(
   item: OrderItemForCalc,
@@ -374,20 +479,35 @@ export function buildCalcFromOrderItem(
     manualSellingPricePerUnit?: number | null;
     sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>;
   },
-  options?: ResolveOrderOpRateOptions,
+  options?: BuildCalcOrderOptions,
 ): CalculationResult {
   const totalQuantity = orderItemTotalQuantity(item);
   const fabricDelivery = Number(item.fabricDeliveryAmount ?? 0);
   const additionalCosts = [
-    ...item.additionalCosts.map((row) => ({
-      id: row.id,
-      amount: Number(row.amount),
-      isPerUnit: row.isPerUnit,
-    })),
+    ...item.additionalCosts
+      .filter((row) => row.id !== FIXED_COST_ADDITIONAL_ID)
+      .map((row) => ({
+        id: row.id,
+        amount: Number(row.amount),
+        isPerUnit: row.isPerUnit,
+      })),
     ...(fabricDelivery > 0
       ? [{ id: "fabric-delivery", amount: fabricDelivery, isPerUnit: false }]
       : []),
   ];
+
+  if (options?.fixedCosts) {
+    const allocation = resolveFixedCostAllocationForOrderItem(
+      item,
+      options.fixedCosts,
+      options,
+      pricing.sizeRules,
+    );
+    if (allocation && allocation.fixedCostTotal > 0) {
+      additionalCosts.push(fixedCostAdditionalLine(allocation));
+    }
+  }
+
   const sizeRules = pricing.sizeRules;
 
   return calculateCosting({

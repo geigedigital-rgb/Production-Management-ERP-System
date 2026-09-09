@@ -38,9 +38,13 @@ export type CommercialPriceProduct = {
 export function commercialPriceTiersFromProduct(
   product: CommercialPriceProduct | null | undefined,
 ): CommercialPriceTier[] {
-  if (!product?.isBaseModel || !product.commercialPriceTiers?.length) return [];
-  return product.commercialPriceTiers.map((tier) => ({
-    minQuantity: tier.minQuantity,
-    pricePerUnit: Number(tier.pricePerUnit),
-  }));
+  // Selling price comes from the saved ladder whenever it exists.
+  // isBaseModel is only a catalog flag («базова модель»), not a gate for pricing.
+  if (!product?.commercialPriceTiers?.length) return [];
+  return product.commercialPriceTiers
+    .map((tier) => ({
+      minQuantity: tier.minQuantity,
+      pricePerUnit: Number(tier.pricePerUnit),
+    }))
+    .filter((tier) => tier.minQuantity > 0 && Number.isFinite(tier.pricePerUnit) && tier.pricePerUnit > 0);
 }

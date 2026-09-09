@@ -27,6 +27,7 @@ import {
   setOrderItemMaterialConsumption,
   copyOrderItemSizeSpec,
   updateOrderItemFabricDelivery,
+  updateOrderItemSewerCountOverride,
   updateOrderItemMaterialTerms,
   getOrderItemMaterialDetail,
   updateOrderItemSizes,
@@ -37,8 +38,15 @@ import {
   buildCalcFromOrderItem,
   calcOptionsFromProduct,
   getPricingForOrder,
+  resolveFixedCostAllocationForOrderItem,
 } from "@/server/domains/calculation/from-entities";
-import { commercialPriceForOrderItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
+import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
+import {
+  fixedCostValidationMessage,
+  validateFixedCostParams,
+  resolveSewerCount,
+} from "@/lib/fixed-costs";
+import { commercialPriceForOrderItem, draftLineFromItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
 import type { OrderStatus } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
@@ -584,6 +592,33 @@ export async function updateOrderFabricDeliveryAction(formData: FormData) {
   return { ok: true as const };
 }
 
+export async function updateOrderItemSewerCountAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("manageOrders");
+
+  const orderId = String(formData.get("orderId") ?? "");
+  await assertCanEditOrderComposition(orderId);
+  const orderItemId = String(formData.get("orderItemId") ?? "");
+  const raw = String(formData.get("sewerCountOverride") ?? "").trim();
+  const clear = formData.get("clearOverride") === "1" || raw === "";
+
+  if (!orderItemId) return { ok: false as const, error: "VALIDATION" as const };
+
+  let sewerCountOverride: number | null = null;
+  if (!clear) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      return { ok: false as const, error: "VALIDATION" as const };
+    }
+    sewerCountOverride = Math.floor(n);
+  }
+
+  await updateOrderItemSewerCountOverride(orderItemId, sewerCountOverride);
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true as const };
+}
+
 export async function updateOrderMaterialConsumptionAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
@@ -663,14 +698,42 @@ export async function saveVersionAction(formData: FormData) {
   if (!item) return { ok: false as const, error: "NOT_FOUND" as const };
 
   const pricing = await getPricingForOrder(orderId);
+  const fixedCosts = await fixedCostOptionsFromDb();
+  const { sewerCount } = resolveSewerCount({
+    companySewerCount: fixedCosts?.companySewerCount ?? 0,
+    orderOverride: item.sewerCountOverride,
+  });
+  const paramsInvalid = fixedCosts
+    ? validateFixedCostParams({
+        workingDaysPerMonth: fixedCosts.workingDaysPerMonth,
+        sewerCount,
+        dailySewerPay: fixedCosts.dailySewerPay,
+        monthlyTotal: fixedCosts.monthlyTotal,
+      })
+    : "MONTHLY_TOTAL_ZERO";
+  if (paramsInvalid) {
+    return {
+      ok: false as const,
+      error: "FIXED_COSTS_INVALID" as const,
+      message: fixedCostValidationMessage(paramsInvalid),
+    };
+  }
+
+  const calcOptions = {
+    ...calcOptionsFromProduct(item.product),
+    fixedCosts,
+  };
   const calc = buildCalcFromOrderItem(
     item,
     {
       ...pricing,
       manualSellingPricePerUnit,
     },
-    calcOptionsFromProduct(item.product),
+    calcOptions,
   );
+  const fixedCostAllocation = fixedCosts
+    ? resolveFixedCostAllocationForOrderItem(item, fixedCosts, calcOptions, pricing.sizeRules)
+    : null;
 
   if (Number(calc.marginPercent) < pricing.minimumMarginPercent) {
     const access = await getCurrentUserAccess();
@@ -688,6 +751,7 @@ export async function saveVersionAction(formData: FormData) {
       item: {
         nameUk: item.nameUk,
         totalQuantity: item.totalQuantity,
+        sewerCountOverride: item.sewerCountOverride,
         sizes: item.sizes,
         materials: item.materials,
         operations: item.operations,
@@ -697,6 +761,12 @@ export async function saveVersionAction(formData: FormData) {
       calc,
       pricing,
       manualSellingPricePerUnit,
+      fixedCosts: fixedCostAllocation
+        ? {
+            params: fixedCosts,
+            allocation: fixedCostAllocation,
+          }
+        : null,
     },
     totals: {
       costPerUnit: Number(calc.costPerUnit),
@@ -741,13 +811,33 @@ export async function saveProposalAction(formData: FormData) {
   if (!order) return { ok: false as const, error: "NOT_FOUND" as const };
 
   const pricing = await getPricingForOrder(orderId);
+  const fixedCosts = await fixedCostOptionsFromDb();
   for (const line of lines) {
     const item = order.items.find((row) => row.id === line.orderItemId);
     if (!item) return { ok: false as const, error: "NOT_FOUND" as const };
+    const { sewerCount } = resolveSewerCount({
+      companySewerCount: fixedCosts?.companySewerCount ?? 0,
+      orderOverride: item.sewerCountOverride,
+    });
+    const paramsInvalid = fixedCosts
+      ? validateFixedCostParams({
+          workingDaysPerMonth: fixedCosts.workingDaysPerMonth,
+          sewerCount,
+          dailySewerPay: fixedCosts.dailySewerPay,
+          monthlyTotal: fixedCosts.monthlyTotal,
+        })
+      : "MONTHLY_TOTAL_ZERO";
+    if (paramsInvalid) {
+      return {
+        ok: false as const,
+        error: "FIXED_COSTS_INVALID" as const,
+        message: fixedCostValidationMessage(paramsInvalid),
+      };
+    }
     const costCalc = buildCalcFromOrderItem(
       item,
       pricing,
-      calcOptionsFromProduct(item.product),
+      { ...calcOptionsFromProduct(item.product), fixedCosts },
     );
     const commercial = commercialPriceForOrderItem(item, {
       discountPercent: line.discountPercent,
@@ -761,6 +851,8 @@ export async function saveProposalAction(formData: FormData) {
       marginPercent = totalSellingValue > 0 ? (profit / totalSellingValue) * 100 : 0;
     } else if (commercial?.fromPriceList) {
       marginPercent = mergeCommercialAndCost(commercial, costCalc, item.totalQuantity).marginPercent;
+    } else {
+      marginPercent = draftLineFromItem(item, costCalc, line.discountPercent).marginPercent;
     }
     if (marginPercent < pricing.minimumMarginPercent) {
       const access = await getCurrentUserAccess();

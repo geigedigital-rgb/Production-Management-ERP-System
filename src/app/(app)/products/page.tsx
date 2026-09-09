@@ -47,8 +47,8 @@ export default async function ProductsPage({
 
   const [pricing, sizes, materials, operations, decorations, units, health] = await Promise.all([
     getPricingDefaults().catch(() => ({
-      pricingMethod: "MARGIN" as const,
-      targetRatePercent: 30,
+      pricingMethod: "MARKUP" as const,
+      targetRatePercent: 0,
       minimumMarginPercent: 15,
       roundingDecimals: 2,
       sizeRules: [],

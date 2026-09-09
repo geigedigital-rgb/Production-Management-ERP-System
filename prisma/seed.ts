@@ -484,7 +484,7 @@ async function main() {
   await prisma.pricingSettings.create({
     data: {
       pricingMethod: "MARGIN",
-      targetMarginPercent: 30,
+      targetMarginPercent: 0,
       minimumMarginPercent: 15,
       managerMaxDiscountPercent: 5,
       roundingRule: "ROUND_2",
@@ -506,6 +506,41 @@ async function main() {
       quotationFooter:
         "Рахунок дійсний 14 календарних днів. Виробництво стартує після погодження макетів і 50% передоплати.",
     },
+  });
+
+  await prisma.fixedCostArticle.deleteMany();
+  await prisma.fixedCostSettings.deleteMany();
+  await prisma.fixedCostSettings.create({
+    data: {
+      workingDaysPerMonth: 21,
+      sewerCount: 5,
+      dailySewerPay: 1500,
+    },
+  });
+  // Owner sheet «Таблиця 1» — статті ПВ (сума 100 850 → коеф. 1,6 при 21 дні / 5 швей / 1500 ₴).
+  await prisma.fixedCostArticle.createMany({
+    data: [
+      { nameUk: "Оренда майстерні", monthlyAmount: 20000, isActive: true, sortOrder: 1 },
+      { nameUk: "Ком посл. майстерня", monthlyAmount: 7000, isActive: true, sortOrder: 2 },
+      { nameUk: "Оренда офісу", monthlyAmount: 3000, isActive: true, sortOrder: 3 },
+      { nameUk: "Ком посл. офіс", monthlyAmount: 1100, isActive: true, sortOrder: 4 },
+      { nameUk: "Оренда серверу бух.", monthlyAmount: 750, isActive: true, sortOrder: 5 },
+      { nameUk: "Бух посл. Новіцька", monthlyAmount: 7000, isActive: true, sortOrder: 6 },
+      { nameUk: "Бух посл. Сергій", monthlyAmount: 4000, isActive: true, sortOrder: 7 },
+      { nameUk: "ЄСВ Наталя", monthlyAmount: 1800, isActive: true, sortOrder: 8 },
+      { nameUk: "Єдиний податок Сергій", monthlyAmount: 1600, isActive: true, sortOrder: 9 },
+      { nameUk: "Військовий збір Сергій", monthlyAmount: 800, isActive: true, sortOrder: 10 },
+      { nameUk: "ЄСВ Сергій", monthlyAmount: 1800, isActive: true, sortOrder: 11 },
+      { nameUk: "Податки працівники ЄСВ", monthlyAmount: 1950, isActive: true, sortOrder: 12 },
+      { nameUk: "Податки працівники ЄСВ", monthlyAmount: 1950, isActive: true, sortOrder: 13 },
+      { nameUk: "працівники Військовий збір", monthlyAmount: 450, isActive: true, sortOrder: 14 },
+      { nameUk: "працівники Військовий збір", monthlyAmount: 450, isActive: true, sortOrder: 15 },
+      { nameUk: "працівники ПДФО", monthlyAmount: 1600, isActive: true, sortOrder: 16 },
+      { nameUk: "працівники ПДФО", monthlyAmount: 1600, isActive: true, sortOrder: 17 },
+      { nameUk: "Різне", monthlyAmount: 4000, isActive: true, sortOrder: 18 },
+      { nameUk: "ЗП водій", monthlyAmount: 10000, isActive: true, sortOrder: 19 },
+      { nameUk: "ЗП СЕО", monthlyAmount: 30000, isActive: true, sortOrder: 20 },
+    ],
   });
 
   // --- Operation categories ---

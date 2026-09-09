@@ -85,8 +85,6 @@ export function OrderCreateForm({
   materialCatalog: initialMaterialCatalog,
   operationCatalog: initialOperationCatalog,
   decorationCatalog: initialDecorationCatalog,
-  defaultTargetMargin = 30,
-  pricingMethod = "MARGIN",
   companyCostMode = "NET",
   fabricGlobals,
   initialClientId,
@@ -99,8 +97,6 @@ export function OrderCreateForm({
   materialCatalog: MaterialCatalogOption[];
   operationCatalog: OperationCatalogOption[];
   decorationCatalog: DecorationCatalogOption[];
-  defaultTargetMargin?: number;
-  pricingMethod?: "MARGIN" | "MARKUP";
   companyCostMode?: MaterialCostVatMode;
   fabricGlobals?: { usdUahRate: number; fabricCargoUsdPerKg: number };
   initialClientId?: string;
@@ -114,7 +110,6 @@ export function OrderCreateForm({
   const [decorationCatalog, setDecorationCatalog] = useState(initialDecorationCatalog);
   const [clientId, setClientId] = useState(initialClientId || "");
   const [deadline, setDeadline] = useState("");
-  const [targetMargin, setTargetMargin] = useState(String(defaultTargetMargin));
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [stagingProductId, setStagingProductId] = useState(initialProductId || "");
   const [stagingComposition, setStagingComposition] = useState<DraftComposition | null>(() => {
@@ -368,10 +363,6 @@ export function OrderCreateForm({
                 label: "Орієнтир",
                 value: estimate > 0 ? formatMoneyUah(estimate) : "—",
               },
-              {
-                label: "Маржа",
-                value: `${targetMargin.replace(",", ".")}%`,
-              },
             ]}
           />
         }
@@ -424,41 +415,6 @@ export function OrderCreateForm({
                   value={deadline}
                   onChange={(event) => setDeadline(event.target.value)}
                 />
-              </FormGroup>
-
-              <FormGroup label="Маржа замовлення" columns={1}>
-                <div className="flex min-w-0 flex-col gap-1">
-                  <span className="type-label">
-                    {pricingMethod === "MARKUP" ? "Цільова націнка, %" : "Цільова маржа, %"}
-                  </span>
-                  <div className="flex min-w-0 w-full items-center gap-2">
-                    {Number(targetMargin.replace(",", ".")) !== defaultTargetMargin ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="shrink-0 px-2"
-                        onClick={() => setTargetMargin(String(defaultTargetMargin))}
-                      >
-                        Базова {defaultTargetMargin}%
-                      </Button>
-                    ) : null}
-                    <Input
-                      name="targetMarginPercent"
-                      type="text"
-                      inputMode="decimal"
-                      autoComplete="off"
-                      size={4}
-                      value={targetMargin}
-                      onChange={(event) => setTargetMargin(event.target.value)}
-                      className="w-[4.75rem] shrink-0"
-                      inputClassName="!h-8 overflow-hidden px-2 tabular"
-                    />
-                  </div>
-                  <span className="type-caption">
-                    База проєкту: {defaultTargetMargin}% — можна змінити лише для цього замовлення
-                  </span>
-                </div>
               </FormGroup>
             </div>
             </OrderDetailSection>

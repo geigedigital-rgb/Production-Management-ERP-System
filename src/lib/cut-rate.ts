@@ -1,7 +1,7 @@
 /**
  * Owner rule (CRM sheet comment 1):
- * Cut cost per unit decreases as run size grows until optimalQty.
- * Above optimalQty the per-unit cut rate stays frozen at the optimal-run rate.
+ * Cut cost per unit decreases as run size grows until the last (optimal) tirage step.
+ * Above that quantity the per-unit cut rate stays frozen.
  * Prefer this logic over copying every Google Sheet cell blindly.
  */
 
@@ -9,6 +9,21 @@ export type CutRateTier = {
   minQuantity: number;
   ratePerUnit: number;
 };
+
+/** Optimal run = explicit value, else last tier minQuantity. */
+export function resolveOptimalCutQty(args: {
+  optimalQty?: number | null;
+  tiers: CutRateTier[];
+}): number | null {
+  if (args.optimalQty != null && args.optimalQty > 0) {
+    return Math.floor(args.optimalQty);
+  }
+  const tiers = [...args.tiers]
+    .filter((tier) => tier.minQuantity > 0 && Number.isFinite(tier.ratePerUnit))
+    .sort((a, b) => a.minQuantity - b.minQuantity);
+  if (tiers.length === 0) return null;
+  return tiers[tiers.length - 1]!.minQuantity;
+}
 
 export function resolveCutRatePerUnit(args: {
   quantity: number;
@@ -25,8 +40,7 @@ export function resolveCutRatePerUnit(args: {
 
   if (tiers.length === 0) return args.fallbackRate;
 
-  const optimal =
-    args.optimalQty != null && args.optimalQty > 0 ? Math.floor(args.optimalQty) : null;
+  const optimal = resolveOptimalCutQty({ optimalQty: args.optimalQty, tiers });
   const effectiveQty = optimal != null && qty > optimal ? optimal : qty;
 
   let rate = args.fallbackRate;

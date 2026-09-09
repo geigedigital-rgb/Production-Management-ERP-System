@@ -20,8 +20,10 @@ import {
   calcOptionsFromProduct,
   getPricingForOrder,
   quantityTiersByOperationIdFromProduct,
+  resolveFixedCostAllocationForOrderItem,
 } from "@/server/domains/calculation/from-entities";
-import { commercialPriceForOrderItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
+import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
+import { commercialPriceForOrderItem, draftLineFromItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
 import { isCutOperationName, resolveCutUnitRateForProduct } from "@/lib/cut-rate";
 import {
   pickOperationQuantityTiers,
@@ -1269,6 +1271,24 @@ export async function updateOrderItemFabricDelivery(
   }
 }
 
+/** Override company sewer count for PV coefficient on this order line only. Null = company default. */
+export async function updateOrderItemSewerCountOverride(
+  orderItemId: string,
+  sewerCountOverride: number | null,
+) {
+  await assertOrderItemEditable(orderItemId);
+  if (sewerCountOverride != null && (!(sewerCountOverride > 0) || !Number.isFinite(sewerCountOverride))) {
+    throw new Error("VALIDATION");
+  }
+  await prisma.orderItem.update({
+    where: { id: orderItemId },
+    data: {
+      sewerCountOverride:
+        sewerCountOverride == null ? null : Math.floor(sewerCountOverride),
+    },
+  });
+}
+
 export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
   const row = await prisma.orderItemMaterial.findUnique({
     where: { id: orderItemMaterialId },
@@ -2225,6 +2245,7 @@ export async function saveProposal(input: {
   const proposalLabel = input.label?.trim() || null;
   const comment = input.comment?.trim() || null;
   const pricing = await getPricingForOrder(input.orderId);
+  const fixedCosts = await fixedCostOptionsFromDb();
 
   const created = await prisma.$transaction(async (tx) => {
     const versions = [];
@@ -2234,11 +2255,14 @@ export async function saveProposal(input: {
         line.manualSellingPricePerUnit != null && !Number.isNaN(line.manualSellingPricePerUnit)
           ? line.manualSellingPricePerUnit
           : null;
-      const costCalc = buildCalcFromOrderItem(
-        item,
-        { ...pricing },
-        calcOptionsFromProduct(item.product),
-      );
+      const calcOptions = {
+        ...calcOptionsFromProduct(item.product),
+        fixedCosts,
+      };
+      const costCalc = buildCalcFromOrderItem(item, { ...pricing }, calcOptions);
+      const fixedCostAllocation = fixedCosts
+        ? resolveFixedCostAllocationForOrderItem(item, fixedCosts, calcOptions, pricing.sizeRules)
+        : null;
 
       const commercial = commercialPriceForOrderItem(item, {
         discountPercent: line.discountPercent,
@@ -2263,10 +2287,11 @@ export async function saveProposal(input: {
         marginPercent = merged.marginPercent;
         profitAmount = totalSellingValue - Number(costCalc.totalCost);
       } else {
-        sellingPricePerUnit = Number(costCalc.sellingPricePerUnit);
-        totalSellingValue = Number(costCalc.totalSellingValue);
-        marginPercent = Number(costCalc.marginPercent);
-        profitAmount = Number(costCalc.profitAmount);
+        const draft = draftLineFromItem(item, costCalc, line.discountPercent);
+        sellingPricePerUnit = draft.sellingPricePerUnit;
+        totalSellingValue = draft.totalSellingValue;
+        marginPercent = draft.marginPercent;
+        profitAmount = totalSellingValue - Number(costCalc.totalCost);
       }
 
       const calc = {
@@ -2295,6 +2320,7 @@ export async function saveProposal(input: {
             item: {
               nameUk: item.nameUk,
               totalQuantity: item.totalQuantity,
+              sewerCountOverride: item.sewerCountOverride,
               sizes: item.sizes,
               materials: item.materials,
               operations: item.operations,
@@ -2306,6 +2332,12 @@ export async function saveProposal(input: {
             commercial: commercial ?? null,
             manualSellingPricePerUnit,
             proposalRevision,
+            fixedCosts: fixedCostAllocation
+              ? {
+                  params: fixedCosts,
+                  allocation: fixedCostAllocation,
+                }
+              : null,
           },
           costPerUnit: Number(costCalc.costPerUnit),
           totalCost: Number(costCalc.totalCost),

@@ -4,7 +4,13 @@ import { auth } from "@/server/auth";
 import { getOrder, refreshOrderItemFabricPricing } from "@/server/domains/orders/service";
 import { listMaterials, listUnits, getFabricPricingGlobals } from "@/server/domains/catalog/materials";
 import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
-import { buildCalcFromOrderItem, calcOptionsFromProduct, getPricingDefaults, getPricingForOrder, resolveOrderOperationUnitRate } from "@/server/domains/calculation/from-entities";
+import { buildCalcFromOrderItem, calcOptionsFromProduct, getPricingDefaults, getPricingForOrder, resolveOrderOperationUnitRate, resolveFixedCostAllocationForOrderItem } from "@/server/domains/calculation/from-entities";
+import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
+import {
+  resolveSewerCount,
+  validateFixedCostParams,
+  type FixedCostValidationError,
+} from "@/lib/fixed-costs";
 import { draftLineFromItem } from "@/lib/order-item-commercial";
 import { Breadcrumbs, QuickAction, QuickActions } from "@/components/ui/ObjectHeader";
 import { Banner } from "@/components/ui/Banner";
@@ -45,7 +51,6 @@ import {
 } from "@/lib/order-proposals";
 import { listEntityActivity } from "@/server/domains/activity/service";
 import { ActivityTimeline, mapActivityEvents } from "@/components/activity/ActivityTimeline";
-import { OrderMarginControl } from "@/components/orders/OrderMarginControl";
 import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import { listProducts } from "@/server/domains/products/service";
 import { publicUploadUrl } from "@/lib/supabase/client";
@@ -89,7 +94,7 @@ export default async function OrderDetailPage({
   const tabHref = (key: string) =>
     `/orders/${order.id}?tab=${key}${order.items.length > 1 ? `&item=${item.id}` : ""}`;
 
-  const [materials, units, operationsCatalog, decorationsCatalog, pricing, projectPricing, activityEvents, catalogProducts] =
+  const [materials, units, operationsCatalog, decorationsCatalog, pricing, projectPricing, activityEvents, catalogProducts, fixedCosts] =
     await Promise.all([
       listMaterials(),
       listUnits(),
@@ -99,9 +104,35 @@ export default async function OrderDetailPage({
       getPricingDefaults(),
       listEntityActivity("order", order.id, 20),
       listProducts(),
+      fixedCostOptionsFromDb(),
     ]);
 
-  const calc = buildCalcFromOrderItem(item, pricing, calcOptionsFromProduct(item.product));
+  const itemCalcOptions = {
+    ...calcOptionsFromProduct(item.product),
+    fixedCosts,
+  };
+  const calc = buildCalcFromOrderItem(item, pricing, itemCalcOptions);
+  const fixedCostAllocation =
+    fixedCosts != null
+      ? resolveFixedCostAllocationForOrderItem(
+          item,
+          fixedCosts,
+          itemCalcOptions,
+          pricing.sizeRules,
+        )
+      : null;
+  const { sewerCount: sewerCountForValidation } = resolveSewerCount({
+    companySewerCount: fixedCosts?.companySewerCount ?? 0,
+    orderOverride: item.sewerCountOverride,
+  });
+  const fixedCostError: FixedCostValidationError | null = fixedCosts
+    ? validateFixedCostParams({
+        workingDaysPerMonth: fixedCosts.workingDaysPerMonth,
+        sewerCount: sewerCountForValidation,
+        dailySewerPay: fixedCosts.dailySewerPay,
+        monthlyTotal: fixedCosts.monthlyTotal,
+      })
+    : "MONTHLY_TOTAL_ZERO";
   const totalQuantity = item.totalQuantity;
   const orderQuantity = order.items.reduce((sum, row) => sum + row.totalQuantity, 0);
   const locked = order.status === "HANDED_TO_PRODUCTION" || order.status === "CLOSED";
@@ -179,7 +210,7 @@ export default async function OrderDetailPage({
     };
   });
 
-  const itemCalcOptions = calcOptionsFromProduct(item.product);
+  const itemCalcOptionsForRates = itemCalcOptions;
 
   const operationRows = item.operations.map((row) => {
     const unitCost =
@@ -187,7 +218,7 @@ export default async function OrderDetailPage({
         ? Number(row.standardOutput ?? 0) > 0
           ? Number(row.shiftCost ?? 0) / Number(row.standardOutput)
           : 0
-        : resolveOrderOperationUnitRate(row, totalQuantity, itemCalcOptions) ?? 0;
+        : resolveOrderOperationUnitRate(row, totalQuantity, itemCalcOptionsForRates) ?? 0;
     const qtyForRow = item.sizes
       .filter((size) => !row.sizeCode || row.sizeCode === size.sizeCode)
       .reduce((sum, size) => sum + size.quantity, 0);
@@ -285,6 +316,7 @@ export default async function OrderDetailPage({
   const draftLines = order.items.map((row) => {
     const lineCalc = buildCalcFromOrderItem(row, pricing, {
       ...calcOptionsFromProduct(row.product),
+      fixedCosts,
     });
     const draft = draftLineFromItem(row, lineCalc);
     return {
@@ -432,6 +464,7 @@ export default async function OrderDetailPage({
   const itemRows = order.items.map((row) => {
     const lineCalc = buildCalcFromOrderItem(row, pricing, {
       ...calcOptionsFromProduct(row.product),
+      fixedCosts,
     });
     const draft = draftLineFromItem(row, lineCalc);
     return {
@@ -524,28 +557,13 @@ export default async function OrderDetailPage({
       : []),
   ];
 
-  const marginControl = canViewCosts ? (
-    <OrderMarginControl
-      orderId={order.id}
-      locked={locked}
-      pricingMethod={pricing.pricingMethod}
-      projectDefault={projectPricing.targetRatePercent}
-      orderOverride={order.targetMarginPercent != null ? Number(order.targetMarginPercent) : null}
-      minimumMarginPercent={pricing.minimumMarginPercent}
-      costPerUnit={Number(calc.costPerUnit)}
-      totalQuantity={totalQuantity}
-      layout={withRail ? "panel" : "strip"}
-    />
-  ) : null;
-
   const activeDraft = draftLines.find((line) => line.orderItemId === item.id);
 
   const moneyRail = canViewCosts ? (
     <aside className="space-y-3 xl:sticky xl:top-[72px] xl:h-fit">
-      {marginControl}
       {activeDraft?.fromPriceList ? (
         <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-          <p className="type-caption">Комерційна ціна з прайсу</p>
+          <p className="type-caption">Ціна з базового прайсу</p>
           <p className="text-[20px] font-semibold tabular">
             {formatMoneyUah(activeDraft.sellingPricePerUnit)}
             <span className="ml-1 text-[12px] font-normal text-[var(--color-text-quiet)]">/ од.</span>
@@ -554,11 +572,32 @@ export default async function OrderDetailPage({
             Разом {formatMoneyUah(activeDraft.totalSellingValue)} · собівартість{" "}
             {formatMoneyUah(activeDraft.costPerUnit)} / од.
           </p>
+          {activeDraft.marginPercent != null ? (
+            <p className="type-caption mt-0.5">
+              Фактична маржа від собівартості: {activeDraft.marginPercent.toFixed(1)}%
+            </p>
+          ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
+          <p className="type-caption">Продажна ціна</p>
+          <p className="text-[20px] font-semibold tabular">
+            {formatMoneyUah(Number(calc.costPerUnit))}
+            <span className="ml-1 text-[12px] font-normal text-[var(--color-text-quiet)]">/ од.</span>
+          </p>
+          <p className="type-caption mt-1">
+            Немає прайсу на виробі — показуємо собівартість. Зафіксуйте прайс у картці виробу
+            (вкладка «Прайс і крій»).
+          </p>
+        </div>
+      )}
       <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
         <h2 className="type-subsection mb-3">Структура собівартості</h2>
-        <CostStructure calc={calc} fabricDeliveryAmount={fabricDeliveryAmount} />
+        <CostStructure
+          calc={calc}
+          fabricDeliveryAmount={fabricDeliveryAmount}
+          fixedCostAmount={fixedCostAllocation?.fixedCostTotal ?? 0}
+        />
         {approvedProposalGroup ? (
           <p className="type-caption mt-3 border-t border-[var(--color-divider)] pt-2">
             Погоджено пропозицію v{approvedProposalGroup.revision}:{" "}
@@ -734,7 +773,6 @@ export default async function OrderDetailPage({
                 Комплектацію передано. Зміни складу та калькуляція доступні адміністратору.
               </Banner>
             ) : null}
-            {marginControl}
             <ConfigurationTab
             orderId={order.id}
             itemId={item.id}
@@ -769,6 +807,11 @@ export default async function OrderDetailPage({
             materialsSubtotal={Number(calc.materialsSubtotal)}
             operationsSubtotal={Number(calc.operationsSubtotal)}
             decorationsSubtotal={Number(calc.decorationsSubtotal)}
+            companySewerCount={fixedCosts?.companySewerCount ?? 0}
+            sewerCountOverride={item.sewerCountOverride}
+            fixedCostAllocation={fixedCostAllocation}
+            fixedCostError={fixedCostError}
+            canEditFixedCosts={canEditComposition && !locked}
             corridorHint={
               action.focusItemId && action.focusItemId !== item.id
                 ? null
@@ -792,6 +835,13 @@ export default async function OrderDetailPage({
                 decorations={decorationRows}
                 fabricDeliveryLines={fabricDeliveryRows}
                 fabricDeliveryAmount={fabricDeliveryAmount}
+                fixedCostAllocation={fixedCostAllocation}
+                fixedCostError={fixedCostError}
+                orderId={order.id}
+                orderItemId={item.id}
+                companySewerCount={fixedCosts?.companySewerCount ?? 0}
+                sewerCountOverride={item.sewerCountOverride}
+                canEditSewerCount={canEditComposition && !locked}
                 sizeQuantities={item.sizes.map((size) => ({
                   sizeCode: size.sizeCode,
                   quantity: size.quantity,
