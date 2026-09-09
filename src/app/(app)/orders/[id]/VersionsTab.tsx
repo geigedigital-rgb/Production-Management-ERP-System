@@ -219,7 +219,7 @@ export function VersionsTab({
                               {formatMoneyUah(line.sellingPricePerUnit)} / од. →{" "}
                               {formatMoneyUah(line.totalSellingValue)}
                             </TD>
-                            <TD numeric className={cn("tabular", line.marginPercent < minimumMarginPercent && "text-[var(--color-danger-text)]")}>
+                            <TD numeric className="tabular">
                               {line.marginPercent.toFixed(1)}%
                             </TD>
                             <TD />

@@ -332,8 +332,6 @@ export async function getOwnerDashboard(input: {
 
   for (const order of active) {
     if (isOverdue(order)) markRisk(order);
-    const margin = marginOf(order);
-    if (margin != null && margin < pricing.minimumMarginPercent) markRisk(order);
     if (staleOf(order)) markRisk(order);
     if (order.status === "APPROVED" && readinessMissing(order).length > 0) markRisk(order);
     if (order.status === "PENDING_APPROVAL") {
@@ -400,17 +398,6 @@ export async function getOwnerDashboard(input: {
       href = `/orders/${order.id}`;
       tone = "danger";
       priority = 1;
-    }
-
-    if (margin != null && margin < pricing.minimumMarginPercent) {
-      issues.push(`Маржа ${margin.toFixed(1)}% нижче мінімуму ${pricing.minimumMarginPercent}%`);
-      if (!title || priority > 2) {
-        title = "Маржа нижче мінімальної";
-        actionLabel = "Погодити";
-        href = `/orders/${order.id}?tab=versions`;
-        tone = "danger";
-        priority = 2;
-      }
     }
 
     if (staleOf(order)) {
@@ -511,12 +498,6 @@ export async function getOwnerDashboard(input: {
   });
 
   const staleCount = active.filter(staleOf).length;
-  const discountCount = active.filter((order) => {
-    const margin = order.items.reduce((sum, item) => sum + num(item.versions[0]?.marginPercent), 0);
-    const n = order.items.filter((item) => item.versions[0]).length;
-    if (n === 0) return false;
-    return margin / n + 0.0001 < pricing.minimumMarginPercent;
-  }).length;
   const noNormCatalog = operations.filter((row) => {
     if (row.calculationMethod === "SHIFT_OUTPUT") {
       return !(num(row.standardOutputPerShift) > 0);
@@ -536,13 +517,6 @@ export async function getOwnerDashboard(input: {
       count: staleCount,
       hint: "Ціни довідника змінені після розрахунку",
       href: dashboardQuery({ range, managerId, focus: "stale" }),
-    },
-    {
-      key: "discount",
-      label: "Ручні знижки",
-      count: discountCount,
-      hint: "Індивідуальна маржа нижче бази проєкту",
-      href: "/settings/pricing",
     },
     {
       key: "noNorm",

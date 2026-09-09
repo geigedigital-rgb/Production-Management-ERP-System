@@ -53,12 +53,14 @@ export function CalculationTab({
   companySewerCount,
   sewerCountOverride = null,
   canEditSewerCount = false,
-  minimumMarginPercent,
   corridorHint,
   hasCommercialPriceList = false,
   commercialSellingPricePerUnit,
   commercialTotalValue,
   commercialMarginPercent,
+  commercialProfitPerUnit,
+  commercialProfitTotal,
+  priceSource,
   sizeQuantities = [],
 }: {
   calc: CalculationResult;
@@ -77,21 +79,35 @@ export function CalculationTab({
   canEditSewerCount?: boolean;
   pricingMethod?: "MARGIN" | "MARKUP";
   targetRatePercent?: number;
-  minimumMarginPercent: number;
+  minimumMarginPercent?: number;
   isOrderOverride?: boolean;
   corridorHint?: { title: string; detail: string; href?: string; label?: string } | null;
   hasCommercialPriceList?: boolean;
   commercialSellingPricePerUnit?: number;
   commercialTotalValue?: number;
   commercialMarginPercent?: number;
+  commercialProfitPerUnit?: number;
+  commercialProfitTotal?: number;
+  priceSource?: "pricelist" | "sewing_markup" | "cost";
   sizeQuantities?: Array<{ sizeCode: string; quantity: number }>;
 }) {
   const perUnit = (value: number) => (totalQuantity > 0 ? value / totalQuantity : 0);
-  const margin = Number(calc.marginPercent);
-  const commercialMargin = commercialMarginPercent ?? margin;
-  const belowMinimum = hasCommercialPriceList
-    ? commercialMargin < minimumMarginPercent
-    : margin < minimumMarginPercent;
+  const costPerUnit = Number(calc.costPerUnit);
+  const costTotal = Number(calc.totalCost);
+  const sellingPerUnit = commercialSellingPricePerUnit ?? Number(calc.sellingPricePerUnit);
+  const sellingTotal = commercialTotalValue ?? Number(calc.totalSellingValue);
+  const profitPerUnit =
+    commercialProfitPerUnit ?? sellingPerUnit - costPerUnit;
+  const profitTotal = commercialProfitTotal ?? sellingTotal - costTotal;
+  const marginPct =
+    commercialMarginPercent ??
+    (sellingTotal > 0 ? (profitTotal / sellingTotal) * 100 : Number(calc.marginPercent));
+  const priceSourceLabel =
+    priceSource === "pricelist" || hasCommercialPriceList
+      ? "з базового прайсу"
+      : priceSource === "sewing_markup"
+        ? "націнка на пошив"
+        : "як собівартість";
   const oversizeRows = sizeQuantities
     .filter((row) => row.quantity > 0 && isOversizeCode(row.sizeCode))
     .map((row) => ({
@@ -116,12 +132,37 @@ export function CalculationTab({
 
   return (
     <div className="space-y-4">
-      {hasCommercialPriceList ? (
-        <Banner tone="info" title="Два шари розрахунку">
-          Комерційна ціна для клієнта — з фіксованого прайсу (+ брендування у пропозиції). Таблиця
-          нижче — внутрішня собівартість для планування виробництва; вона не змінює ціну в КП.
-        </Banner>
-      ) : null}
+      <div className="grid gap-2 rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3 sm:grid-cols-4">
+        <div>
+          <p className="type-caption">Собівартість / од.</p>
+          <p className="mt-0.5 text-[15px] font-semibold tabular">{formatMoneyUah(costPerUnit)}</p>
+          {totalQuantity > 1 ? (
+            <p className="type-caption mt-0.5">разом {formatMoneyUah(costTotal)}</p>
+          ) : null}
+        </div>
+        <div>
+          <p className="type-caption">Націнка / од.</p>
+          <p className="mt-0.5 text-[15px] font-semibold tabular text-[var(--color-success-text)]">
+            {formatMoneyUah(profitPerUnit)}
+          </p>
+          <p className="type-caption mt-0.5">маржа {marginPct.toFixed(1)}%</p>
+        </div>
+        <div>
+          <p className="type-caption">Ціна клієнту / од.</p>
+          <p className="mt-0.5 text-[15px] font-semibold tabular">{formatMoneyUah(sellingPerUnit)}</p>
+          <p className="type-caption mt-0.5">{priceSourceLabel}</p>
+        </div>
+        <div>
+          <p className="type-caption">Заробимо на тираж</p>
+          <p className="mt-0.5 text-[15px] font-semibold tabular text-[var(--color-success-text)]">
+            {formatMoneyUah(profitTotal)}
+          </p>
+          {totalQuantity > 1 ? (
+            <p className="type-caption mt-0.5">продаж {formatMoneyUah(sellingTotal)}</p>
+          ) : null}
+        </div>
+      </div>
+
       {corridorHint ? (
         <Banner
           tone="info"
@@ -151,22 +192,12 @@ export function CalculationTab({
           недоступні, доки параметри не виправлені.
         </Banner>
       ) : null}
-      {belowMinimum ? (
-        <Banner
-          tone="danger"
-          title={`Маржа ${commercialMargin.toFixed(1)}% нижче мінімуму ${minimumMarginPercent}%`}
-        >
-          Збереження пропозиції з такою ціною доступне лише адміністратору.
-        </Banner>
-      ) : null}
-
       <TableCard>
         <TableToolbar
           left={<span className="type-subsection">Деталі статей</span>}
           right={
             <span className="type-caption tabular">
-              на {totalQuantity} шт
-              {hasCommercialPriceList ? " · ціна з прайсу виробу" : " · без прайсу (собівартість)"}
+              на {totalQuantity} шт · таблиця = статті собівартості
             </span>
           }
         />
@@ -415,37 +446,32 @@ export function CalculationTab({
                 Собівартість
               </TD>
               <TD numeric className="text-[var(--color-text-secondary)]">
-                {formatMoneyUah(Number(calc.costPerUnit))}
+                {formatMoneyUah(costPerUnit)}
               </TD>
-              <TD numeric>{formatMoneyUah(Number(calc.totalCost))}</TD>
+              <TD numeric>{formatMoneyUah(costTotal)}</TD>
+            </tr>
+            <tr>
+              <TD colSpan={2} className="text-[var(--color-text-secondary)]">
+                Націнка (заробіток)
+                <span className="type-caption ml-1.5">маржа {marginPct.toFixed(1)}%</span>
+              </TD>
+              <TD numeric className="text-[var(--color-success-text)]">
+                {formatMoneyUah(profitPerUnit)}
+              </TD>
+              <TD numeric className="text-[var(--color-success-text)]">
+                {formatMoneyUah(profitTotal)}
+              </TD>
             </tr>
             <tr className="border-t border-[var(--color-divider)]">
               <TD colSpan={2}>
-                {hasCommercialPriceList && commercialSellingPricePerUnit != null ? (
-                  <>
-                    Комерційна ціна для клієнта
-                    <span className="type-caption ml-1.5">маржа {commercialMargin.toFixed(1)}%</span>
-                  </>
-                ) : (
-                  <>
-                    Ціна продажу (розрахункова)
-                    <span className="type-caption ml-1.5">маржа {margin.toFixed(1)}%</span>
-                  </>
-                )}
+                Ціна для клієнта
+                <span className="type-caption ml-1.5">{priceSourceLabel}</span>
               </TD>
               <TD numeric className="font-semibold">
-                {formatMoneyUah(
-                  hasCommercialPriceList && commercialSellingPricePerUnit != null
-                    ? commercialSellingPricePerUnit
-                    : Number(calc.sellingPricePerUnit),
-                )}
+                {formatMoneyUah(sellingPerUnit)}
               </TD>
               <TD numeric className="font-semibold">
-                {formatMoneyUah(
-                  hasCommercialPriceList && commercialTotalValue != null
-                    ? commercialTotalValue
-                    : Number(calc.totalSellingValue),
-                )}
+                {formatMoneyUah(sellingTotal)}
               </TD>
             </tr>
           </TFoot>

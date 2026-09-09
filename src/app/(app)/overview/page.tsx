@@ -222,17 +222,13 @@ export default async function OverviewPage({
                 />
               ) : (
                 sorted.slice(0, 12).map((order) => {
-                  const lowMargin =
-                    order.margin != null && order.margin < data.pricing.minimumMarginPercent;
                   const href = `/orders/${order.id}`;
                   const days = daysLeft(order.deadline);
 
                   return (
                     <TR
                       key={order.id}
-                      className={cn(
-                        (order.overdue || lowMargin) && "bg-[var(--color-tint-rose)]/70",
-                      )}
+                      className={cn(order.overdue && "bg-[var(--color-tint-rose)]/70")}
                     >
                       <TD>
                         <CellStack
@@ -248,21 +244,7 @@ export default async function OverviewPage({
                         </span>
                       </TD>
                       <TD align="right" nowrap>
-                        <span
-                          className={cn(
-                            "tabular font-medium",
-                            lowMargin && "text-[var(--color-danger-text)]",
-                            order.margin != null &&
-                              !lowMargin &&
-                              order.margin >= data.pricing.targetRatePercent &&
-                              "text-[var(--color-success-text)]",
-                            order.margin != null &&
-                              !lowMargin &&
-                              order.margin < data.pricing.targetRatePercent &&
-                              "text-[var(--color-text-secondary)]",
-                            order.margin == null && "text-[var(--color-text-quiet)]",
-                          )}
-                        >
+                        <span className="tabular font-medium text-[var(--color-text-secondary)]">
                           {order.margin != null ? `${order.margin.toFixed(1)}%` : "—"}
                         </span>
                       </TD>

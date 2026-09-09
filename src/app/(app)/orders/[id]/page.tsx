@@ -329,6 +329,7 @@ export default async function OrderDetailPage({
       totalSellingValue: draft.totalSellingValue,
       fromPriceList: draft.fromPriceList,
       basePricePerUnit: draft.basePricePerUnit,
+      priceSource: draft.priceSource,
     };
   });
   const hasCommercialPriceList = draftLines.some((line) => line.fromPriceList);
@@ -558,39 +559,71 @@ export default async function OrderDetailPage({
   ];
 
   const activeDraft = draftLines.find((line) => line.orderItemId === item.id);
+  const clientPricePerUnit = activeDraft?.sellingPricePerUnit ?? Number(calc.sellingPricePerUnit);
+  const clientTotal = activeDraft?.totalSellingValue ?? Number(calc.totalSellingValue);
+  const costPerUnit = activeDraft?.costPerUnit ?? Number(calc.costPerUnit);
+  const costTotal = costPerUnit * totalQuantity;
+  const profitPerUnit = clientPricePerUnit - costPerUnit;
+  const profitTotal = clientTotal - costTotal;
+  const marginPct =
+    activeDraft?.marginPercent ??
+    (clientTotal > 0 ? (profitTotal / clientTotal) * 100 : 0);
+  const priceSourceLabel =
+    activeDraft?.priceSource === "pricelist"
+      ? "з базового прайсу виробу"
+      : activeDraft?.priceSource === "sewing_markup"
+        ? "націнка на пошив за тиражем"
+        : "немає прайсу — як собівартість";
 
   const moneyRail = canViewCosts ? (
     <aside className="space-y-3 xl:sticky xl:top-[72px] xl:h-fit">
-      {activeDraft?.fromPriceList ? (
-        <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-          <p className="type-caption">Ціна з базового прайсу</p>
-          <p className="text-[20px] font-semibold tabular">
-            {formatMoneyUah(activeDraft.sellingPricePerUnit)}
-            <span className="ml-1 text-[12px] font-normal text-[var(--color-text-quiet)]">/ од.</span>
-          </p>
-          <p className="type-caption mt-1">
-            Разом {formatMoneyUah(activeDraft.totalSellingValue)} · собівартість{" "}
-            {formatMoneyUah(activeDraft.costPerUnit)} / од.
-          </p>
-          {activeDraft.marginPercent != null ? (
-            <p className="type-caption mt-0.5">
-              Фактична маржа від собівартості: {activeDraft.marginPercent.toFixed(1)}%
-            </p>
+      <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
+        <p className="type-caption">Ціна для клієнта</p>
+        <p className="text-[20px] font-semibold tabular">
+          {formatMoneyUah(clientPricePerUnit)}
+          <span className="ml-1 text-[12px] font-normal text-[var(--color-text-quiet)]">/ од.</span>
+        </p>
+        <p className="type-caption mt-0.5">{priceSourceLabel}</p>
+        <dl className="mt-3 space-y-1.5 border-t border-[var(--color-divider)] pt-3 text-[13px]">
+          <div className="flex justify-between gap-2">
+            <dt className="text-[var(--color-text-secondary)]">Собівартість / од.</dt>
+            <dd className="tabular">{formatMoneyUah(costPerUnit)}</dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-[var(--color-text-secondary)]">Націнка / од.</dt>
+            <dd className="tabular font-medium text-[var(--color-success-text)]">
+              {formatMoneyUah(profitPerUnit)}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-[var(--color-text-secondary)]">Маржа</dt>
+            <dd className="tabular font-medium">{marginPct.toFixed(1)}%</dd>
+          </div>
+          {totalQuantity > 1 ? (
+            <>
+              <div className="flex justify-between gap-2 border-t border-[var(--color-divider)] pt-1.5">
+                <dt className="text-[var(--color-text-secondary)]">Разом продаж</dt>
+                <dd className="tabular font-semibold">{formatMoneyUah(clientTotal)}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-[var(--color-text-secondary)]">Разом собівартість</dt>
+                <dd className="tabular">{formatMoneyUah(costTotal)}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-[var(--color-text-secondary)]">Заробимо</dt>
+                <dd className="tabular font-semibold text-[var(--color-success-text)]">
+                  {formatMoneyUah(profitTotal)}
+                </dd>
+              </div>
+            </>
           ) : null}
-        </div>
-      ) : (
-        <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-          <p className="type-caption">Продажна ціна</p>
-          <p className="text-[20px] font-semibold tabular">
-            {formatMoneyUah(Number(calc.costPerUnit))}
-            <span className="ml-1 text-[12px] font-normal text-[var(--color-text-quiet)]">/ од.</span>
+        </dl>
+        {activeDraft?.priceSource === "cost" ? (
+          <p className="type-caption mt-2 text-[var(--color-warning-text)]">
+            Зафіксуйте прайс у картці виробу («Прайс і крій»), щоб ціна відрізнялась від собівартості.
           </p>
-          <p className="type-caption mt-1">
-            Немає прайсу на виробі — показуємо собівартість. Зафіксуйте прайс у картці виробу
-            (вкладка «Прайс і крій»).
-          </p>
-        </div>
-      )}
+        ) : null}
+      </div>
       <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
         <h2 className="type-subsection mb-3">Структура собівартості</h2>
         <CostStructure
@@ -851,9 +884,12 @@ export default async function OrderDetailPage({
                 minimumMarginPercent={pricing.minimumMarginPercent}
                 isOrderOverride={pricing.isOrderOverride}
                 hasCommercialPriceList={Boolean(activeDraft?.fromPriceList)}
-                commercialSellingPricePerUnit={activeDraft?.fromPriceList ? activeDraft.sellingPricePerUnit : undefined}
-                commercialTotalValue={activeDraft?.fromPriceList ? activeDraft.totalSellingValue : undefined}
-                commercialMarginPercent={activeDraft?.fromPriceList ? activeDraft.marginPercent : undefined}
+                commercialSellingPricePerUnit={clientPricePerUnit}
+                commercialTotalValue={clientTotal}
+                commercialMarginPercent={marginPct}
+                commercialProfitPerUnit={profitPerUnit}
+                commercialProfitTotal={profitTotal}
+                priceSource={activeDraft?.priceSource}
                 corridorHint={
                   action.focusItemId && action.focusItemId !== item.id
                     ? null

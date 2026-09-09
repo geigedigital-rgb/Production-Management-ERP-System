@@ -103,7 +103,6 @@ export function CostStructure({
 export function CostSummary({
   calc,
   quantity,
-  minimumMarginPercent,
   title = "Підсумок",
   subtitle,
   footer,
@@ -111,6 +110,7 @@ export function CostSummary({
 }: {
   calc: CalculationResult;
   quantity: number;
+  /** @deprecated No longer used for warnings. */
   minimumMarginPercent?: number;
   title?: string;
   subtitle?: string;
@@ -118,7 +118,6 @@ export function CostSummary({
   className?: string;
 }) {
   const margin = Number(calc.marginPercent);
-  const belowMinimum = minimumMarginPercent != null && margin < minimumMarginPercent;
   const empty = Number(calc.totalCost) === 0;
 
   return (
@@ -150,21 +149,10 @@ export function CostSummary({
 
         <div className="flex items-center justify-between gap-2 border-y border-[var(--color-divider)] py-2.5">
           <span className="text-[13px] text-[var(--color-text-secondary)]">Маржа</span>
-          <span
-            className={cn(
-              "tabular text-[13.5px] font-semibold",
-              belowMinimum ? "text-[var(--color-danger-text)]" : "text-[var(--color-success-text)]",
-            )}
-          >
+          <span className="tabular text-[13.5px] font-semibold text-[var(--color-success-text)]">
             {margin.toFixed(1)}%
           </span>
         </div>
-
-        {belowMinimum ? (
-          <Banner tone="danger" title={`Нижче мінімуму ${minimumMarginPercent}%`}>
-            Версію можна зберегти лише з погодженням адміністратора.
-          </Banner>
-        ) : null}
 
         {empty ? (
           <Banner tone="warning" title="Комплектація порожня">

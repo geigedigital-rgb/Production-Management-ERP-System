@@ -46,7 +46,6 @@ import {
   validateFixedCostParams,
   resolveSewerCount,
 } from "@/lib/fixed-costs";
-import { commercialPriceForOrderItem, draftLineFromItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
 import type { OrderStatus } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
@@ -735,13 +734,6 @@ export async function saveVersionAction(formData: FormData) {
     ? resolveFixedCostAllocationForOrderItem(item, fixedCosts, calcOptions, pricing.sizeRules)
     : null;
 
-  if (Number(calc.marginPercent) < pricing.minimumMarginPercent) {
-    const access = await getCurrentUserAccess();
-    if (!access?.permissions.includes("approveBelowMinMargin")) {
-      return { ok: false as const, error: "MARGIN_TOO_LOW" as const };
-    }
-  }
-
   const version = await saveCalculationVersion({
     orderItemId,
     authorId: session.user.id,
@@ -833,32 +825,6 @@ export async function saveProposalAction(formData: FormData) {
         error: "FIXED_COSTS_INVALID" as const,
         message: fixedCostValidationMessage(paramsInvalid),
       };
-    }
-    const costCalc = buildCalcFromOrderItem(
-      item,
-      pricing,
-      { ...calcOptionsFromProduct(item.product), fixedCosts },
-    );
-    const commercial = commercialPriceForOrderItem(item, {
-      discountPercent: line.discountPercent,
-      fallbackPricePerUnit:
-        line.manualSellingPricePerUnit ?? Number(costCalc.sellingPricePerUnit),
-    });
-    let marginPercent = Number(costCalc.marginPercent);
-    if (line.manualSellingPricePerUnit != null) {
-      const totalSellingValue = line.manualSellingPricePerUnit * item.totalQuantity;
-      const profit = totalSellingValue - Number(costCalc.totalCost);
-      marginPercent = totalSellingValue > 0 ? (profit / totalSellingValue) * 100 : 0;
-    } else if (commercial?.fromPriceList) {
-      marginPercent = mergeCommercialAndCost(commercial, costCalc, item.totalQuantity).marginPercent;
-    } else {
-      marginPercent = draftLineFromItem(item, costCalc, line.discountPercent).marginPercent;
-    }
-    if (marginPercent < pricing.minimumMarginPercent) {
-      const access = await getCurrentUserAccess();
-      if (!access?.permissions.includes("approveBelowMinMargin")) {
-        return { ok: false as const, error: "MARGIN_TOO_LOW" as const };
-      }
     }
   }
 

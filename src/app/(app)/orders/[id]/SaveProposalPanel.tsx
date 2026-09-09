@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { FormGroup, Textarea } from "@/components/ui/Field";
-import { Banner } from "@/components/ui/Banner";
 import { SidePanel } from "@/components/ui/Overlay";
 import { IconPlus } from "@/components/ui/Icons";
 import { saveProposalAction } from "@/server/domains/orders/actions";
@@ -51,13 +50,13 @@ function parseDiscount(raw: string): number {
 export function SaveProposalPanel({
   orderId,
   lines: initialLines,
-  minimumMarginPercent,
   accent = true,
   defaultOpen = false,
 }: {
   orderId: string;
   lines: ProposalDraftLine[];
-  minimumMarginPercent: number;
+  /** @deprecated Kept for call-site compatibility; no longer gates saving. */
+  minimumMarginPercent?: number;
   accent?: boolean;
   defaultOpen?: boolean;
 }) {
@@ -121,7 +120,6 @@ export function SaveProposalPanel({
     () => lines.reduce((sum, line) => sum + line.totalQuantity, 0),
     [lines],
   );
-  const belowMinimum = lines.some((line) => line.marginPercent < minimumMarginPercent);
 
   function updatePrice(orderItemId: string, raw: string) {
     const price = Number(raw);
@@ -156,10 +154,6 @@ export function SaveProposalPanel({
     startTransition(async () => {
       const result = await saveProposalAction(formData);
       if (!result.ok) {
-        if (result.error === "MARGIN_TOO_LOW") {
-          setError("Маржа нижче мінімальної. Підніміть ціну або зверніться до адміністратора.");
-          return;
-        }
         if (result.error === "ORDER_LOCKED") {
           setError("Замовлення заблоковано для редагування.");
           return;
@@ -263,13 +257,7 @@ export function SaveProposalPanel({
                     <td className="px-3 py-2 text-right font-medium tabular">
                       {formatMoneyUah(line.totalSellingValue)}
                     </td>
-                    <td
-                      className={`px-3 py-2 text-right tabular ${
-                        line.marginPercent < minimumMarginPercent
-                          ? "text-[var(--color-danger-text)]"
-                          : ""
-                      }`}
-                    >
+                    <td className="px-3 py-2 text-right tabular">
                       {line.marginPercent.toFixed(1)}%
                     </td>
                   </tr>
@@ -288,12 +276,6 @@ export function SaveProposalPanel({
               </tfoot>
             </table>
           </div>
-
-          {belowMinimum ? (
-            <Banner tone="danger" title="Маржа нижче мінімальної">
-              Збереження доступне лише адміністратору. Підніміть ціну або перегляньте норми витрат.
-            </Banner>
-          ) : null}
 
           <FormGroup label="Коментар" columns={1}>
             <Textarea
