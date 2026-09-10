@@ -102,7 +102,7 @@ export function lookupScreenPrintBaseRate(args: {
   colorCount: number;
   cells: ScreenPrintPriceCell[];
 }): { bandQty: number; colorCount: number; baseRate: number } | null {
-  const colors = Math.max(1, Math.min(8, Math.floor(args.colorCount) || 1));
+  const colors = Math.max(1, Math.min(24, Math.floor(args.colorCount) || 1));
   const bandQty = resolveScreenPrintBandQty(args.quantity, args.cells);
   if (bandQty == null) return null;
   const cell = args.cells.find((c) => c.minQuantity === bandQty && c.colorCount === colors);
@@ -180,7 +180,7 @@ export function parseScreenPrintLineName(
   if (!isScreenPrintDecorationName(name)) return null;
   const text = name!.trim();
   const colorMatch = text.match(/(\d+)\s*кол\./u);
-  const colorCount = colorMatch ? Math.max(1, Math.min(8, Number(colorMatch[1]) || 1)) : 1;
+  const colorCount = colorMatch ? Math.max(1, Math.min(24, Number(colorMatch[1]) || 1)) : 1;
 
   const selectedCodes: string[] = [];
   for (const coef of coefficients) {

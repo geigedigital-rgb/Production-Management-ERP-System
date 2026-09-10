@@ -106,30 +106,32 @@ export async function saveScreenPrintGrid(
 export async function saveScreenPrintCoefficients(
   rows: Array<{ code: string; nameUk: string; factor: number; noteUk?: string | null }>,
 ) {
-  for (const [index, row] of rows.entries()) {
-    const code = row.code.trim();
-    if (!code) continue;
-    const factor = Number(row.factor);
-    if (!(factor > 0)) continue;
-    const nameUk = row.nameUk.trim() || code;
-    const noteUk = row.noteUk?.trim() || null;
-
-    await prisma.screenPrintCoefficient.upsert({
-      where: { code },
-      create: {
-        id: `sp_coef_${code.toLowerCase()}`,
+  const cleaned = rows
+    .map((row, index) => {
+      const code = row.code.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+      const factor = Number(row.factor);
+      const nameUk = row.nameUk.trim();
+      if (!code || !nameUk || !(factor > 0) || !Number.isFinite(factor)) return null;
+      return {
         code,
         nameUk,
         factor,
-        noteUk,
+        noteUk: row.noteUk?.trim() || null,
         sortOrder: index + 1,
-      },
-      update: {
-        nameUk,
-        factor,
-        noteUk,
-        sortOrder: index + 1,
-      },
-    });
-  }
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row != null);
+
+  // Drop removed coefficients so the catalog matches the admin form exactly.
+  await prisma.$transaction(async (tx) => {
+    await tx.screenPrintCoefficient.deleteMany();
+    if (cleaned.length > 0) {
+      await tx.screenPrintCoefficient.createMany({
+        data: cleaned.map((row) => ({
+          id: `sp_coef_${row.code.toLowerCase()}`,
+          ...row,
+        })),
+      });
+    }
+  });
 }
