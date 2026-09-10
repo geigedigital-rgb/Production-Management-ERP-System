@@ -1,25 +1,35 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/ui/Banner";
+import { Button } from "@/components/ui/Button";
 import { SoftBusy } from "@/components/ui/SoftBusy";
 import { IconPlus, IconTrash } from "@/components/ui/Icons";
-import { saveScreenPrintCatalogAction } from "@/server/domains/screen-print/actions";
 import {
-  uniqueColorCounts,
-  uniqueQtyBands,
-  type ScreenPrintCoefficient,
-  type ScreenPrintPriceCell,
+  Table,
+  TableCard,
+  TableEmpty,
+  TableToolbar,
+  TBody,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "@/components/ui/Table";
+import { saveScreenPrintCatalogAction } from "@/server/domains/screen-print/actions";
+import type {
+  ScreenPrintCoefficient,
+  ScreenPrintPriceCell,
 } from "@/lib/screen-print-pricing";
 import { cn } from "@/lib/utils";
 
-const cellInput =
-  "h-7 w-full min-w-[3.25rem] rounded-[5px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+/** Soft field — light border, no heavy box. */
+const field =
+  "h-8 w-full min-w-0 rounded-[6px] border border-transparent bg-transparent px-1.5 text-[13px] text-[var(--color-text-primary)] outline-none transition-[border-color,background-color] placeholder:text-[var(--color-text-quiet)] hover:border-[var(--color-border)] focus:border-[var(--color-primary-400)] focus:bg-[color-mix(in_srgb,var(--color-primary-50)_40%,transparent)] disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
-const compactInput =
-  "h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-white px-2 text-[12.5px] outline-none focus:border-[var(--color-primary-500)] placeholder:text-[var(--color-text-quiet)]";
+const draftField =
+  "h-8 w-full min-w-0 rounded-[6px] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-[13px] outline-none placeholder:text-[var(--color-text-quiet)] focus:border-[var(--color-primary-400)] focus:border-solid [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
 function slugCode(nameUk: string, used: Set<string>): string {
   const base =
@@ -40,8 +50,16 @@ function slugCode(nameUk: string, used: Set<string>): string {
   return code;
 }
 
+function sortCells(rows: ScreenPrintPriceCell[]) {
+  return [...rows].sort(
+    (a, b) => a.minQuantity - b.minQuantity || a.colorCount - b.colorCount,
+  );
+}
+
+type CoefRow = ScreenPrintCoefficient & { key: string };
+
 /**
- * Compact screen-print catalog editor: tirage × colors grid + coefficient rows.
+ * Row-first screen-print catalog: empty draft line → fill → add; soft fields like fixed costs.
  */
 export function ScreenPrintAdminPanel({
   cells: initialCells,
@@ -51,112 +69,52 @@ export function ScreenPrintAdminPanel({
   coefficients: ScreenPrintCoefficient[];
 }) {
   const router = useRouter();
-  const [cells, setCells] = useState(initialCells);
-  const [coefficients, setCoefficients] = useState(initialCoefficients);
-  const [draftBand, setDraftBand] = useState("");
-  const [draftColor, setDraftColor] = useState("");
+  const [cells, setCells] = useState(() => sortCells(initialCells));
+  const [coefficients, setCoefficients] = useState<CoefRow[]>(() =>
+    initialCoefficients.map((row, i) => ({ ...row, key: row.code || `c-${i}` })),
+  );
+
+  const [draftQty, setDraftQty] = useState("");
+  const [draftColors, setDraftColors] = useState("");
+  const [draftRate, setDraftRate] = useState("");
+
+  const [draftCoefName, setDraftCoefName] = useState("");
+  const [draftCoefNote, setDraftCoefNote] = useState("");
+  const [draftCoefFactor, setDraftCoefFactor] = useState("");
+
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const bands = useMemo(() => uniqueQtyBands(cells), [cells]);
-  const colors = useMemo(() => uniqueColorCounts(cells), [cells]);
+  useEffect(() => {
+    setCells(sortCells(initialCells));
+    setCoefficients(
+      initialCoefficients.map((row, i) => ({ ...row, key: row.code || `c-${i}` })),
+    );
+  }, [initialCells, initialCoefficients]);
 
-  function rateAt(qty: number, color: number): number {
-    return cells.find((c) => c.minQuantity === qty && c.colorCount === color)?.unitRate ?? 0;
-  }
-
-  function setRate(qty: number, color: number, unitRate: number) {
-    setCells((prev) => {
-      const next = prev.filter((c) => !(c.minQuantity === qty && c.colorCount === color));
-      next.push({ minQuantity: qty, colorCount: color, unitRate: Math.max(0, unitRate) });
-      return next.sort(
-        (a, b) => a.minQuantity - b.minQuantity || a.colorCount - b.colorCount,
+  const dirty = useMemo(() => {
+    const cellKey = (rows: ScreenPrintPriceCell[]) =>
+      JSON.stringify(sortCells(rows));
+    const coefKey = (rows: ScreenPrintCoefficient[]) =>
+      JSON.stringify(
+        rows.map((r) => ({
+          code: r.code,
+          nameUk: r.nameUk,
+          factor: r.factor,
+          noteUk: r.noteUk ?? "",
+        })),
       );
-    });
-  }
+    return (
+      cellKey(cells) !== cellKey(initialCells) ||
+      coefKey(coefficients) !== coefKey(initialCoefficients)
+    );
+  }, [cells, coefficients, initialCells, initialCoefficients]);
 
-  function addBand() {
-    const qty = Math.floor(Number(draftBand));
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setError("Вкажіть тираж від (шт) більше 0");
-      return;
-    }
-    if (bands.includes(qty)) {
-      setError(`Тираж від ${qty} уже є`);
-      return;
-    }
-    setError(null);
-    const colorList = colors.length > 0 ? colors : [1];
-    setCells((prev) => {
-      const next = [...prev];
-      for (const color of colorList) {
-        if (!next.some((c) => c.minQuantity === qty && c.colorCount === color)) {
-          next.push({ minQuantity: qty, colorCount: color, unitRate: 0 });
-        }
-      }
-      return next.sort(
-        (a, b) => a.minQuantity - b.minQuantity || a.colorCount - b.colorCount,
-      );
-    });
-    setDraftBand("");
-  }
-
-  function removeBand(qty: number) {
-    setCells((prev) => prev.filter((c) => c.minQuantity !== qty));
-  }
-
-  function addColorColumn() {
-    const color = Math.floor(Number(draftColor));
-    if (!Number.isFinite(color) || color <= 0 || color > 24) {
-      setError("Кількість кольорів: 1–24");
-      return;
-    }
-    if (colors.includes(color)) {
-      setError(`${color} кол. уже є`);
-      return;
-    }
-    setError(null);
-    const bandList = bands.length > 0 ? bands : [50];
-    setCells((prev) => {
-      const next = [...prev];
-      for (const qty of bandList) {
-        if (!next.some((c) => c.minQuantity === qty && c.colorCount === color)) {
-          next.push({ minQuantity: qty, colorCount: color, unitRate: 0 });
-        }
-      }
-      return next.sort(
-        (a, b) => a.minQuantity - b.minQuantity || a.colorCount - b.colorCount,
-      );
-    });
-    setDraftColor("");
-  }
-
-  function removeColorColumn(color: number) {
-    setCells((prev) => prev.filter((c) => c.colorCount !== color));
-  }
-
-  function addCoefficient() {
-    const used = new Set(coefficients.map((c) => c.code));
-    const code = slugCode("Новий коефіцієнт", used);
-    setCoefficients((prev) => [
-      ...prev,
-      { code, nameUk: "", factor: 1.1, noteUk: "" },
-    ]);
-  }
-
-  function removeCoefficient(code: string) {
-    setCoefficients((prev) => prev.filter((c) => c.code !== code));
-  }
-
-  function save() {
+  function persist(nextCells: ScreenPrintPriceCell[], nextCoefs: CoefRow[]) {
     setMessage(null);
     setError(null);
-    if (bands.length === 0 || colors.length === 0) {
-      setError("Додайте хоча б один тираж і один стовпчик кольорів");
-      return;
-    }
-    for (const row of coefficients) {
+    for (const row of nextCoefs) {
       if (!row.nameUk.trim()) {
         setError("У кожного коефіцієнта має бути назва");
         return;
@@ -166,259 +124,401 @@ export function ScreenPrintAdminPanel({
         return;
       }
     }
+    const used = new Set<string>();
+    const coefPayload = nextCoefs.map((row) => {
+      const code = row.code.trim() || slugCode(row.nameUk, used);
+      used.add(code);
+      return {
+        code,
+        nameUk: row.nameUk.trim(),
+        factor: Number(row.factor),
+        noteUk: row.noteUk?.trim() || null,
+      };
+    });
+
     const formData = new FormData();
-    formData.set("gridJson", JSON.stringify(cells));
-    formData.set(
-      "coefficientsJson",
-      JSON.stringify(
-        coefficients.map((row) => ({
-          ...row,
-          code: row.code.trim() || slugCode(row.nameUk, new Set()),
-        })),
-      ),
-    );
+    formData.set("gridJson", JSON.stringify(sortCells(nextCells)));
+    formData.set("coefficientsJson", JSON.stringify(coefPayload));
     startTransition(async () => {
       const result = await saveScreenPrintCatalogAction(formData);
       if (!result.ok) {
         setError("Не вдалося зберегти. Перевірте числа.");
         return;
       }
-      setMessage("Довідник збережено");
+      setMessage("Збережено");
       router.refresh();
     });
   }
 
+  function addPriceRow() {
+    const minQuantity = Math.floor(Number(draftQty));
+    const colorCount = Math.floor(Number(draftColors));
+    const unitRate = Number(String(draftRate).replace(",", "."));
+    if (!Number.isFinite(minQuantity) || minQuantity <= 0) {
+      setError("Вкажіть тираж від (шт)");
+      return;
+    }
+    if (!Number.isFinite(colorCount) || colorCount <= 0 || colorCount > 24) {
+      setError("Кількість кольорів: 1–24");
+      return;
+    }
+    if (!Number.isFinite(unitRate) || unitRate < 0) {
+      setError("Вкажіть ціну ₴/шт");
+      return;
+    }
+    if (cells.some((c) => c.minQuantity === minQuantity && c.colorCount === colorCount)) {
+      setError(`Уже є рядок: від ${minQuantity} шт · ${colorCount} кол.`);
+      return;
+    }
+    setError(null);
+    const next = sortCells([...cells, { minQuantity, colorCount, unitRate }]);
+    setCells(next);
+    setDraftQty("");
+    setDraftColors("");
+    setDraftRate("");
+    persist(next, coefficients);
+  }
+
+  function updatePriceRow(index: number, patch: Partial<ScreenPrintPriceCell>) {
+    setCells((prev) => {
+      const next = prev.map((row, i) => (i === index ? { ...row, ...patch } : row));
+      return sortCells(next);
+    });
+  }
+
+  function removePriceRow(index: number) {
+    const next = cells.filter((_, i) => i !== index);
+    setCells(next);
+    persist(next, coefficients);
+  }
+
+  function addCoefRow() {
+    const nameUk = draftCoefName.trim();
+    const factor = Number(String(draftCoefFactor).replace(",", ".")) || 0;
+    if (!nameUk) {
+      setError("Вкажіть назву коефіцієнта");
+      return;
+    }
+    if (!(factor > 0)) {
+      setError("Множник × має бути більше 0");
+      return;
+    }
+    setError(null);
+    const used = new Set(coefficients.map((c) => c.code));
+    const code = slugCode(nameUk, used);
+    const next: CoefRow[] = [
+      ...coefficients,
+      { key: code, code, nameUk, factor, noteUk: draftCoefNote.trim() || "" },
+    ];
+    setCoefficients(next);
+    setDraftCoefName("");
+    setDraftCoefNote("");
+    setDraftCoefFactor("");
+    persist(cells, next);
+  }
+
+  function removeCoefRow(key: string) {
+    const next = coefficients.filter((c) => c.key !== key);
+    setCoefficients(next);
+    persist(cells, next);
+  }
+
   return (
     <SoftBusy busy={pending} label="Збереження…">
-      <div className="space-y-3">
-        {/* Price grid */}
-        <section className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--color-divider)] px-3 py-2.5">
-            <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-                Прайс ₴/шт · база ≤ А4
-              </p>
-              <p className="type-caption mt-0.5">
-                Рядок = тираж від N шт · стовпчик = кількість кольорів
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <input
-                type="number"
-                min={1}
-                placeholder="Тираж"
-                value={draftBand}
-                onChange={(event) => setDraftBand(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    addBand();
-                  }
-                }}
-                className={cn(compactInput, "w-[5.5rem]")}
-                aria-label="Новий тираж від"
-              />
-              <Button type="button" size="sm" variant="secondary" onClick={addBand}>
-                <IconPlus size={14} />
-                Тираж
-              </Button>
-              <input
-                type="number"
-                min={1}
-                max={24}
-                placeholder="Кол."
-                value={draftColor}
-                onChange={(event) => setDraftColor(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    addColorColumn();
-                  }
-                }}
-                className={cn(compactInput, "w-[4.5rem]")}
-                aria-label="Нова кількість кольорів"
-              />
-              <Button type="button" size="sm" variant="secondary" onClick={addColorColumn}>
-                <IconPlus size={14} />
-                Кольори
-              </Button>
-            </div>
-          </div>
+      <div className="space-y-4">
+        <TableCard>
+          <TableToolbar
+            left={
+              <div className="min-w-0">
+                <p className="type-subsection">Прайс ₴/шт · база ≤ А4</p>
+                <p className="type-caption mt-0.5">
+                  Один рядок — тираж × кольори × ціна. Додайте порожній рядок знизу.
+                </p>
+              </div>
+            }
+            right={
+              dirty ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  loading={pending}
+                  onClick={() => persist(cells, coefficients)}
+                >
+                  Зберегти зміни
+                </Button>
+              ) : (
+                <span className="type-caption">Усе збережено</span>
+              )
+            }
+          />
+          <Table>
+            <THead>
+              <TH width="120px">Тираж від, шт</TH>
+              <TH width="100px">Кольорів</TH>
+              <TH width="120px" align="right">
+                ₴ / шт
+              </TH>
+              <TH width="44px" />
+            </THead>
+            <TBody>
+              {cells.length === 0 ? (
+                <TableEmpty
+                  colSpan={4}
+                  title="Порожньо"
+                  description="Заповніть рядок знизу й натисніть «Додати»."
+                />
+              ) : (
+                cells.map((row, index) => (
+                  <TR key={`${row.minQuantity}-${row.colorCount}-${index}`}>
+                    <TD className="py-1">
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={pending}
+                        className={cn(field, "tabular")}
+                        value={row.minQuantity}
+                        aria-label="Тираж від"
+                        onChange={(event) =>
+                          updatePriceRow(index, {
+                            minQuantity: Math.max(1, Math.floor(Number(event.target.value)) || 1),
+                          })
+                        }
+                      />
+                    </TD>
+                    <TD className="py-1">
+                      <input
+                        type="number"
+                        min={1}
+                        max={24}
+                        disabled={pending}
+                        className={cn(field, "tabular")}
+                        value={row.colorCount}
+                        aria-label="Кількість кольорів"
+                        onChange={(event) =>
+                          updatePriceRow(index, {
+                            colorCount: Math.max(
+                              1,
+                              Math.min(24, Math.floor(Number(event.target.value)) || 1),
+                            ),
+                          })
+                        }
+                      />
+                    </TD>
+                    <TD className="py-1" numeric>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        disabled={pending}
+                        className={cn(field, "text-right tabular")}
+                        value={row.unitRate}
+                        aria-label="Ціна за шт"
+                        onChange={(event) =>
+                          updatePriceRow(index, {
+                            unitRate: Math.max(0, Number(event.target.value) || 0),
+                          })
+                        }
+                      />
+                    </TD>
+                    <TD className="py-1" align="center">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        aria-label="Прибрати рядок"
+                        onClick={() => removePriceRow(index)}
+                        className="rounded p-1 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-40"
+                      >
+                        <IconTrash size={14} />
+                      </button>
+                    </TD>
+                  </TR>
+                ))
+              )}
+            </TBody>
+          </Table>
 
-          <div className="overflow-x-auto px-2 py-2">
-            {bands.length === 0 || colors.length === 0 ? (
-              <p className="px-2 py-6 text-center type-caption text-[var(--color-text-quiet)]">
-                Додайте тираж і кількість кольорів — зʼявиться сітка цін.
-              </p>
-            ) : (
-              <table className="w-auto min-w-full border-collapse text-[12.5px]">
-                <thead>
-                  <tr className="border-b border-[var(--color-divider)]">
-                    <th className="sticky left-0 bg-[var(--color-surface)] px-2 py-1.5 text-left type-caption">
-                      Від, шт
-                    </th>
-                    {colors.map((c) => (
-                      <th key={c} className="px-1 py-1.5 text-center">
-                        <div className="inline-flex items-center justify-center gap-0.5">
-                          <span className="type-caption whitespace-nowrap">{c} кол.</span>
-                          <button
-                            type="button"
-                            title={`Прибрати ${c} кол.`}
-                            aria-label={`Прибрати стовпчик ${c} кол.`}
-                            onClick={() => removeColorColumn(c)}
-                            className="rounded p-0.5 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
-                          >
-                            <IconTrash size={12} />
-                          </button>
-                        </div>
-                      </th>
-                    ))}
-                    <th className="w-8 px-1" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {bands.map((qty) => (
-                    <tr
-                      key={qty}
-                      className="border-b border-[var(--color-divider)] last:border-0"
-                    >
-                      <td className="sticky left-0 bg-[var(--color-surface)] px-2 py-1 tabular font-medium">
-                        {qty}
-                      </td>
-                      {colors.map((color) => (
-                        <td key={`${qty}-${color}`} className="px-1 py-1">
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={rateAt(qty, color)}
-                            onChange={(event) =>
-                              setRate(qty, color, Number(event.target.value) || 0)
-                            }
-                            className={cellInput}
-                            aria-label={`₴/шт від ${qty}, ${color} кол.`}
-                          />
-                        </td>
-                      ))}
-                      <td className="px-1 py-1 text-center">
-                        <button
-                          type="button"
-                          title={`Прибрати тираж від ${qty}`}
-                          aria-label={`Прибрати тираж від ${qty}`}
-                          onClick={() => removeBand(qty)}
-                          className="rounded p-1 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
-                        >
-                          <IconTrash size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
-
-        {/* Coefficients */}
-        <section className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--color-divider)] px-3 py-2.5">
-            <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-                Коефіцієнти (галочки в замовленні)
-              </p>
-              <p className="type-caption mt-0.5">
-                Множаться на базовий прайс. Можна додавати й прибирати умови.
-              </p>
-            </div>
-            <Button type="button" size="sm" variant="secondary" onClick={addCoefficient}>
+          <form
+            className="grid grid-cols-[120px_100px_120px_auto] items-center gap-2 border-t border-[var(--color-divider)] px-3 py-2.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              addPriceRow();
+            }}
+          >
+            <input
+              type="number"
+              min={1}
+              disabled={pending}
+              className={cn(draftField, "tabular")}
+              value={draftQty}
+              onChange={(event) => setDraftQty(event.target.value)}
+              placeholder="напр. 50"
+              aria-label="Новий тираж від"
+            />
+            <input
+              type="number"
+              min={1}
+              max={24}
+              disabled={pending}
+              className={cn(draftField, "tabular")}
+              value={draftColors}
+              onChange={(event) => setDraftColors(event.target.value)}
+              placeholder="кол."
+              aria-label="Нова кількість кольорів"
+            />
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              disabled={pending}
+              className={cn(draftField, "text-right tabular")}
+              value={draftRate}
+              onChange={(event) => setDraftRate(event.target.value)}
+              placeholder="₴"
+              aria-label="Нова ціна"
+            />
+            <Button type="submit" size="sm" variant="secondary" disabled={pending}>
               <IconPlus size={14} />
-              Коефіцієнт
+              Додати
             </Button>
-          </div>
+          </form>
+        </TableCard>
 
-          <div className="px-2 py-2">
-            {coefficients.length === 0 ? (
-              <p className="px-2 py-5 text-center type-caption text-[var(--color-text-quiet)]">
-                Немає коефіцієнтів — додайте, якщо потрібні умови (площа, тканина тощо).
-              </p>
-            ) : (
-              <ul className="space-y-1.5">
-                <li className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_4.5rem_2rem] gap-1.5 px-1 type-caption sm:grid">
-                  <span>Назва</span>
-                  <span>Примітка</span>
-                  <span className="text-right">×</span>
-                  <span />
-                </li>
-                {coefficients.map((row, index) => (
-                  <li
-                    key={row.code}
-                    className="grid grid-cols-1 gap-1.5 rounded-[8px] bg-[var(--color-surface-subtle)]/60 px-1.5 py-1.5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_4.5rem_2rem] sm:items-center"
-                  >
-                    <input
-                      value={row.nameUk}
-                      placeholder="Назва умови"
-                      aria-label="Назва коефіцієнта"
-                      className={compactInput}
-                      onChange={(event) => {
-                        const nameUk = event.target.value;
-                        setCoefficients((prev) =>
-                          prev.map((c, i) => (i === index ? { ...c, nameUk } : c)),
-                        );
-                      }}
-                    />
-                    <input
-                      value={row.noteUk ?? ""}
-                      placeholder="Підказка (необовʼязково)"
-                      aria-label="Примітка"
-                      className={compactInput}
-                      onChange={(event) => {
-                        const noteUk = event.target.value;
-                        setCoefficients((prev) =>
-                          prev.map((c, i) => (i === index ? { ...c, noteUk } : c)),
-                        );
-                      }}
-                    />
-                    <input
-                      type="number"
-                      min={0.01}
-                      step="0.01"
-                      value={row.factor}
-                      aria-label="Множник"
-                      className={cn(compactInput, "text-right tabular")}
-                      onChange={(event) => {
-                        const factor = Number(event.target.value) || 1;
-                        setCoefficients((prev) =>
-                          prev.map((c, i) => (i === index ? { ...c, factor } : c)),
-                        );
-                      }}
-                    />
-                    <button
-                      type="button"
-                      title="Прибрати коефіцієнт"
-                      aria-label={`Прибрати ${row.nameUk || row.code}`}
-                      onClick={() => removeCoefficient(row.code)}
-                      className="justify-self-center rounded p-1 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
-                    >
-                      <IconTrash size={14} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
+        <TableCard>
+          <TableToolbar
+            left={
+              <div className="min-w-0">
+                <p className="type-subsection">Коефіцієнти</p>
+                <p className="type-caption mt-0.5">
+                  Галочки в замовленні. Новий рядок знизу — заповніть і додайте.
+                </p>
+              </div>
+            }
+          />
+          <Table>
+            <THead>
+              <TH>Назва</TH>
+              <TH>Примітка</TH>
+              <TH width="88px" align="right">
+                ×
+              </TH>
+              <TH width="44px" />
+            </THead>
+            <TBody>
+              {coefficients.length === 0 ? (
+                <TableEmpty
+                  colSpan={4}
+                  title="Без коефіцієнтів"
+                  description="Додайте умову в рядку знизу, якщо потрібні множники."
+                />
+              ) : (
+                coefficients.map((row, index) => (
+                  <TR key={row.key}>
+                    <TD className="py-1">
+                      <input
+                        disabled={pending}
+                        className={field}
+                        value={row.nameUk}
+                        aria-label="Назва коефіцієнта"
+                        onChange={(event) => {
+                          const nameUk = event.target.value;
+                          setCoefficients((prev) =>
+                            prev.map((c, i) => (i === index ? { ...c, nameUk } : c)),
+                          );
+                        }}
+                      />
+                    </TD>
+                    <TD className="py-1">
+                      <input
+                        disabled={pending}
+                        className={field}
+                        value={row.noteUk ?? ""}
+                        placeholder="—"
+                        aria-label="Примітка"
+                        onChange={(event) => {
+                          const noteUk = event.target.value;
+                          setCoefficients((prev) =>
+                            prev.map((c, i) => (i === index ? { ...c, noteUk } : c)),
+                          );
+                        }}
+                      />
+                    </TD>
+                    <TD className="py-1" numeric>
+                      <input
+                        type="number"
+                        min={0.01}
+                        step="0.01"
+                        disabled={pending}
+                        className={cn(field, "text-right tabular")}
+                        value={row.factor}
+                        aria-label="Множник"
+                        onChange={(event) => {
+                          const factor = Number(event.target.value) || 1;
+                          setCoefficients((prev) =>
+                            prev.map((c, i) => (i === index ? { ...c, factor } : c)),
+                          );
+                        }}
+                      />
+                    </TD>
+                    <TD className="py-1" align="center">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        aria-label={`Прибрати ${row.nameUk || "коефіцієнт"}`}
+                        onClick={() => removeCoefRow(row.key)}
+                        className="rounded p-1 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-40"
+                      >
+                        <IconTrash size={14} />
+                      </button>
+                    </TD>
+                  </TR>
+                ))
+              )}
+            </TBody>
+          </Table>
+
+          <form
+            className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_88px_auto] items-center gap-2 border-t border-[var(--color-divider)] px-3 py-2.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              addCoefRow();
+            }}
+          >
+            <input
+              disabled={pending}
+              className={draftField}
+              value={draftCoefName}
+              onChange={(event) => setDraftCoefName(event.target.value)}
+              placeholder="Назва умови"
+              aria-label="Нова назва коефіцієнта"
+            />
+            <input
+              disabled={pending}
+              className={draftField}
+              value={draftCoefNote}
+              onChange={(event) => setDraftCoefNote(event.target.value)}
+              placeholder="Примітка (необовʼязково)"
+              aria-label="Примітка нового коефіцієнта"
+            />
+            <input
+              type="number"
+              min={0.01}
+              step="0.01"
+              disabled={pending}
+              className={cn(draftField, "text-right tabular")}
+              value={draftCoefFactor}
+              onChange={(event) => setDraftCoefFactor(event.target.value)}
+              placeholder="1.5"
+              aria-label="Множник нового коефіцієнта"
+            />
+            <Button type="submit" size="sm" variant="secondary" disabled={pending}>
+              <IconPlus size={14} />
+              Додати
+            </Button>
+          </form>
+        </TableCard>
 
         {error ? <Banner tone="danger">{error}</Banner> : null}
-        {message ? <Banner tone="info">{message}</Banner> : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" onClick={save} loading={pending}>
-            Зберегти довідник
-          </Button>
-          <span className="type-caption text-[var(--color-text-quiet)]">
-            Зміни діють для нових розрахунків у замовленнях
-          </span>
-        </div>
+        {message && !error ? <Banner tone="info">{message}</Banner> : null}
       </div>
     </SoftBusy>
   );

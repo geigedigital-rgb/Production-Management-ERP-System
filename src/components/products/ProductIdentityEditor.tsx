@@ -2,16 +2,19 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/Button";
 import { SoftBusy } from "@/components/ui/SoftBusy";
 import { updateProductIdentityAction } from "@/server/domains/products/actions";
 import { cn } from "@/lib/utils";
 
-const fieldShell =
-  "w-full min-w-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--color-text-quiet)] focus:border-[var(--color-primary-400)] focus:ring-1 focus:ring-[var(--color-focus-ring)] disabled:opacity-60";
+/** Soft inline highlight — same rhythm as view mode, no boxed form. */
+const titleEdit =
+  "type-page-title w-full min-w-0 border-0 border-b border-transparent bg-transparent px-0 py-0 text-[var(--color-text-primary)] outline-none transition-[border-color,background-color] placeholder:text-[var(--color-text-quiet)] focus:border-[var(--color-primary-400)] focus:bg-[color-mix(in_srgb,var(--color-primary-50)_45%,transparent)]";
+
+const lineEdit =
+  "min-w-0 border-0 border-b border-transparent bg-transparent px-0 py-0 text-[13px] leading-[19px] text-[var(--color-text-secondary)] outline-none transition-[border-color,background-color] placeholder:text-[var(--color-text-quiet)] focus:border-[var(--color-primary-300)] focus:bg-[color-mix(in_srgb,var(--color-primary-50)_35%,transparent)] disabled:opacity-60";
 
 /**
- * Inline title / code / description — soft structured fields, no heavy card/modal.
+ * Inline identity edit keeps the page header layout; fields gently highlight in place.
  */
 export function ProductIdentityEditor({
   productId,
@@ -87,8 +90,7 @@ export function ProductIdentityEditor({
           <h1
             className={cn(
               "type-page-title min-w-0",
-              !disabled &&
-                "cursor-text rounded-[6px] transition-colors hover:bg-[var(--color-surface-subtle)]",
+              !disabled && "cursor-text hover:underline hover:decoration-[var(--color-primary-300)]",
             )}
             title={disabled ? undefined : "Натисніть, щоб змінити"}
             onClick={() => {
@@ -110,8 +112,7 @@ export function ProductIdentityEditor({
         <p
           className={cn(
             "type-body-secondary mt-1.5 max-w-3xl",
-            !disabled &&
-              "cursor-text rounded-[6px] transition-colors hover:bg-[var(--color-surface-subtle)]",
+            !disabled && "cursor-text hover:underline hover:decoration-[var(--color-border-strong)]",
           )}
           title={disabled ? undefined : "Натисніть, щоб змінити код або опис"}
           onClick={() => {
@@ -134,19 +135,15 @@ export function ProductIdentityEditor({
 
   return (
     <SoftBusy busy={pending} tone="inline" label="Збереження…">
-      <div className="min-w-0 w-full max-w-3xl flex-1 space-y-3">
-        <label className="block space-y-1">
-          <span className="type-label">Назва</span>
+      <div className="min-w-0 w-full max-w-3xl flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <input
             ref={nameRef}
             value={name}
             disabled={pending}
             aria-label="Назва виробу"
             placeholder="Назва виробу"
-            className={cn(
-              fieldShell,
-              "type-page-title h-auto px-2.5 py-1.5 text-[var(--color-text-primary)]",
-            )}
+            className={cn(titleEdit, "flex-1 basis-[12rem]")}
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -159,71 +156,76 @@ export function ProductIdentityEditor({
               }
             }}
           />
-        </label>
-
-        <div className="grid gap-3 sm:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)]">
-          <label className="block space-y-1">
-            <span className="type-label">Внутрішній код</span>
-            <input
-              value={code}
+          <span className="flex shrink-0 items-center gap-2 type-caption">
+            <button
+              type="button"
               disabled={pending}
-              aria-label="Внутрішній код"
-              placeholder="Необовʼязково"
-              className={cn(fieldShell, "h-9 px-2.5 text-[13.5px] text-[var(--color-text-primary)]")}
-              onChange={(event) => setCode(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  save();
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  cancel();
-                }
-              }}
-            />
-          </label>
-
-          <label className="block space-y-1">
-            <span className="type-label">Опис</span>
-            <textarea
-              value={desc}
+              onClick={save}
+              className="font-medium text-[var(--color-primary-700)] hover:underline disabled:opacity-50"
+            >
+              {pending ? "…" : "Зберегти"}
+            </button>
+            <button
+              type="button"
               disabled={pending}
-              aria-label="Опис"
-              placeholder="Короткий опис для каталогу"
-              rows={2}
-              className={cn(
-                fieldShell,
-                "min-h-[2.5rem] resize-y px-2.5 py-2 text-[13.5px] leading-snug text-[var(--color-text-primary)]",
-              )}
-              onChange={(event) => setDesc(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  cancel();
-                }
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  save();
-                }
-              }}
-            />
-          </label>
-        </div>
-
-        {error ? <p className="type-caption text-[var(--color-danger-text)]">{error}</p> : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" loading={pending} onClick={save}>
-            Зберегти
-          </Button>
-          <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={cancel}>
-            Скасувати
-          </Button>
-          <span className="type-caption text-[var(--color-text-quiet)]">
-            Enter — зберегти · Esc — скасувати
+              onClick={cancel}
+              className="text-[var(--color-text-quiet)] hover:text-[var(--color-text-secondary)] disabled:opacity-50"
+            >
+              Скасувати
+            </button>
           </span>
         </div>
+
+        <div className="mt-1.5 flex max-w-3xl flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="shrink-0 text-[13px] leading-[19px] text-[var(--color-text-tertiary)]">
+            Код
+          </span>
+          <input
+            value={code}
+            disabled={pending}
+            aria-label="Внутрішній код"
+            placeholder="—"
+            className={cn(lineEdit, "w-[7.5rem]")}
+            onChange={(event) => setCode(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                save();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancel();
+              }
+            }}
+          />
+          <span className="text-[13px] leading-[19px] text-[var(--color-text-quiet)]">·</span>
+          <input
+            value={desc}
+            disabled={pending}
+            aria-label="Опис"
+            placeholder="Опис"
+            className={cn(lineEdit, "min-w-[12rem] flex-1")}
+            onChange={(event) => setDesc(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                save();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancel();
+              }
+            }}
+          />
+        </div>
+
+        {error ? (
+          <p className="type-caption mt-1 text-[var(--color-danger-text)]">{error}</p>
+        ) : (
+          <p className="type-caption mt-1 text-[var(--color-text-quiet)]">
+            Enter — зберегти · Esc — скасувати
+          </p>
+        )}
       </div>
     </SoftBusy>
   );
