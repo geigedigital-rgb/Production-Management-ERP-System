@@ -31,7 +31,6 @@ import {
 } from "@/lib/fixed-costs";
 import {
   OrderFixedCostError,
-  OrderSewerCountControl,
 } from "@/components/orders/OrderSewerCountControl";
 
 /**
@@ -51,8 +50,6 @@ export function CalculationTab({
   orderId,
   orderItemId,
   companySewerCount,
-  sewerCountOverride = null,
-  canEditSewerCount = false,
   corridorHint,
   hasCommercialPriceList = false,
   commercialSellingPricePerUnit,
@@ -75,8 +72,6 @@ export function CalculationTab({
   orderId: string;
   orderItemId: string;
   companySewerCount: number;
-  sewerCountOverride?: number | null;
-  canEditSewerCount?: boolean;
   pricingMethod?: "MARGIN" | "MARKUP";
   targetRatePercent?: number;
   minimumMarginPercent?: number;
@@ -209,38 +204,11 @@ export function CalculationTab({
             <TH align="right">Разом</TH>
           </THead>
           <TBody>
-            {oversizeRows.length > 0 ? (
-              <>
-                <TableSectionHeader title="Розміри XXL+" first />
-                {oversizeRows.map((row) => (
-                  <TR key={row.sizeCode}>
-                    <TD className="font-medium text-[var(--color-text-primary)]">
-                      {row.sizeCode}
-                    </TD>
-                    <TD className="type-caption">
-                      матеріали ×{row.materialCoeff.toFixed(2)} · операції ×
-                      {row.operationCoeff.toFixed(2)} (+{oversizeMaterialPct()}% / +
-                      {oversizeOperationPct()}% до спільної норми)
-                    </TD>
-                    <TD numeric className="text-[var(--color-text-secondary)]">
-                      —
-                    </TD>
-                    <TD numeric>{row.quantity} шт</TD>
-                  </TR>
-                ))}
-                <TableSectionSubtotal
-                  label="Разом oversized"
-                  perUnit="—"
-                  total={`${oversizeRows.reduce((sum, row) => sum + row.quantity, 0)} шт`}
-                />
-              </>
-            ) : null}
-
-            <TableSectionHeader title="Матеріали" first={oversizeRows.length === 0} />
+            <TableSectionHeader title="Матеріали" first />
             {oversizeRows.length > 0 ? (
               <TR muted>
                 <TD colSpan={4} className="type-caption">
-                  У сумах нижче вже враховано {oversizeUpliftCaption()} на частку тиражу XXL+.
+                  У сумах нижче вже враховано {oversizeUpliftCaption()} на частку тиражу 3XL+.
                 </TD>
               </TR>
             ) : null}
@@ -261,7 +229,7 @@ export function CalculationTab({
                     {row.consumption} {row.unit} × (1 + {row.waste}%) × {formatMoneyUah(row.price)}
                     {row.sizeCode ? ` · ${row.sizeCode}` : ""}
                     {oversizeRows.length > 0 && !row.sizeCode
-                      ? ` · для XXL+ ще ×${(1 + oversizeMaterialPct() / 100).toFixed(2)}`
+                      ? ` · для 3XL+ ще ×${(1 + oversizeMaterialPct() / 100).toFixed(2)}`
                       : ""}
                   </TD>
                   <TD numeric className="text-[var(--color-text-secondary)]">
@@ -283,7 +251,7 @@ export function CalculationTab({
             {oversizeRows.length > 0 ? (
               <TR muted>
                 <TD colSpan={4} className="type-caption">
-                  Для XXL+ ставка операцій ×{(1 + oversizeOperationPct() / 100).toFixed(2)} вже в
+                  Для 3XL+ ставка операцій ×{(1 + oversizeOperationPct() / 100).toFixed(2)} вже в
                   підсумку.
                 </TD>
               </TR>
@@ -318,13 +286,10 @@ export function CalculationTab({
             <TR muted>
               <TD colSpan={4} className="py-1.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <OrderSewerCountControl
-                    orderId={orderId}
-                    orderItemId={orderItemId}
-                    companySewerCount={companySewerCount}
-                    sewerCountOverride={sewerCountOverride}
-                    locked={!canEditSewerCount}
-                  />
+                  <p className="type-caption">
+                    ПВ у собівартості виробу: пошив ÷ коеф. з довідника ({companySewerCount} швей).
+                    Кількість швей у замовленні не змінюється.
+                  </p>
                   <OrderFixedCostError error={fixedCostError} />
                 </div>
               </TD>

@@ -6,6 +6,7 @@
 export type CommercialPriceTier = {
   minQuantity: number;
   pricePerUnit: number;
+  showOnCard?: boolean;
 };
 
 export function resolveCommercialPricePerUnit(args: {
@@ -32,7 +33,11 @@ export function resolveCommercialPricePerUnit(args: {
 
 export type CommercialPriceProduct = {
   isBaseModel?: boolean;
-  commercialPriceTiers: Array<{ minQuantity: number; pricePerUnit: unknown }>;
+  commercialPriceTiers: Array<{
+    minQuantity: number;
+    pricePerUnit: unknown;
+    showOnCard?: boolean | null;
+  }>;
 };
 
 export function commercialPriceTiersFromProduct(
@@ -45,6 +50,16 @@ export function commercialPriceTiersFromProduct(
     .map((tier) => ({
       minQuantity: tier.minQuantity,
       pricePerUnit: Number(tier.pricePerUnit),
+      showOnCard: tier.showOnCard === true,
     }))
     .filter((tier) => tier.minQuantity > 0 && Number.isFinite(tier.pricePerUnit) && tier.pricePerUnit > 0);
+}
+
+/** Tiers marked for product cards in «Вироби»; falls back to full ladder if none checked. */
+export function cardCommercialPriceTiersFromProduct(
+  product: CommercialPriceProduct | null | undefined,
+): CommercialPriceTier[] {
+  const all = commercialPriceTiersFromProduct(product);
+  const marked = all.filter((tier) => tier.showOnCard);
+  return marked.length > 0 ? marked : all;
 }

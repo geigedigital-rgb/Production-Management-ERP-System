@@ -3,23 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <25"
   },
   "packageManager": "npm@10.9.2",
   "scripts": {
-    "dev": "prisma generate && next dev",
-    "build": "prisma generate && next build --webpack",
-    "start": "prisma migrate deploy && next start",
-    "postinstall": "prisma generate",
-    "lint": "eslint",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio",
-    "test:calc": "tsx scripts/calc-engine.smoke.ts",
-    "test:e2e": "playwright test",
-    "test:qa": "tsx scripts/qa-e2e-prepare.ts && playwright test"
+    "dev": "bash scripts/run-with-node.sh bash scripts/dev.sh",
+    "dev:webpack": "bash scripts/run-with-node.sh bash -c 'prisma generate && exec next dev --webpack \"$@\"' --",
+    "build": "bash scripts/run-with-node.sh bash scripts/build.sh",
+    "start": "bash scripts/run-with-node.sh bash scripts/start.sh",
+    "postinstall": "bash scripts/run-with-node.sh prisma generate",
+    "lint": "bash scripts/run-with-node.sh eslint",
+    "db:generate": "bash scripts/run-with-node.sh prisma generate",
+    "db:migrate": "bash scripts/run-with-node.sh prisma migrate dev",
+    "db:deploy": "bash scripts/run-with-node.sh prisma migrate deploy",
+    "db:seed": "bash scripts/run-with-node.sh tsx prisma/seed.ts",
+    "db:studio": "bash scripts/run-with-node.sh prisma studio",
+    "test:calc": "bash scripts/run-with-node.sh tsx scripts/calc-engine.smoke.ts",
+    "test:e2e": "bash scripts/run-with-node.sh playwright test",
+    "test:qa": "bash scripts/run-with-node.sh bash -c 'tsx scripts/qa-e2e-prepare.ts && playwright test'"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

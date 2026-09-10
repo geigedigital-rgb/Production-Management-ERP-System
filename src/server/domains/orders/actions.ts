@@ -489,9 +489,10 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
   const orderId = String(formData.get("orderId") ?? "");
   await assertCanEditOrderComposition(orderId);
   const id = String(formData.get("id") ?? "");
-  const supplierRaw = formData.get("supplierId");
-  const supplierId =
-    supplierRaw === "" || supplierRaw == null ? undefined : String(supplierRaw);
+  const hasSupplierField = formData.has("supplierId");
+  const supplierId = hasSupplierField
+    ? String(formData.get("supplierId") ?? "").trim() || null
+    : undefined;
   const hasColorField = formData.has("colorSnapshot");
   const colorSnapshot = hasColorField
     ? String(formData.get("colorSnapshot") ?? "").trim() || null
@@ -555,7 +556,7 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
 
   await updateOrderItemMaterialTerms({
     id,
-    ...(supplierId !== undefined ? { supplierId: supplierId || null } : {}),
+    ...(hasSupplierField ? { supplierId } : {}),
     ...(hasColorField ? { colorSnapshot } : {}),
     ...(formData.has("cargoUsdPerKg") ? { cargoUsdPerKg } : {}),
     ...(formData.has("usdUahRate") ? { usdUahRate } : {}),

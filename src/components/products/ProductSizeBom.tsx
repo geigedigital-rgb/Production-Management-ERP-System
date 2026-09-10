@@ -38,16 +38,13 @@ import {
 } from "@/lib/size-bom";
 import {
   copyProductSizeSpecAction,
-  removeProductDecorationAction,
   removeProductMaterialAction,
   removeProductOperationAction,
-  updateProductDecorationSetupCostAction,
   updateProductMaterialConsumptionAction,
   updateProductMaterialWasteAction,
   updateProductOperationRateAction,
 } from "@/server/domains/products/actions";
 import {
-  AddProductDecorationPanel,
   AddProductMaterialPanel,
   AddProductOperationPanel,
   ProductAddMaterialBar,
@@ -160,6 +157,7 @@ export function ProductSizeBom({
   hideCosts = false,
   readOnly = false,
   sizeRules = [],
+  fixedCostPreview = null,
 }: {
   productId: string;
   sizes: SizeOpt[];
@@ -171,7 +169,13 @@ export function ProductSizeBom({
   hasCutOperation?: boolean;
   decorationSetupTotal?: number;
   decorationUnitRateTotal?: number;
-  materialOptions: Array<{ id: string; label: string; unit?: string; composition?: string | null }>;
+  materialOptions: Array<{
+    id: string;
+    label: string;
+    unit?: string;
+    composition?: string | null;
+    densityGsm?: string | null;
+  }>;
   operationOptions: Array<{ id: string; label: string }>;
   decorationOptions: Array<{ id: string; label: string }>;
   unitOptions: Array<{ id: string; label: string }>;
@@ -179,6 +183,12 @@ export function ProductSizeBom({
   hideCosts?: boolean;
   readOnly?: boolean;
   sizeRules?: SizeCoeffRule[];
+  fixedCostPreview?: {
+    perUnit: number;
+    coefficient: number;
+    sewingPerUnit: number;
+    sewerCount: number;
+  } | null;
 }) {
   const router = useRouter();
   const previewQty = useProductPreviewQty();
@@ -262,27 +272,6 @@ export function ProductSizeBom({
     formData.set("rateOverride", String(rateOverride));
     startTransition(async () => {
       await updateProductOperationRateAction(formData);
-      router.refresh();
-    });
-  }
-
-  function removeDecoration(id: string) {
-    const formData = new FormData();
-    formData.set("productId", productId);
-    formData.set("id", id);
-    startTransition(async () => {
-      await removeProductDecorationAction(formData);
-      router.refresh();
-    });
-  }
-
-  function saveDecorationSetupCost(id: string, setupCost: number) {
-    const formData = new FormData();
-    formData.set("productId", productId);
-    formData.set("id", id);
-    formData.set("setupCost", String(setupCost));
-    startTransition(async () => {
-      await updateProductDecorationSetupCostAction(formData);
       router.refresh();
     });
   }
@@ -733,6 +722,32 @@ export function ProductSizeBom({
         </Table>
       </TableCard>
 
+      {!hideCosts && fixedCostPreview && fixedCostPreview.perUnit > 0 ? (
+        <TableCard>
+          <TableToolbar left={<span className="type-subsection">Постійні витрати</span>} />
+          <Table>
+            <THead>
+              <TH>Розрахунок</TH>
+              <TH align="right">₴ / од.</TH>
+            </THead>
+            <TBody>
+              <TR>
+                <TD>
+                  <p className="font-medium">ПВ до собівартості</p>
+                  <p className="type-caption mt-0.5">
+                    пошив {formatMoneyUah(fixedCostPreview.sewingPerUnit)} ÷ коеф.{" "}
+                    {fixedCostPreview.coefficient} · {fixedCostPreview.sewerCount} швей у довіднику
+                  </p>
+                </TD>
+                <TD numeric className="font-medium">
+                  {formatMoneyUah(fixedCostPreview.perUnit)}
+                </TD>
+              </TR>
+            </TBody>
+          </Table>
+        </TableCard>
+      ) : null}
+
       {!hideCosts && !readOnly
         ? operations
             .filter(
@@ -750,108 +765,11 @@ export function ProductSizeBom({
             ))
         : null}
 
-      <TableCard>
-        <TableToolbar
-          left={<span className="type-subsection">Нанесення</span>}
-          right={
-            !readOnly ? (
-              <AddProductDecorationPanel productId={productId} decorations={decorationOptions} />
-            ) : null
-          }
-        />
-        <Table className="table-fixed">
-          <THead>
-            <TH>Метод</TH>
-            {!hideCosts ? (
-              <TH align="right" width="96px" title="Один раз на всю партію">
-                Приладка
-              </TH>
-            ) : null}
-            {!hideCosts ? (
-              <TH align="right" width="80px" title="За кожну одиницю">
-                ₴/шт
-              </TH>
-            ) : null}
-            {!readOnly ? <TH width="52px" /> : null}
-          </THead>
-          <TBody>
-            {decorations.length === 0 ? (
-              <TableEmpty
-                colSpan={1 + (hideCosts ? 0 : 2) + (readOnly ? 0 : 1)}
-                title="Нанесення не використовується"
-                description="Додайте друк або вишивку, якщо потрібно."
-              />
-            ) : (
-              decorations.map((row) => (
-                <TR key={row.id}>
-                  <TD className="min-w-0">
-                    <CellStack title={row.name} maxWidth="100%" />
-                  </TD>
-                  {!hideCosts ? (
-                    <TD numeric nowrap>
-                      {readOnly ? (
-                        <span className="text-[var(--color-text-secondary)]">
-                          {formatMoneyUah(row.setupCost)}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center justify-end gap-0.5">
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            defaultValue={row.setupCost}
-                            key={`${row.id}-${row.setupCost}`}
-                            onBlur={(event) => {
-                              const next = Math.max(0, Number(event.target.value) || 0);
-                              if (next === row.setupCost) return;
-                              saveDecorationSetupCost(row.id, next);
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key !== "Enter") return;
-                              event.currentTarget.blur();
-                            }}
-                            className={inputClass + " w-[72px]"}
-                            aria-label={`Приладка ${row.name}`}
-                          />
-                          <span className="text-[12px] text-[var(--color-text-secondary)]">₴</span>
-                        </span>
-                      )}
-                    </TD>
-                  ) : null}
-                  {!hideCosts ? (
-                    <TD numeric nowrap className="font-medium">
-                      {formatMoneyUah(row.unitRate)}
-                    </TD>
-                  ) : null}
-                  {!readOnly ? (
-                    <TD align="center">
-                      <button
-                        type="button"
-                        aria-label={`Прибрати ${row.name}`}
-                        disabled={pending}
-                        onClick={() => removeDecoration(row.id)}
-                        className="rounded-[var(--radius-control)] p-1.5 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-50"
-                      >
-                        <IconTrash size={16} />
-                      </button>
-                    </TD>
-                  ) : null}
-                </TR>
-              ))
-            )}
-          </TBody>
-          {decorations.length > 0 && !hideCosts ? (
-            <TFoot>
-              <tr>
-                <TD className="min-w-0 truncate text-[var(--color-text-secondary)]">Разом</TD>
-                <TD numeric>{formatMoneyUah(decorationSetupTotal)}</TD>
-                <TD numeric>{formatMoneyUah(decorationUnitRateTotal)}</TD>
-                {!readOnly ? <TD /> : null}
-              </tr>
-            </TFoot>
-          ) : null}
-        </Table>
-      </TableCard>
+      {!hideCosts ? (
+        <p className="type-caption rounded-[10px] border border-dashed border-[var(--color-border)] px-3 py-2.5">
+          Нанесення (шовкотрафарет тощо) додається лише в замовленні — не в картці базового виробу.
+        </p>
+      ) : null}
     </div>
   );
 }

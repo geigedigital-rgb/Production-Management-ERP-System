@@ -25,6 +25,7 @@ import {
 import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
 import { commercialPriceForOrderItem, draftLineFromItem, mergeCommercialAndCost } from "@/lib/order-item-commercial";
 import { isCutOperationName, resolveCutUnitRateForProduct } from "@/lib/cut-rate";
+import { isScreenPrintDecorationName } from "@/lib/screen-print-pricing";
 import {
   pickOperationQuantityTiers,
   resolveQuantityTierRate,
@@ -380,6 +381,7 @@ export async function getOrder(id: string) {
                   nameUk: true,
                   type: true,
                   supplierCode: true,
+                  availableColors: true,
                   metersPerKg: true,
                   priceKgUsd: true,
                   priceKgUsdCargo: true,
@@ -389,6 +391,12 @@ export async function getOrder(id: string) {
                   metersPerRoll: true,
                   minWholesaleMeters: true,
                   costVatOverride: true,
+                  supplierOffers: {
+                    include: {
+                      supplier: { select: { id: true, nameUk: true } },
+                    },
+                    orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+                  },
                 },
               },
             },
@@ -532,16 +540,8 @@ function bomFromProduct(
       }),
     },
     decorations: {
-      create: product.decorations.map((row, index) => ({
-        decorationMethodId: row.decorationMethodId,
-        nameSnapshot: row.decorationMethod.nameUk,
-        setupCost:
-          row.setupCostOverride != null
-            ? row.setupCostOverride
-            : row.decorationMethod.setupCost,
-        unitRate: row.decorationMethod.unitRate,
-        sortOrder: index,
-      })),
+      // Branding is added only on the order (шовкотрафарет / інші методи), not from product BOM.
+      create: [],
     },
     additionalCosts: {
       create: product.additionalCosts.map((row) => ({
@@ -2049,6 +2049,36 @@ export async function addOrderItemDecoration(input: {
   });
 }
 
+/** Snapshot a calculated branding line (e.g. silk-screen) onto the order item. */
+export async function addOrderItemDecorationWithRates(input: {
+  orderItemId: string;
+  nameUk: string;
+  setupCost: number;
+  unitRate: number;
+  decorationMethodId?: string | null;
+}) {
+  await assertOrderItemEditable(input.orderItemId);
+  const nameUk = input.nameUk.trim();
+  if (!nameUk) throw new Error("VALIDATION");
+  const setupCost = Math.max(0, Number(input.setupCost) || 0);
+  const unitRate = Math.max(0, Number(input.unitRate) || 0);
+  const maxSort = await prisma.orderItemDecoration.aggregate({
+    where: { orderItemId: input.orderItemId },
+    _max: { sortOrder: true },
+  });
+
+  return prisma.orderItemDecoration.create({
+    data: {
+      orderItemId: input.orderItemId,
+      decorationMethodId: input.decorationMethodId ?? null,
+      nameSnapshot: nameUk,
+      setupCost,
+      unitRate,
+      sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
+    },
+  });
+}
+
 export async function removeOrderItemDecoration(id: string) {
   await assertOrderItemDecorationEditable(id);
   return prisma.orderItemDecoration.delete({ where: { id } });
@@ -2058,15 +2088,27 @@ export async function updateOrderItemDecoration(input: {
   id: string;
   setupCost?: number;
   unitRate?: number;
+  nameUk?: string;
 }) {
   await assertOrderItemDecorationEditable(input.id);
+  const nameUk = input.nameUk?.trim();
   return prisma.orderItemDecoration.update({
     where: { id: input.id },
     data: {
+      ...(nameUk ? { nameSnapshot: nameUk } : {}),
       ...(input.setupCost != null ? { setupCost: Math.max(0, input.setupCost) } : {}),
       ...(input.unitRate != null ? { unitRate: Math.max(0, input.unitRate) } : {}),
     },
   });
+}
+
+/** Find the silk-screen branding line on an order item (name starts with method label). */
+export async function findOrderItemScreenPrintDecoration(orderItemId: string) {
+  const rows = await prisma.orderItemDecoration.findMany({
+    where: { orderItemId },
+    orderBy: { sortOrder: "asc" },
+  });
+  return rows.find((row) => isScreenPrintDecorationName(row.nameSnapshot)) ?? null;
 }
 
 export async function saveCalculationVersion(input: {

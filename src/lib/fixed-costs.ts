@@ -8,8 +8,9 @@
  * coefficient = daily sewer pay ÷ PV/sewer/day  (1 decimal)
  * PV/unit = sewing/unit ÷ coefficient
  *
- * Not an operation — injected as a separate cost line. Do not fold into sewing rates
- * or commercial sewing markup multipliers.
+ * Not an operation — injected as a separate cost line after operations.
+ * Sewer count is company-wide (directory only); order/product never override it.
+ * Formula: PV/unit = sewing/unit ÷ coefficient, then added into unit cost.
  */
 
 export const FIXED_COST_ADDITIONAL_ID = "fixed-overhead";

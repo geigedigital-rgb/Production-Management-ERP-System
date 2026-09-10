@@ -122,7 +122,14 @@ function ProductThumb({
       )}
     >
       {imageUrl ? (
-        <Image src={imageUrl} alt="" fill sizes="64px" className="object-cover" />
+        <Image
+          src={imageUrl}
+          alt=""
+          fill
+          sizes="64px"
+          className="object-cover"
+          unoptimized={imageUrl.startsWith("/uploads/") || imageUrl.includes("supabase.co")}
+        />
       ) : (
         <span className="flex h-full w-full flex-col items-center justify-center text-[var(--color-text-tertiary)]">
           <IconProducts size={iconSize} />

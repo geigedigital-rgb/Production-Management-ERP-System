@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { SoftBusy } from "@/components/ui/SoftBusy";
 import { useRouter } from "next/navigation";
 import { SidePanel } from "@/components/ui/Overlay";
 import { Button } from "@/components/ui/Button";
@@ -410,6 +411,7 @@ export function OrderMaterialDetailPanel({
       ) : error ? (
         <Banner tone="danger">{error}</Banner>
       ) : detail ? (
+        <SoftBusy busy={pending} label="Збереження матеріалу…">
         <div className="space-y-4">
           {detail.isFabric && live ? (
             <>
@@ -510,7 +512,7 @@ export function OrderMaterialDetailPanel({
                         Крупні розміри в тиражі
                       </p>
                       <p className="type-caption">
-                        База {base} {formatUnit(detail.unit)}/од. → XXL+ ≈ {effective}{" "}
+                        База {base} {formatUnit(detail.unit)}/од. → 3XL+ ≈ {effective}{" "}
                         {formatUnit(detail.unit)}/од. (+{oversizeMaterialPct()}% у калькуляції).{" "}
                         {oversizeUpliftCaption()}.
                       </p>
@@ -751,6 +753,7 @@ export function OrderMaterialDetailPanel({
             </Section>
           ) : null}
         </div>
+        </SoftBusy>
       ) : null}
     </SidePanel>
   );

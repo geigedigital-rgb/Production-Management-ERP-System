@@ -466,7 +466,8 @@ export function resolveFixedCostAllocationForOrderItem(
   const sewingSizes = resolveOrderSewingPerUnitBySize(item, options, sizeRules);
   return buildFixedCostAllocation({
     ...fixedCosts,
-    sewerCountOverride: item.sewerCountOverride,
+    // Sewer count lives only in the fixed-costs directory — never per order/product.
+    sewerCountOverride: null,
     sizes: sewingSizes,
   });
 }

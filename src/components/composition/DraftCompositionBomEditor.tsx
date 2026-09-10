@@ -3,7 +3,6 @@
 import { useState, type ReactNode } from "react";
 import { MaterialCreatePanel } from "@/app/(app)/settings/resources/MaterialCreateForm";
 import { OperationCreatePanel } from "@/app/(app)/settings/operations/OperationCreateForm";
-import { DecorationCreatePanel } from "@/app/(app)/settings/applications/DecorationCreateForm";
 import { CopySizeSpec, SizeScopeTabs } from "@/components/catalog/SizeScopeTabs";
 import { SizeBomScopeHint } from "@/components/catalog/SizeBomScopeHint";
 import {
@@ -14,22 +13,19 @@ import {
 } from "@/lib/size-coeffs";
 import {
   CompositionAddBar,
-  DraftAddDecorationForm,
   DraftAddMaterialForm,
   DraftAddOperationForm,
   type DecorationCatalogOption,
   type MaterialCatalogOption,
   type OperationCatalogOption,
 } from "@/components/composition/DraftCompositionForms";
-import { IconDecoration, IconMaterials, IconOperations, IconTrash } from "@/components/ui/Icons";
+import { IconMaterials, IconOperations, IconTrash } from "@/components/ui/Icons";
 import {
   type DraftComposition,
-  type DraftDecorationRow,
   type DraftMaterialRow,
   type DraftOperationRow,
 } from "@/components/orders/ProductCatalogPanel";
 import {
-  decorationBatchCost,
   draftKey,
   draftMaterialChoiceSummary,
   draftMaterialMissingChoices,
@@ -163,12 +159,6 @@ export function DraftCompositionBomEditor({
       .filter((row) => !isCutOperationName(row.name))
       .reduce((sum, row) => sum + operationUnitCost(row, controlQty), 0) * controlQty;
   const hasCutOperation = composition.operations.some((row) => isCutOperationName(row.name));
-  const decorationsSubtotal = composition.decorations.reduce(
-    (sum, row) => sum + decorationBatchCost(row, controlQty),
-    0,
-  );
-  const decorationSetupTotal = composition.decorations.reduce((sum, row) => sum + row.setupCost, 0);
-  const decorationUnitRateTotal = composition.decorations.reduce((sum, row) => sum + row.unitRate, 0);
 
   function withResolvedPrice(row: DraftMaterialRow): DraftMaterialRow {
     if (!enableLinePricingControls || !materialHasPricingControls(row)) return row;
@@ -196,22 +186,6 @@ export function DraftCompositionBomEditor({
       operations: composition.operations
         .map((row) => (row.key === key ? patchDraftScope(row, sizeScope, sizeCodes) : row))
         .filter((row): row is DraftOperationRow => Boolean(row)),
-    });
-  }
-
-  function removeDecoration(key: string) {
-    onCompositionChange({
-      ...composition,
-      decorations: composition.decorations.filter((row) => row.key !== key),
-    });
-  }
-
-  function updateDecoration(key: string, patch: Partial<DraftDecorationRow>) {
-    onCompositionChange({
-      ...composition,
-      decorations: composition.decorations.map((row) =>
-        row.key === key ? { ...row, ...patch } : row,
-      ),
     });
   }
 
@@ -244,13 +218,6 @@ export function DraftCompositionBomEditor({
     onCompositionChange({
       ...composition,
       operations: [...composition.operations, attachDraftScope(row, sizeScope)],
-    });
-  }
-
-  function addDecoration(row: DraftDecorationRow) {
-    onCompositionChange({
-      ...composition,
-      decorations: [...composition.decorations, row],
     });
   }
 
@@ -418,7 +385,7 @@ export function DraftCompositionBomEditor({
                         </span>
                         {oversizeNorm != null ? (
                           <span className="text-[10px] text-[var(--color-text-quiet)]">
-                            XXL+ ≈ {oversizeNorm} {formatUnit(row.unit)}
+                            3XL+ ≈ {oversizeNorm} {formatUnit(row.unit)}
                           </span>
                         ) : null}
                       </span>
@@ -724,130 +691,10 @@ export function DraftCompositionBomEditor({
         </CompositionAddBar>
       </TableCard>
 
-      <TableCard>
-        <TableToolbar left={<span className="type-subsection">Нанесення</span>} />
-        <Table className="table-fixed">
-          <THead>
-            <TH>Метод</TH>
-            <TH align="right" width="96px" title="Один раз на всю партію">
-              Приладка
-            </TH>
-            <TH align="right" width="80px" title="За кожну одиницю">
-              ₴/шт
-            </TH>
-            <TH width="44px" />
-          </THead>
-          <TBody>
-            {composition.decorations.length === 0 ? (
-              <TableEmpty
-                colSpan={4}
-                icon={<IconDecoration size={22} />}
-                title="Нанесення не використовується"
-                description="Додайте друк або вишивку, якщо потрібно."
-              />
-            ) : (
-              composition.decorations.map((row) => (
-                <TR key={row.key}>
-                  <TD className="min-w-0">
-                    <CellStack title={row.name} maxWidth="100%" />
-                  </TD>
-                  <TD numeric onClick={(event) => event.stopPropagation()}>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      value={row.setupCost}
-                      onChange={(event) =>
-                        updateDecoration(row.key, {
-                          setupCost: Math.max(0, Number(event.target.value) || 0),
-                        })
-                      }
-                      className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
-                      title="Приладка (разово на партію)"
-                    />
-                  </TD>
-                  <TD numeric onClick={(event) => event.stopPropagation()}>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      value={row.unitRate}
-                      onChange={(event) =>
-                        updateDecoration(row.key, {
-                          unitRate: Math.max(0, Number(event.target.value) || 0),
-                        })
-                      }
-                      className="h-7 w-[64px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
-                      title="Ставка за виріб"
-                    />
-                  </TD>
-                  <TD align="center">
-                    <button
-                      type="button"
-                      aria-label={`Прибрати ${row.name}`}
-                      onClick={() => removeDecoration(row.key)}
-                      className="rounded-[var(--radius-control)] p-1.5 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
-                    >
-                      <IconTrash size={15} />
-                    </button>
-                  </TD>
-                </TR>
-              ))
-            )}
-          </TBody>
-          {showSubtotals && composition.decorations.length > 0 ? (
-            <TFoot>
-              <tr>
-                <TD
-                  className="min-w-0 truncate text-[var(--color-text-secondary)]"
-                  title={`На ${controlQty} шт: ${formatMoneyUah(decorationsSubtotal)}`}
-                >
-                  Разом
-                </TD>
-                <TD numeric>{formatMoneyUah(decorationSetupTotal)}</TD>
-                <TD numeric>{formatMoneyUah(decorationUnitRateTotal)}</TD>
-                <TD />
-              </tr>
-            </TFoot>
-          ) : null}
-        </Table>
-        <CompositionAddBar
-          createAction={
-            <DecorationCreatePanel
-              variant="ghost"
-              size="sm"
-              triggerLabel="Нове нанесення"
-              onCreated={(result) => {
-                const created = result.decoration as
-                  | {
-                      id: string;
-                      nameUk: string;
-                      setupCost: number;
-                      unitRate: number;
-                    }
-                  | undefined;
-                if (!created) return;
-                const option: DecorationCatalogOption = {
-                  id: created.id,
-                  label: created.nameUk,
-                  setupCost: created.setupCost,
-                  unitRate: created.unitRate,
-                };
-                onDecorationCatalogAdd?.(option);
-                addDecoration({
-                  key: draftKey(),
-                  decorationMethodId: option.id,
-                  name: option.label,
-                  setupCost: option.setupCost,
-                  unitRate: option.unitRate,
-                });
-              }}
-            />
-          }
-        >
-          <DraftAddDecorationForm options={decorationOptions} onAdd={addDecoration} compact />
-        </CompositionAddBar>
-      </TableCard>
+      <p className="type-caption rounded-[10px] border border-dashed border-[var(--color-border)] px-3 py-2.5">
+        Нанесення додається пізніше в замовленні (шовкотрафарет за тиражем і кольорами). У базовому
+        виробі його немає.
+      </p>
 
       <DraftMaterialLinePanel
         open={Boolean(selectedMaterial)}

@@ -32,6 +32,7 @@ import {
   toCompositionTemplate,
   duplicateProduct,
   setProductSizes,
+  updateProductIdentity,
 } from "@/server/domains/products/service";
 
 export async function createProductAction(formData: FormData) {
@@ -200,6 +201,37 @@ export async function updateProductImageAction(formData: FormData) {
   revalidatePath("/products");
   revalidatePath("/orders/new");
   return { ok: true as const, imageUrl: imageUrlRaw || null };
+}
+
+export async function updateProductIdentityAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(formData.get("productId") ?? "");
+  const nameUk = String(formData.get("nameUk") ?? "").trim();
+  const internalCodeRaw = String(formData.get("internalCode") ?? "").trim();
+  const descriptionRaw = String(formData.get("description") ?? "").trim();
+  if (!productId || !nameUk) return { ok: false as const, error: "VALIDATION" as const };
+
+  try {
+    await updateProductIdentity({
+      productId,
+      nameUk,
+      internalCode: internalCodeRaw || null,
+      description: descriptionRaw || null,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "VALIDATION";
+    if (message === "DUPLICATE_CODE") return { ok: false as const, error: "DUPLICATE_CODE" as const };
+    if (message === "DUPLICATE_NAME") return { ok: false as const, error: "DUPLICATE_NAME" as const };
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/products");
+  revalidatePath("/orders/new");
+  return { ok: true as const };
 }
 
 export async function addProductMaterialAction(formData: FormData) {
@@ -418,27 +450,44 @@ export async function copyProductSizeSpecAction(formData: FormData) {
   return { ok: true as const };
 }
 
-export async function updateProductCutRatesAction(formData: FormData) {
+export async function updateProductCutRatesAction(
+  input:
+    | FormData
+    | {
+        productId: string;
+        optimalQty?: number | null;
+        tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
+      },
+) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
   await assertSessionPermission("createInlineCatalog");
 
-  const productId = String(formData.get("productId") ?? "");
-  if (!productId) return { ok: false as const, error: "VALIDATION" as const };
+  let productId: string;
+  let optimalQty: number | null;
+  let tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
 
-  const optimalRaw = String(formData.get("optimalQty") ?? "").trim();
-  const optimalQty = optimalRaw ? Number(optimalRaw) : null;
-
-  const minQuantities = formData.getAll("tierMinQuantity").map(String);
-  const rates = formData.getAll("tierRate").map(String);
-  const tiers: Array<{ minQuantity: number; ratePerUnit: number }> = [];
-  for (let i = 0; i < minQuantities.length; i++) {
-    const minQuantity = Number(minQuantities[i]);
-    const ratePerUnit = Number(rates[i]);
-    if (!Number.isFinite(minQuantity) || !Number.isFinite(ratePerUnit)) continue;
-    if (minQuantity <= 0 || ratePerUnit < 0) continue;
-    tiers.push({ minQuantity, ratePerUnit });
+  if (input instanceof FormData) {
+    productId = String(input.get("productId") ?? "");
+    const optimalRaw = String(input.get("optimalQty") ?? "").trim();
+    optimalQty = optimalRaw ? Number(optimalRaw) : null;
+    const minQuantities = input.getAll("tierMinQuantity").map(String);
+    const rates = input.getAll("tierRate").map(String);
+    tiers = [];
+    for (let i = 0; i < minQuantities.length; i++) {
+      const minQuantity = Number(minQuantities[i]);
+      const ratePerUnit = Number(rates[i]);
+      if (!Number.isFinite(minQuantity) || !Number.isFinite(ratePerUnit)) continue;
+      if (minQuantity <= 0 || ratePerUnit < 0) continue;
+      tiers.push({ minQuantity, ratePerUnit });
+    }
+  } else {
+    productId = input.productId;
+    optimalQty = input.optimalQty ?? null;
+    tiers = input.tiers;
   }
+
+  if (!productId) return { ok: false as const, error: "VALIDATION" as const };
 
   const parsed = parseCutRateTiersInput({ optimalQty, tiers });
   if (!parsed.ok) return { ok: false as const, error: "VALIDATION" as const };
@@ -522,25 +571,43 @@ export async function updateProductOperationRateAction(formData: FormData) {
   return { ok: true as const };
 }
 
-export async function updateProductCommercialPricesAction(formData: FormData) {
+export async function updateProductCommercialPricesAction(
+  input:
+    | FormData
+    | {
+        productId: string;
+        isBaseModel?: boolean;
+        tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+      },
+) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
   await assertSessionPermission("createInlineCatalog");
 
-  const productId = String(formData.get("productId") ?? "");
-  if (!productId) return { ok: false as const, error: "VALIDATION" as const };
+  let productId: string;
+  let isBaseModel: boolean;
+  let tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
 
-  const isBaseModel = formData.get("isBaseModel") === "1";
-  const minQuantities = formData.getAll("tierMinQuantity").map(String);
-  const prices = formData.getAll("tierPrice").map(String);
-  const tiers: Array<{ minQuantity: number; pricePerUnit: number }> = [];
-  for (let i = 0; i < minQuantities.length; i++) {
-    const minQuantity = Number(minQuantities[i]);
-    const pricePerUnit = Number(prices[i]);
-    if (!Number.isFinite(minQuantity) || !Number.isFinite(pricePerUnit)) continue;
-    if (minQuantity <= 0 || pricePerUnit < 0) continue;
-    tiers.push({ minQuantity, pricePerUnit });
+  if (input instanceof FormData) {
+    productId = String(input.get("productId") ?? "");
+    isBaseModel = input.get("isBaseModel") === "1";
+    const minQuantities = input.getAll("tierMinQuantity").map(String);
+    const prices = input.getAll("tierPrice").map(String);
+    tiers = [];
+    for (let i = 0; i < minQuantities.length; i++) {
+      const minQuantity = Number(minQuantities[i]);
+      const pricePerUnit = Number(prices[i]);
+      if (!Number.isFinite(minQuantity) || !Number.isFinite(pricePerUnit)) continue;
+      if (minQuantity <= 0 || pricePerUnit < 0) continue;
+      tiers.push({ minQuantity, pricePerUnit });
+    }
+  } else {
+    productId = input.productId;
+    isBaseModel = input.isBaseModel === true;
+    tiers = input.tiers;
   }
+
+  if (!productId) return { ok: false as const, error: "VALIDATION" as const };
 
   const parsed = parseCommercialPriceTiersInput({ isBaseModel, tiers });
   if (!parsed.ok) return { ok: false as const, error: "VALIDATION" as const };
@@ -589,14 +656,14 @@ export async function previewProductEconomicsAction(productId: string, quantity:
             : null,
     })),
   );
-  const { calc } = calcWithClientPrice({
+  const { calc, resolved } = calcWithClientPrice({
     costCalc,
     quantity: qty,
     product,
     sewingPerUnit,
   });
 
-  return { ok: true as const, calc, quantity: qty };
+  return { ok: true as const, calc, quantity: qty, priceSource: resolved };
 }
 
 export async function bulkArchiveProductsAction(formData: FormData) {

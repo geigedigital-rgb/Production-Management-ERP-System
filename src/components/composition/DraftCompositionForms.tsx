@@ -18,6 +18,7 @@ import {
   resolveDraftMaterialPrice,
 } from "@/lib/draft-composition";
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
+import { materialOptionDescription } from "@/lib/material-catalog-options";
 import { formatMoneyUah } from "@/lib/utils";
 
 export type MaterialCatalogOption = {
@@ -29,6 +30,7 @@ export type MaterialCatalogOption = {
   defaultWaste: number;
   materialType?: string | null;
   composition?: string | null;
+  densityGsm?: string | null;
   priceMeterUahNoVat?: number | null;
   priceMeterUahVat?: number | null;
   priceMeterUahCutVat?: number | null;
@@ -192,7 +194,7 @@ export function DraftAddMaterialForm({
               <option
                 key={row.id}
                 value={row.id}
-                data-description={row.composition?.trim() || undefined}
+                data-description={materialOptionDescription(row.densityGsm, row.composition)}
               >
                 {row.label}
               </option>
@@ -259,7 +261,7 @@ export function DraftAddMaterialForm({
             <option
               key={row.id}
               value={row.id}
-              data-description={row.composition?.trim() || undefined}
+              data-description={materialOptionDescription(row.densityGsm, row.composition)}
             >
               {row.label}
             </option>

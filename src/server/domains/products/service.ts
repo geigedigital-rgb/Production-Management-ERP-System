@@ -898,9 +898,59 @@ export async function setProductImageUrl(productId: string, imageUrl: string | n
   if (url && !isAllowedProductImageUrl(url)) {
     throw new Error("INVALID_IMAGE_URL");
   }
-  return prisma.product.update({
+
+  const previous = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { imageUrl: true },
+  });
+
+  const updated = await prisma.product.update({
     where: { id: productId },
     data: { imageUrl: url },
+  });
+
+  const previousUrl = previous?.imageUrl?.trim() || null;
+  if (previousUrl && previousUrl !== url) {
+    const { removeStoredProductImage } = await import("@/lib/uploads");
+    await removeStoredProductImage(previousUrl);
+  }
+
+  return updated;
+}
+
+export async function updateProductIdentity(input: {
+  productId: string;
+  nameUk: string;
+  internalCode: string | null;
+  description: string | null;
+}) {
+  const nameUk = input.nameUk.trim();
+  if (!nameUk) throw new Error("VALIDATION");
+
+  const internalCode = input.internalCode?.trim() || null;
+  const description = input.description?.trim() || null;
+
+  if (internalCode) {
+    const codeClash = await prisma.product.findFirst({
+      where: { internalCode, id: { not: input.productId } },
+      select: { id: true },
+    });
+    if (codeClash) throw new Error("DUPLICATE_CODE");
+  }
+
+  const nameClash = await prisma.product.findFirst({
+    where: {
+      id: { not: input.productId },
+      nameUk: { equals: nameUk, mode: "insensitive" },
+      status: "ACTIVE",
+    },
+    select: { id: true },
+  });
+  if (nameClash) throw new Error("DUPLICATE_NAME");
+
+  return prisma.product.update({
+    where: { id: input.productId },
+    data: { nameUk, internalCode, description },
   });
 }
 
@@ -956,7 +1006,7 @@ export function parseCommercialPriceTiersInput(input: {
   | {
       ok: true;
       isBaseModel: boolean;
-      tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+      tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard: boolean }>;
     }
   | { ok: false } {
   const isBaseModel =
@@ -964,15 +1014,19 @@ export function parseCommercialPriceTiersInput(input: {
     input.isBaseModel === "1" ||
     input.isBaseModel === "true";
 
-  const tiers: Array<{ minQuantity: number; pricePerUnit: number }> = [];
+  const tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard: boolean }> = [];
   if (Array.isArray(input.tiers)) {
     for (const row of input.tiers) {
       if (!row || typeof row !== "object") continue;
       const minQuantity = Number((row as { minQuantity?: unknown }).minQuantity);
       const pricePerUnit = Number((row as { pricePerUnit?: unknown }).pricePerUnit);
+      const showOnCard =
+        (row as { showOnCard?: unknown }).showOnCard === true ||
+        (row as { showOnCard?: unknown }).showOnCard === "1" ||
+        (row as { showOnCard?: unknown }).showOnCard === "true";
       if (!Number.isFinite(minQuantity) || !Number.isFinite(pricePerUnit)) continue;
       if (minQuantity <= 0 || pricePerUnit < 0) continue;
-      tiers.push({ minQuantity, pricePerUnit });
+      tiers.push({ minQuantity, pricePerUnit, showOnCard });
     }
   }
 
@@ -982,14 +1036,19 @@ export function parseCommercialPriceTiersInput(input: {
 export async function setProductCommercialPrices(input: {
   productId: string;
   isBaseModel: boolean;
-  tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+  tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard?: boolean }>;
 }) {
   const tiers = input.tiers
     .filter((tier) => tier.minQuantity > 0 && tier.pricePerUnit >= 0)
     .sort((a, b) => a.minQuantity - b.minQuantity);
 
-  const unique = new Map<number, number>();
-  for (const tier of tiers) unique.set(tier.minQuantity, tier.pricePerUnit);
+  const unique = new Map<number, { pricePerUnit: number; showOnCard: boolean }>();
+  for (const tier of tiers) {
+    unique.set(tier.minQuantity, {
+      pricePerUnit: tier.pricePerUnit,
+      showOnCard: tier.showOnCard === true,
+    });
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.product.update({
@@ -999,10 +1058,11 @@ export async function setProductCommercialPrices(input: {
     await tx.productCommercialPriceTier.deleteMany({ where: { productId: input.productId } });
     if (unique.size > 0) {
       await tx.productCommercialPriceTier.createMany({
-        data: [...unique.entries()].map(([minQuantity, pricePerUnit]) => ({
+        data: [...unique.entries()].map(([minQuantity, row]) => ({
           productId: input.productId,
           minQuantity,
-          pricePerUnit,
+          pricePerUnit: row.pricePerUnit,
+          showOnCard: row.showOnCard,
         })),
       });
     }
@@ -1160,6 +1220,7 @@ export async function duplicateProduct(sourceId: string) {
         create: source.commercialPriceTiers.map((tier) => ({
           minQuantity: tier.minQuantity,
           pricePerUnit: tier.pricePerUnit,
+          showOnCard: tier.showOnCard,
         })),
       },
     },

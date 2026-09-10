@@ -28,7 +28,7 @@ export function ProductDetailTabs({
   price: {
     productId: string;
     isBaseModel: boolean;
-    tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+    tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard?: boolean }>;
     costHints?: TirageCostHint[];
   };
   showPricing?: boolean;

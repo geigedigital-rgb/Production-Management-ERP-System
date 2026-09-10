@@ -1,6 +1,7 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
+import { RowBusyMark, busyRowClass } from "@/components/ui/SoftBusy";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/Page";
@@ -57,6 +58,7 @@ export function OrderItemsTable({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const totalQty = rows.reduce((sum, row) => sum + row.quantity, 0);
 
   function select(id: string) {
@@ -70,9 +72,13 @@ export function OrderItemsTable({
     formData.set("orderId", orderId);
     formData.set("orderItemId", row.id);
     const fallback = rows.find((item) => item.id !== row.id)?.id;
+    setBusyItemId(row.id);
     startTransition(async () => {
       const result = await removeOrderItemAction(formData);
-      if (!result.ok) return;
+      if (!result.ok) {
+        setBusyItemId(null);
+        return;
+      }
       if (fallback) {
         router.push(`/orders/${orderId}?tab=${activeTab}&item=${fallback}`);
       }
@@ -115,20 +121,29 @@ export function OrderItemsTable({
             const active = row.id === selectedId;
             const state = handedOver ? "У виробництві" : itemNeedLabel[row.need];
             const tone = handedOver ? "neutral" : itemNeedTone(row.need);
+            const rowBusy = pending && busyItemId === row.id;
             return (
               <TR
                 key={row.id}
-                onClick={() => select(row.id)}
+                onClick={() => {
+                  if (rowBusy) return;
+                  select(row.id);
+                }}
                 className={cn(
                   active && "bg-[var(--color-tint-sage)] hover:bg-[var(--color-tint-sage)]",
+                  busyRowClass(rowBusy),
                 )}
+                aria-busy={rowBusy || undefined}
               >
                 <TD numeric className="text-[var(--color-text-tertiary)]">
                   {index + 1}
                 </TD>
                 <TD>
                   <div className="min-w-0">
-                    <p className="font-medium text-[var(--color-text-primary)]">{row.nameUk}</p>
+                    <p className="font-medium text-[var(--color-text-primary)]">
+                      {row.nameUk}
+                      <RowBusyMark busy={rowBusy} />
+                    </p>
                     {row.sizeRun ? (
                       <p className="type-caption tabular">{row.sizeRun}</p>
                     ) : null}

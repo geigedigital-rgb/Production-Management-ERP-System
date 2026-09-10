@@ -1,376 +1,436 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { Banner } from "@/components/ui/Banner";
-import {
-  updateProductCommercialPricesAction,
-  updateProductCutRatesAction,
-} from "@/server/domains/products/actions";
+import { Input } from "@/components/ui/Input";
+import { updateProductCommercialPricesAction, updateProductCutRatesAction } from "@/server/domains/products/actions";
 import {
   hintForQty,
   hydrateCommercialPriceTiers,
   type TirageCostHint,
 } from "@/components/products/ProductPriceFields";
-import {
-  defaultSewingMultiplierForQty,
-  markupAmountFromSewing,
-  SHARED_PRODUCT_TIRAGE_QTYS,
-  suggestSellingFromSewingMarkup,
-} from "@/lib/sewing-markup";
-import { cn, formatMoneyUah } from "@/lib/utils";
+import { resolveCutRatePerUnit, resolveOptimalCutQty } from "@/lib/cut-rate";
+import { resolveCommercialPricePerUnit } from "@/lib/commercial-price";
+import { defaultSewingMultiplierForQty } from "@/lib/sewing-markup";
+import { formatMoneyUah } from "@/lib/utils";
 
-export type UnifiedTirageRow = {
+type Row = {
   minQuantity: number;
-  cutRatePerUnit: number;
+  cutRate: number;
   pricePerUnit: number;
   sewingMultiplier: number;
+  showOnCard: boolean;
 };
 
-function CompactInput({
-  className,
-  ...props
-}: React.InputHTMLAttributes<HTMLInputElement>) {
+function CompactInput(props: React.ComponentProps<"input">) {
   return (
     <input
       {...props}
-      className={cn(
-        "h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[13px] tabular text-[var(--color-text-primary)] outline-none transition-colors",
-        "hover:border-[var(--color-border-strong)] focus:border-[var(--color-primary-500)] focus:ring-2 focus:ring-[var(--color-primary-100)]",
-        className,
-      )}
+      className={[
+        "h-7 w-full min-w-0 rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-[12.5px] tabular-nums text-[var(--color-text)]",
+        "focus-visible:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--color-accent)_22%,transparent)]",
+        "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+        props.className ?? "",
+      ].join(" ")}
     />
   );
 }
 
-function MoneyCell({ value }: { value: number | null }) {
-  if (value == null) return <span className="text-[var(--color-text-quiet)]">—</span>;
-  return <span className="tabular text-[var(--color-text-secondary)]">{formatMoneyUah(value)}</span>;
+function MoneyCell({ value }: { value: number }) {
+  return (
+    <span className="type-mono text-[11.5px] tabular-nums text-[var(--color-text-quiet)]">
+      {Number.isFinite(value) ? formatMoneyUah(value) : "—"}
+    </span>
+  );
 }
 
-function buildUnifiedRows(args: {
-  cutTiers: Array<{ minQuantity: number; ratePerUnit: number }>;
-  priceTiers: Array<{ minQuantity: number; pricePerUnit: number; sewingMultiplier?: number }>;
-  costHints?: TirageCostHint[];
-}): UnifiedTirageRow[] {
-  const cutMap = new Map(args.cutTiers.map((row) => [row.minQuantity, row.ratePerUnit]));
-  const priceMap = new Map(
-    args.priceTiers.map((row) => [
-      row.minQuantity,
-      { price: row.pricePerUnit, mult: row.sewingMultiplier },
-    ]),
-  );
+function cutRateFromOptimalTotal(optimalTotal: number, qty: number): number {
+  if (!(qty > 0) || !(optimalTotal >= 0) || !Number.isFinite(optimalTotal)) return 0;
+  return Math.round((optimalTotal / qty) * 100) / 100;
+}
 
-  // Cut ladder is the source of truth for tirage steps; price rows follow the same qtys.
-  const sourceQtys = args.cutTiers.length
-    ? [...args.cutTiers.map((row) => row.minQuantity)].filter((qty) => qty > 0).sort((a, b) => a - b)
-    : args.priceTiers.length
-      ? [...args.priceTiers.map((row) => row.minQuantity)].filter((qty) => qty > 0).sort((a, b) => a - b)
-      : [...SHARED_PRODUCT_TIRAGE_QTYS];
+function ensureOptimalRow(rows: Row[], optimalQty: number, cutRate: number): Row[] {
+  if (!(optimalQty > 0)) return rows;
+  const idx = rows.findIndex((row) => row.minQuantity === optimalQty);
+  if (idx >= 0) {
+    const next = [...rows];
+    next[idx] = { ...next[idx]!, cutRate };
+    return next.sort((a, b) => a.minQuantity - b.minQuantity);
+  }
+  const last = rows[rows.length - 1];
+  return [
+    ...rows,
+    {
+      minQuantity: optimalQty,
+      cutRate,
+      pricePerUnit: last?.pricePerUnit ?? 0,
+      sewingMultiplier: last?.sewingMultiplier ?? defaultSewingMultiplierForQty(optimalQty),
+      showOnCard: false,
+    },
+  ].sort((a, b) => a.minQuantity - b.minQuantity);
+}
 
-  const draft = sourceQtys.map((minQuantity) => {
-    const priceInfo = priceMap.get(minQuantity);
-    return {
-      minQuantity,
-      cutRatePerUnit: cutMap.get(minQuantity) ?? 0,
-      pricePerUnit: priceInfo?.price ?? 0,
-      sewingMultiplier: priceInfo?.mult ?? defaultSewingMultiplierForQty(minQuantity),
-    };
-  });
-
-  return hydrateCommercialPriceTiers(
-    draft.map((row) => ({
-      minQuantity: row.minQuantity,
-      pricePerUnit: row.pricePerUnit,
-      sewingMultiplier: row.sewingMultiplier,
-    })),
-    args.costHints,
-  ).map((hydrated, index) => ({
-    ...draft[index]!,
-    pricePerUnit: hydrated.pricePerUnit,
-    sewingMultiplier: hydrated.sewingMultiplier ?? draft[index]!.sewingMultiplier,
+/** Розкладає крій по всіх сходинках від вартості оптимуму: ₴/шт = вартість_оптимуму ÷ тираж_сходинки. */
+function spreadCutFromOptimal(rows: Row[], optimalTotal: number): Row[] {
+  return rows.map((row) => ({
+    ...row,
+    cutRate: cutRateFromOptimalTotal(optimalTotal, row.minQuantity),
   }));
 }
 
 export function ProductPriceCutPanel({
   productId,
+  optimalQty: initialOptimalQty,
   cutTiers,
+  isBaseModel: initialIsBaseModel,
   priceTiers,
-  costHints,
+  costHints = [],
 }: {
   productId: string;
-  /** @deprecated unused — optimal = last tirage step */
-  optimalQty?: number | null;
+  optimalQty: number | null;
   cutTiers: Array<{ minQuantity: number; ratePerUnit: number }>;
-  /** @deprecated unused — base flag set automatically when prices saved */
-  isBaseModel?: boolean;
-  priceTiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+  isBaseModel: boolean;
+  priceTiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard?: boolean }>;
   costHints?: TirageCostHint[];
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [rows, setRows] = useState<UnifiedTirageRow[]>(() =>
-    buildUnifiedRows({ cutTiers, priceTiers, costHints }),
+  const initialMerged = useMemo(() => {
+    const qtySet = new Set<number>();
+    for (const t of cutTiers) qtySet.add(t.minQuantity);
+    for (const t of priceTiers) qtySet.add(t.minQuantity);
+    const qtys = [...qtySet].sort((a, b) => a - b);
+    if (qtys.length === 0) qtys.push(50);
+
+    const cutMap = new Map(cutTiers.map((t) => [t.minQuantity, t.ratePerUnit]));
+    const priceMap = new Map(priceTiers.map((t) => [t.minQuantity, t.pricePerUnit]));
+    const cardMap = new Map(priceTiers.map((t) => [t.minQuantity, t.showOnCard === true]));
+
+    const base = qtys.map((q) => ({
+      minQuantity: q,
+      cutRate: cutMap.get(q) ?? 0,
+      pricePerUnit: priceMap.get(q) ?? 0,
+      sewingMultiplier: defaultSewingMultiplierForQty(q),
+      showOnCard: cardMap.get(q) ?? false,
+    }));
+
+    return hydrateCommercialPriceTiers(base, costHints).map((row, index) => ({
+      minQuantity: row.minQuantity,
+      pricePerUnit: row.pricePerUnit,
+      sewingMultiplier: row.sewingMultiplier ?? defaultSewingMultiplierForQty(row.minQuantity),
+      cutRate: base[index]?.cutRate ?? 0,
+      showOnCard: base[index]?.showOnCard ?? false,
+    }));
+  }, [cutTiers, priceTiers, costHints]);
+
+  const resolvedInitialOptimal = useMemo(() => {
+    if (initialOptimalQty != null && initialOptimalQty > 0) return initialOptimalQty;
+    return (
+      resolveOptimalCutQty({
+        optimalQty: null,
+        tiers: cutTiers.map((t) => ({ minQuantity: t.minQuantity, ratePerUnit: t.ratePerUnit })),
+      }) ??
+      cutTiers[cutTiers.length - 1]?.minQuantity ??
+      50
+    );
+  }, [initialOptimalQty, cutTiers]);
+
+  const initialOptimalTotal = useMemo(() => {
+    const rate =
+      cutTiers.find((t) => t.minQuantity === resolvedInitialOptimal)?.ratePerUnit ??
+      cutTiers[cutTiers.length - 1]?.ratePerUnit ??
+      0;
+    return Math.round(rate * resolvedInitialOptimal * 100) / 100;
+  }, [cutTiers, resolvedInitialOptimal]);
+
+  const [rows, setRows] = useState(() =>
+    initialMerged.map((r) => ({
+      minQuantity: r.minQuantity,
+      cutRate: r.cutRate,
+      pricePerUnit: r.pricePerUnit,
+      sewingMultiplier: r.sewingMultiplier,
+      showOnCard: r.showOnCard,
+    })),
   );
+  const [optimalQty, setOptimalQty] = useState(resolvedInitialOptimal);
+  const [optimalCutTotal, setOptimalCutTotal] = useState(initialOptimalTotal);
+  const [isBaseModel, setIsBaseModel] = useState(initialIsBaseModel);
+  const [message, setMessage] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
-  const previewQty = rows.find((row) => row.minQuantity >= 40)?.minQuantity ?? rows[0]?.minQuantity ?? 40;
+  const previewQty = rows[0]?.minQuantity || 50;
+  const previewCut = resolveCutRatePerUnit({
+    quantity: previewQty,
+    optimalQty,
+    tiers: rows.map((r) => ({ minQuantity: r.minQuantity, ratePerUnit: r.cutRate })),
+    fallbackRate: rows[rows.length - 1]?.cutRate ?? 0,
+  });
+  const previewPrice =
+    resolveCommercialPricePerUnit({
+      quantity: previewQty,
+      tiers: rows.map((r) => ({ minQuantity: r.minQuantity, pricePerUnit: r.pricePerUnit })),
+      fallbackPrice: rows[0]?.pricePerUnit ?? 0,
+    }) ?? 0;
 
-  const previewCut = useMemo(() => {
-    const sorted = [...rows].sort((a, b) => a.minQuantity - b.minQuantity);
-    const optimal = sorted[sorted.length - 1]?.minQuantity ?? null;
-    const effective = optimal != null && previewQty > optimal ? optimal : previewQty;
-    let rate = 0;
-    for (const row of sorted) {
-      if (row.minQuantity <= effective) rate = row.cutRatePerUnit;
-      else break;
-    }
-    return rate;
-  }, [previewQty, rows]);
-
-  const previewPrice = useMemo(() => {
-    const sorted = [...rows].sort((a, b) => a.minQuantity - b.minQuantity);
-    let price = sorted[0]?.pricePerUnit ?? 0;
-    for (const row of sorted) {
-      if (row.minQuantity <= previewQty) price = row.pricePerUnit;
-      else break;
-    }
-    return price;
-  }, [previewQty, rows]);
-
-  function updateQty(index: number, minQuantity: number) {
+  function applyOptimal(nextQty: number, nextTotal: number, spreadAll: boolean) {
+    const qty = Math.max(1, Math.round(nextQty) || 1);
+    const total = Math.max(0, Number.isFinite(nextTotal) ? nextTotal : 0);
+    const rate = cutRateFromOptimalTotal(total, qty);
+    setOptimalQty(qty);
+    setOptimalCutTotal(Math.round(total * 100) / 100);
     setRows((prev) => {
-      const next = [...prev];
-      const row = next[index]!;
-      const hint = hintForQty(costHints, minQuantity);
-      const sewingMultiplier = row.sewingMultiplier || defaultSewingMultiplierForQty(minQuantity);
-      next[index] = {
-        ...row,
-        minQuantity,
-        sewingMultiplier,
-        pricePerUnit: hint
-          ? suggestSellingFromSewingMarkup({
-              costPerUnit: hint.costPerUnit,
-              sewingPerUnit: hint.sewingPerUnit,
-              multiplier: sewingMultiplier,
-            })
-          : row.pricePerUnit,
-      };
-      return next;
+      const withRow = ensureOptimalRow(prev, qty, rate);
+      return spreadAll ? spreadCutFromOptimal(withRow, total) : withRow;
     });
   }
 
   function addTirage() {
     setRows((prev) => {
-      const minQuantity = (prev[prev.length - 1]?.minQuantity ?? 0) + 50;
-      const sewingMultiplier = defaultSewingMultiplierForQty(minQuantity);
-      const hint = hintForQty(costHints, minQuantity);
-      return [
-        ...prev,
-        {
-          minQuantity,
-          cutRatePerUnit: prev[prev.length - 1]?.cutRatePerUnit ?? 0,
-          sewingMultiplier,
-          pricePerUnit: hint
-            ? suggestSellingFromSewingMarkup({
-                costPerUnit: hint.costPerUnit,
-                sewingPerUnit: hint.sewingPerUnit,
-                multiplier: sewingMultiplier,
-              })
-            : 0,
-        },
-      ];
+      const last = prev[prev.length - 1];
+      const nextQty = last ? last.minQuantity * 2 : 50;
+      const next: Row = {
+        minQuantity: nextQty,
+        cutRate: cutRateFromOptimalTotal(optimalCutTotal, nextQty),
+        pricePerUnit: last?.pricePerUnit ?? 0,
+        sewingMultiplier: last?.sewingMultiplier ?? defaultSewingMultiplierForQty(nextQty),
+        showOnCard: false,
+      };
+      const hydrated = hydrateCommercialPriceTiers(
+        [...prev, next].map((r) => ({
+          minQuantity: r.minQuantity,
+          pricePerUnit: r.pricePerUnit,
+          sewingMultiplier: r.sewingMultiplier,
+          cutRate: r.cutRate,
+        })),
+        costHints,
+      );
+      return hydrated.map((h, i) => ({
+        minQuantity: h.minQuantity,
+        cutRate: i < prev.length ? prev[i]!.cutRate : next.cutRate,
+        pricePerUnit: h.pricePerUnit,
+        sewingMultiplier: h.sewingMultiplier ?? defaultSewingMultiplierForQty(h.minQuantity),
+        showOnCard: i < prev.length ? prev[i]!.showOnCard : false,
+      }));
     });
   }
 
   function saveAll() {
-    setError(null);
-    const sorted = [...rows].sort((a, b) => a.minQuantity - b.minQuantity);
-    const optimalQty = sorted[sorted.length - 1]?.minQuantity ?? "";
-
-    const cutForm = new FormData();
-    cutForm.set("productId", productId);
-    cutForm.set("optimalQty", String(optimalQty));
-    for (const row of rows) {
-      cutForm.append("tierMinQuantity", String(row.minQuantity));
-      cutForm.append("tierRate", String(row.cutRatePerUnit));
-    }
-
-    const priceForm = new FormData();
-    priceForm.set("productId", productId);
-    if (rows.some((row) => row.pricePerUnit > 0)) {
-      priceForm.set("isBaseModel", "1");
-    }
-    for (const row of rows) {
-      priceForm.append("tierMinQuantity", String(row.minQuantity));
-      priceForm.append("tierPrice", String(row.pricePerUnit));
-    }
-
+    setMessage(null);
     startTransition(async () => {
-      const [cutResult, priceResult] = await Promise.all([
-        updateProductCutRatesAction(cutForm),
-        updateProductCommercialPricesAction(priceForm),
-      ]);
-      if (!cutResult.ok || !priceResult.ok) {
-        setError("Перевірте тиражі, ставки крою та ціни клієнту.");
+      const cutResult = await updateProductCutRatesAction({
+        productId,
+        optimalQty,
+        tiers: rows.map((r) => ({
+          minQuantity: r.minQuantity,
+          ratePerUnit: r.cutRate,
+        })),
+      });
+      if (!cutResult.ok) {
+        setMessage(cutResult.error);
         return;
       }
-      router.refresh();
+      const priceResult = await updateProductCommercialPricesAction({
+        productId,
+        isBaseModel,
+        tiers: rows.map((r) => ({
+          minQuantity: r.minQuantity,
+          pricePerUnit: r.pricePerUnit,
+          showOnCard: r.showOnCard,
+        })),
+      });
+      setMessage(priceResult.ok ? "Крій і прайс збережено" : priceResult.error);
     });
   }
 
   return (
-    <div className="space-y-4 rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[0_1px_0_rgba(15,23,32,0.03)]">
-      <div className="min-w-0">
-        <h3 className="text-[14px] font-semibold text-[var(--color-text-primary)]">
-          Прайс і крій за тиражем
-        </h3>
-        <p className="type-caption mt-0.5 max-w-2xl">
-          Тираж спільний. Остання сходинка тиражу — оптимум крою (далі ₴/шт не падає). Прайс
-          зберігається разом із кроєм.
-        </p>
+    <div className="space-y-3 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-soft)]">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="type-label">Прайс і крій</p>
+          <p className="type-caption mt-0.5">
+            Спочатку оптимум: вартість крою ÷ тираж → ₴/шт. Галочка «У картці» — базовий прайс у меню
+            «Вироби».
+          </p>
+        </div>
+        <label className="inline-flex items-center gap-2 type-caption">
+          <input
+            type="checkbox"
+            checked={isBaseModel}
+            onChange={(event) => setIsBaseModel(event.target.checked)}
+            className="h-4 w-4 rounded border-[var(--color-border)]"
+          />
+          Базова модель (без націнки за крій)
+        </label>
       </div>
 
-      {error ? <Banner tone="danger">{error}</Banner> : null}
+      <div className="grid gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-2.5 sm:grid-cols-[7.5rem_9rem_auto] sm:items-end">
+        <label className="block space-y-1">
+          <span className="type-caption">Оптимум, шт</span>
+          <Input
+            type="number"
+            min={1}
+            step={1}
+            inputClassName="h-8 text-[13px]"
+            value={optimalQty}
+            onChange={(event) => applyOptimal(Number(event.target.value), optimalCutTotal, true)}
+          />
+        </label>
+        <label className="block space-y-1">
+          <span className="type-caption">Крій на оптимум, ₴</span>
+          <Input
+            type="number"
+            min={0}
+            step="0.01"
+            inputClassName="h-8 text-[13px]"
+            value={optimalCutTotal}
+            onChange={(event) => applyOptimal(optimalQty, Number(event.target.value), true)}
+          />
+        </label>
+        <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5">
+          <p className="type-caption">₴/шт</p>
+          <p className="type-mono text-[14px] font-semibold tabular-nums">
+            {formatMoneyUah(cutRateFromOptimalTotal(optimalCutTotal, optimalQty))}
+          </p>
+        </div>
+      </div>
 
-      <div className="overflow-x-auto rounded-[8px] border border-[var(--color-border)]">
-        <table className="w-full min-w-[640px] border-collapse text-left text-[13px]">
-          <colgroup>
-            <col className="w-[72px]" />
-            <col className="w-[76px]" />
-            <col />
-            <col />
-            <col className="w-[56px]" />
-            <col />
-            <col className="w-[100px]" />
-            <col className="w-[36px]" />
-          </colgroup>
+      {message ? <p className="type-caption text-[var(--color-text-muted)]">{message}</p> : null}
+
+      <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
+        <table className="w-auto min-w-0 border-collapse text-left">
           <thead>
-            <tr className="bg-[var(--color-surface-subtle)]">
-              <th
-                rowSpan={2}
-                className="border-r border-[var(--color-border)] px-2 py-2 align-middle text-center text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--color-text-secondary)]"
-              >
-                Тираж
-                <span className="mt-0.5 block text-[10px] font-normal normal-case tracking-normal text-[var(--color-text-quiet)]">
-                  спільний
-                </span>
+            <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg)]/50">
+              <th className="whitespace-nowrap px-1 py-1.5 type-caption font-medium" title="Показувати в картці виробу">
+                Картка
               </th>
-              <th
-                className="border-r border-[var(--color-border)] bg-[var(--color-tint-amber)]/35 px-2 py-1.5 text-center text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--color-warning-text)]"
-              >
-                Крій
-              </th>
-              <th
-                colSpan={5}
-                className="bg-[var(--color-tint-sage)]/50 px-2.5 py-1.5 text-center text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--color-primary-700)]"
-              >
-                Базовий прайс
-              </th>
-              <th rowSpan={2} className="w-9" />
-            </tr>
-            <tr className="border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)]">
-              <th className="border-r border-[var(--color-border)] bg-[var(--color-tint-amber)]/20 px-2 py-2 text-right font-medium text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-quiet)]">
-                ₴ / шт
-              </th>
-              <th className="px-2 py-2 text-right font-medium text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-quiet)]">
-                Собів.
-              </th>
-              <th className="px-2 py-2 text-right font-medium text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-quiet)]">
-                Пошив
-              </th>
-              <th className="px-2 py-2 text-center font-medium text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-quiet)]">
-                ×
-              </th>
-              <th className="px-2 py-2 text-right font-medium text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-quiet)]">
-                Націнка
-              </th>
-              <th className="px-2 py-2 text-right font-medium text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-quiet)]">
-                Ціна
-              </th>
+              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Тираж</th>
+              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Крій</th>
+              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Собів.</th>
+              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Пошив</th>
+              <th className="whitespace-nowrap px-1 py-1.5 type-caption font-medium">×</th>
+              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Націнка</th>
+              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Ціна</th>
+              <th className="w-7 px-0.5 py-1.5" />
             </tr>
           </thead>
           <tbody>
             {rows.map((row, index) => {
               const hint = hintForQty(costHints, row.minQuantity);
-              const markup = hint
-                ? markupAmountFromSewing(hint.sewingPerUnit, row.sewingMultiplier)
-                : null;
+              const sewing = hint?.sewingPerUnit ?? 0;
+              const cost = hint?.costPerUnit ?? 0;
+              const markup = row.pricePerUnit - cost;
+              const isOptimal = row.minQuantity === optimalQty;
               return (
                 <tr
-                  key={index}
-                  className="border-t border-[var(--color-divider)] hover:bg-[var(--color-surface-tint)]/40"
+                  key={`${row.minQuantity}-${index}`}
+                  className={[
+                    "border-b border-[var(--color-divider)] last:border-0",
+                    isOptimal ? "bg-[color-mix(in_srgb,var(--color-accent)_8%,transparent)]" : "",
+                  ].join(" ")}
                 >
-                  <td className="border-r border-[var(--color-border)] bg-[var(--color-surface-subtle)]/60 px-1.5 py-1">
+                  <td className="px-1 py-0.5 text-center">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-[var(--color-border)]"
+                      checked={row.showOnCard}
+                      title="Базовий прайс у картці «Вироби»"
+                      onChange={(event) => {
+                        const showOnCard = event.target.checked;
+                        setRows((prev) => {
+                          const next = [...prev];
+                          next[index] = { ...row, showOnCard };
+                          return next;
+                        });
+                      }}
+                    />
+                  </td>
+                  <td className="px-1 py-0.5">
+                    <div className="flex items-center gap-0.5">
+                      <CompactInput
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        className="w-[3.25rem] text-right"
+                        value={row.minQuantity}
+                        onChange={(event) => {
+                          const minQuantity = Math.max(1, Math.round(Number(event.target.value)) || 1);
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[index] = {
+                              ...row,
+                              minQuantity,
+                              cutRate: cutRateFromOptimalTotal(optimalCutTotal, minQuantity),
+                            };
+                            return next.sort((a, b) => a.minQuantity - b.minQuantity);
+                          });
+                        }}
+                      />
+                      {isOptimal ? (
+                        <span className="type-caption shrink-0 text-[10px] text-[var(--color-accent)]">
+                          опт
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className="px-1 py-0.5">
+                    <CompactInput
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      inputMode="decimal"
+                      className="w-[3.75rem] text-right"
+                      value={row.cutRate}
+                      title="Можна підправити вручну; «Розкласти крій» знову візьме від оптимуму"
+                      onChange={(event) => {
+                        const cutRate = Number(event.target.value);
+                        setRows((prev) => {
+                          const next = [...prev];
+                          next[index] = { ...row, cutRate };
+                          return next;
+                        });
+                        if (isOptimal && Number.isFinite(cutRate)) {
+                          setOptimalCutTotal(Math.round(cutRate * optimalQty * 100) / 100);
+                        }
+                      }}
+                    />
+                  </td>
+                  <td className="whitespace-nowrap px-1.5 py-0.5 text-right">
+                    <MoneyCell value={cost} />
+                  </td>
+                  <td className="whitespace-nowrap px-1.5 py-0.5 text-right">
+                    <MoneyCell value={sewing} />
+                  </td>
+                  <td className="px-1 py-0.5">
                     <CompactInput
                       type="number"
                       min={1}
-                      className="w-full px-1.5 text-center font-semibold"
-                      value={row.minQuantity}
-                      onChange={(event) => updateQty(index, Number(event.target.value))}
-                    />
-                  </td>
-                  <td className="border-r border-[var(--color-border)] bg-[var(--color-tint-amber)]/10 px-1.5 py-1">
-                    <CompactInput
-                      type="number"
-                      min={0}
                       step="0.01"
-                      className="w-full px-1.5 text-right font-semibold"
-                      value={row.cutRatePerUnit}
-                      onChange={(event) => {
-                        const cutRatePerUnit = Number(event.target.value);
-                        setRows((prev) => {
-                          const next = [...prev];
-                          next[index] = { ...row, cutRatePerUnit };
-                          return next;
-                        });
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-1 text-right">
-                    <MoneyCell value={hint?.costPerUnit ?? null} />
-                  </td>
-                  <td className="px-2 py-1 text-right">
-                    <MoneyCell value={hint?.sewingPerUnit ?? null} />
-                  </td>
-                  <td className="px-1.5 py-1">
-                    <CompactInput
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      className="mx-auto w-full max-w-[52px] px-1 text-center"
+                      inputMode="decimal"
+                      className="w-[2.75rem] text-right"
                       value={row.sewingMultiplier}
                       onChange={(event) => {
                         const sewingMultiplier = Number(event.target.value);
-                        const nextHint = hintForQty(costHints, row.minQuantity);
+                        const pricePerUnit =
+                          sewing > 0 && Number.isFinite(sewingMultiplier)
+                            ? Math.round(sewing * sewingMultiplier * 100) / 100
+                            : row.pricePerUnit;
                         setRows((prev) => {
                           const next = [...prev];
-                          next[index] = {
-                            ...row,
-                            sewingMultiplier,
-                            pricePerUnit: nextHint
-                              ? suggestSellingFromSewingMarkup({
-                                  costPerUnit: nextHint.costPerUnit,
-                                  sewingPerUnit: nextHint.sewingPerUnit,
-                                  multiplier: sewingMultiplier,
-                                })
-                              : row.pricePerUnit,
-                          };
+                          next[index] = { ...row, sewingMultiplier, pricePerUnit };
                           return next;
                         });
                       }}
                     />
                   </td>
-                  <td className="px-2 py-1 text-right">
+                  <td className="whitespace-nowrap px-1.5 py-0.5 text-right">
                     <MoneyCell value={markup} />
                   </td>
-                  <td className="px-1.5 py-1">
+                  <td className="px-1 py-0.5">
                     <CompactInput
                       type="number"
                       min={0}
                       step="0.01"
-                      className="w-full px-1.5 text-right font-semibold"
+                      inputMode="decimal"
+                      className="w-[4.25rem] text-right font-semibold"
                       value={row.pricePerUnit}
                       onChange={(event) => {
                         const pricePerUnit = Number(event.target.value);
@@ -382,10 +442,10 @@ export function ProductPriceCutPanel({
                       }}
                     />
                   </td>
-                  <td className="px-0.5 py-1 text-center">
+                  <td className="px-0.5 py-0.5 text-center">
                     <button
                       type="button"
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--color-text-quiet)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-danger-text)] disabled:opacity-40"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-[11px] text-[var(--color-text-quiet)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-danger-text)] disabled:opacity-40"
                       disabled={rows.length <= 1}
                       onClick={() => setRows((prev) => prev.filter((_, i) => i !== index))}
                       aria-label="Видалити тираж"
@@ -403,6 +463,16 @@ export function ProductPriceCutPanel({
       <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-3">
         <Button type="button" variant="secondary" size="sm" onClick={addTirage}>
           Додати тираж
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            setRows((prev) => spreadCutFromOptimal(ensureOptimalRow(prev, optimalQty, cutRateFromOptimalTotal(optimalCutTotal, optimalQty)), optimalCutTotal))
+          }
+        >
+          Розкласти крій
         </Button>
         <Button
           type="button"

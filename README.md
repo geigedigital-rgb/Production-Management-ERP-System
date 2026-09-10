@@ -68,7 +68,7 @@ See [production_management_service_base_spec.md](./production_management_service
 | `AUTH_URL` | Public HTTPS URL of the Railway service |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | For product image uploads |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Required** for product photos & order file uploads (Storage). Without it local `/uploads` paths won’t appear on Railway/prod |
 | `APP_TIMEZONE` | `Europe/Kyiv` |
 
 3. Build: `npm run build` (`prisma generate` + `next build`).

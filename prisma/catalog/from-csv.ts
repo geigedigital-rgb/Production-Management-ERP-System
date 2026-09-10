@@ -477,7 +477,7 @@ export function loadModels(): { models: ParsedModel[]; skipped: Array<{ name: st
 
     const cat = category || "Інше";
     const sizeCodes =
-      /дит/i.test(nameUk) ? ["XS", "S", "M", "L"] : ["S", "M", "L", "XL", "XXL", "3XL", "4XL"];
+      /дит/i.test(nameUk) ? ["XS", "S", "M", "L"] : ["S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL", "6XL"];
     const cutOptimal =
       cutRateOptimal && cutRateOptimal > 0 ? cutRateOptimal : Math.max(2, Math.round(sewRate * 0.15));
 

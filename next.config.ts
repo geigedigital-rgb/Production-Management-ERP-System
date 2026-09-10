@@ -3,15 +3,29 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
+function supabaseHostname(): string | null {
+  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!raw) return null;
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return null;
+  }
+}
+
+const supabaseHost = supabaseHostname();
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   // Prisma must not be bundled by Turbopack/webpack — otherwise the generated
-  // client can lose model delegates (e.g. fixedCostArticle) at runtime.
+  // client can lose model delegates (e.g. fixedCostArticle) at runtime, and
+  // webpack may spend 1–2 minutes compiling the ~5MB WASM base64 payload.
   serverExternalPackages: [
     "@prisma/client",
     "@prisma/adapter-pg",
     ".prisma/client",
+    "prisma",
     "pg",
   ],
   images: {
@@ -26,6 +40,15 @@ const nextConfig: NextConfig = {
         hostname: "*.supabase.co",
         pathname: "/storage/v1/object/public/**",
       },
+      ...(supabaseHost
+        ? [
+            {
+              protocol: "https" as const,
+              hostname: supabaseHost,
+              pathname: "/storage/v1/object/public/**",
+            },
+          ]
+        : []),
     ],
   },
 };

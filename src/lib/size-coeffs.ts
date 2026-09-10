@@ -1,5 +1,5 @@
-/** Oversized garment sizes: higher material waste and sewing rates. */
-export const OVERSIZE_CODES = ["XXL", "3XL", "4XL"] as const;
+/** Oversized garment sizes: higher material waste and sewing rates (from 3XL up). */
+export const OVERSIZE_CODES = ["3XL", "4XL", "5XL", "6XL"] as const;
 
 export type SizeCoeff = {
   materialCoeff: number;
@@ -48,7 +48,7 @@ export function resolveSizeCoeffs(
   return { materialCoeff: 1, operationCoeff: 1 };
 }
 
-/** Shared oversize uplift from rules (XXL / 3XL / 4XL); falls back to defaults. */
+/** Shared oversize uplift from rules (3XL+); falls back to defaults. */
 export function resolveOversizeUplift(rules?: SizeCoeffRule[] | null): SizeCoeff {
   for (const code of OVERSIZE_CODES) {
     const fromRules = rules?.find((row) => row.sizeCode === code);
@@ -72,7 +72,7 @@ export function oversizeOperationPct(rules?: SizeCoeffRule[] | null): number {
 
 /** Short Ukrainian labels for BOM / calc UI. */
 export function oversizeUpliftCaption(rules?: SizeCoeffRule[] | null): string {
-  return `XXL+ · матеріали +${oversizeMaterialPct(rules)}% · операції +${oversizeOperationPct(rules)}%`;
+  return `3XL+ · матеріали +${oversizeMaterialPct(rules)}% · операції +${oversizeOperationPct(rules)}%`;
 }
 
 export function effectiveOversizeConsumption(

@@ -370,3 +370,46 @@
     background: #ffffff;
   }
 }
+
+/* Shop-floor specification density */
+.print-doc--shop {
+  font-size: 10pt;
+  line-height: 1.35;
+}
+
+.print-doc--shop .print-doc-section {
+  margin-bottom: 4mm;
+}
+
+.print-doc--shop .print-doc-table th,
+.print-doc--shop .print-doc-table td {
+  padding: 1.4mm 2mm;
+  font-size: 9pt;
+}
+
+.print-doc-list--shop {
+  font-size: 9.5pt;
+}
+
+.print-doc-list--shop li {
+  margin-bottom: 0.8mm;
+}
+
+.print-doc-op-name {
+  font-weight: 600;
+}
+
+.print-doc-op-method {
+  font-size: 8.5pt;
+  color: #5a6560;
+}
+
+.print-doc-summary--shop {
+  align-items: start;
+}
+
+.print-doc-shop-check {
+  margin: 1mm 0 2mm;
+  font-size: 10pt;
+  letter-spacing: 0.01em;
+}

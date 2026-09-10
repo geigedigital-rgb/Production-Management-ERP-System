@@ -27,7 +27,6 @@ import {
   ProductCutRateFields,
   type CutRateTierDraft,
 } from "@/components/products/ProductCutRateFields";
-import { resolveOptimalCutQty } from "@/lib/cut-rate";
 import {
   DEFAULT_COMMERCIAL_PRICE_TIERS,
   ProductPriceFields,
@@ -120,6 +119,8 @@ export function ProductCreatePanel({
   const [operationCatalog, setOperationCatalog] = useState(initialOperations);
   const [decorationCatalog, setDecorationCatalog] = useState(initialDecorations);
   const [cutTiers, setCutTiers] = useState<CutRateTierDraft[]>([]);
+  const [cutOptimalQty, setCutOptimalQty] = useState(100);
+  const [cutOptimalTotal, setCutOptimalTotal] = useState(0);
   const [isBaseModel, setIsBaseModel] = useState(true);
   const [priceTiers, setPriceTiers] = useState<CommercialPriceTierDraft[]>([]);
 
@@ -154,6 +155,8 @@ export function ProductCreatePanel({
     setSelectedSizes([]);
     setComposition(emptyComposition());
     setCutTiers([]);
+    setCutOptimalQty(100);
+    setCutOptimalTotal(0);
     setIsBaseModel(true);
     setPriceTiers([]);
     setError(null);
@@ -211,16 +214,14 @@ export function ProductCreatePanel({
           operationId: row.operationId,
           sizeCodes: row.sizeCodes ?? null,
         })),
-        decorations: composition.decorations.map((row) => ({
-          decorationMethodId: row.decorationMethodId,
-        })),
+        decorations: [],
       }),
     );
     if (hasCutOperation && cutTiers.some((row) => row.ratePerUnit > 0 || row.minQuantity > 0)) {
       formData.set(
         "cutRatesJson",
         JSON.stringify({
-          optimalQty: resolveOptimalCutQty({ optimalQty: null, tiers: cutTiers }),
+          optimalQty: cutOptimalQty,
           tiers: cutTiers,
         }),
       );
@@ -449,7 +450,7 @@ export function ProductCreatePanel({
               cutRatePreview={
                 hasCutOperation
                   ? {
-                      optimalQty: resolveOptimalCutQty({ optimalQty: null, tiers: cutTiers }),
+                      optimalQty: cutOptimalQty,
                       tiers: cutTiers,
                     }
                   : undefined
@@ -502,10 +503,18 @@ export function ProductCreatePanel({
               <div>
                 <SectionTitle>Крій за тиражем</SectionTitle>
                 <p className="type-caption mt-1">
-                  Ставки крою на 1 шт. Оптимум — остання сходинка тиражу; далі ₴/шт не падає.
+                  Оптимальний тираж і вартість крою → ₴/шт = вартість ÷ тираж; решта сходинок — так
+                  само. Вище оптимуму ₴/шт не падає.
                 </p>
               </div>
-              <ProductCutRateFields tiers={cutTiers} onTiersChange={setCutTiers} />
+              <ProductCutRateFields
+                tiers={cutTiers}
+                onTiersChange={setCutTiers}
+                optimalQty={cutOptimalQty}
+                onOptimalQtyChange={setCutOptimalQty}
+                optimalCutTotal={cutOptimalTotal}
+                onOptimalCutTotalChange={setCutOptimalTotal}
+              />
             </section>
           ) : (
             <p className="type-caption rounded-[var(--radius-control)] border border-dashed border-[var(--color-border)] px-3 py-2.5">
@@ -615,7 +624,7 @@ function ReadinessStrip({
           {ready ? "Готовий до розрахунку" : canSave ? "Чернетка" : "Заповніть назву"}
         </span>
         <span className="text-[var(--color-text-secondary)]">
-          Розміри {sizes} · Матеріали {materials} · Операції {operations} · Нанесення {decorations}
+          Розміри {sizes} · Матеріали {materials} · Операції {operations}
         </span>
       </div>
       {!ready && canSave ? (

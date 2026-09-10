@@ -470,6 +470,8 @@ async function main() {
     { code: "XXL", nameUk: "XXL", sortOrder: 6 },
     { code: "3XL", nameUk: "3XL", sortOrder: 7 },
     { code: "4XL", nameUk: "4XL", sortOrder: 8 },
+    { code: "5XL", nameUk: "5XL", sortOrder: 9 },
+    { code: "6XL", nameUk: "6XL", sortOrder: 10 },
   ];
   for (const size of sizes) {
     await prisma.size.upsert({
@@ -682,13 +684,6 @@ async function main() {
   await prisma.sizeRule.createMany({
     data: [
       {
-        sizeCode: "XXL",
-        materialCoeff: 1.15,
-        operationCoeff: 1.2,
-        surchargePercent: 0,
-        appliesTo: "SELECTED",
-      },
-      {
         sizeCode: "3XL",
         materialCoeff: 1.15,
         operationCoeff: 1.2,
@@ -697,6 +692,20 @@ async function main() {
       },
       {
         sizeCode: "4XL",
+        materialCoeff: 1.15,
+        operationCoeff: 1.2,
+        surchargePercent: 0,
+        appliesTo: "SELECTED",
+      },
+      {
+        sizeCode: "5XL",
+        materialCoeff: 1.15,
+        operationCoeff: 1.2,
+        surchargePercent: 0,
+        appliesTo: "SELECTED",
+      },
+      {
+        sizeCode: "6XL",
         materialCoeff: 1.15,
         operationCoeff: 1.2,
         surchargePercent: 0,

@@ -2,7 +2,7 @@ import { ALL_SIZES, type SizeScope } from "@/lib/size-bom";
 import { isOversizeCode } from "@/lib/size-coeffs";
 
 /**
- * Explains size tabs: shared base on «Усі», auto XXL+ uplift from company %, optional overrides.
+ * Explains size tabs: shared base on «Усі», auto 3XL+ uplift from company %, optional overrides.
  */
 export function SizeBomScopeHint({
   sizeScope,
@@ -23,7 +23,7 @@ export function SizeBomScopeHint({
         <p className="type-caption">
           База S–XL
           {hasOversizeSizes
-            ? ` · XXL+ авто +${materialPct}% мат. / +${operationPct}% оп.`
+            ? ` · 3XL+ авто +${materialPct}% мат. / +${operationPct}% оп.`
             : ""}
         </p>
       );

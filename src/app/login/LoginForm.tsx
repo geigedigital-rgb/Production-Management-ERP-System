@@ -2,10 +2,10 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { loginAction } from "@/server/auth/actions";
 
 export function LoginForm() {
   const t = useTranslations("auth");
@@ -19,15 +19,24 @@ export function LoginForm() {
     if (!formRef.current) return;
     setError(null);
     const formData = new FormData(formRef.current);
-    formData.set("callbackUrl", searchParams.get("callbackUrl") || "/overview");
+    const email = String(formData.get("email") ?? "");
+    const password = String(formData.get("password") ?? "");
+    const callbackUrl = searchParams.get("callbackUrl") || "/overview";
+
     startTransition(async () => {
-      const result = await loginAction(formData);
+      // Client signIn hits /api/auth — keeps /login compile free of Prisma.
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+        callbackUrl,
+      });
       if (result?.error) {
         setError(t("invalidCredentials"));
         return;
       }
       if (result?.ok) {
-        router.push(result.callbackUrl);
+        router.push(callbackUrl);
         router.refresh();
       }
     });

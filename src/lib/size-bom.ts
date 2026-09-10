@@ -1,3 +1,5 @@
+import { resolveSizeCoeffs, isOversizeCode } from "@/lib/size-coeffs";
+
 export const ALL_SIZES = "ALL";
 
 export type SizeScope = typeof ALL_SIZES | string;
@@ -187,16 +189,25 @@ export function lineNeedOnSizes(
     sizeCode?: string | null;
     consumption: number;
     waste: number;
+    /** When false, size uplift (3XL+) is already baked into consumption. */
+    applySizeCoeff?: boolean;
   },
   siblings: Array<{ id: string; groupKey?: string | null; sizeCode?: string | null }>,
   sizes: Array<{ sizeCode: string; quantity: number }>,
+  sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }> | null,
 ) {
   let need = 0;
   const perUnit = row.consumption * (1 + row.waste / 100);
+  // Explicit oversize lines already carry absolute norms — don't uplift again.
+  const applyCoeff =
+    row.applySizeCoeff !== false && !(row.sizeCode != null && isOversizeCode(row.sizeCode));
   for (const size of sizes) {
     if (size.quantity <= 0) continue;
     if (!linesForSize(siblings, size.sizeCode).some((line) => line.id === row.id)) continue;
-    need += perUnit * size.quantity;
+    const coeff = applyCoeff
+      ? resolveSizeCoeffs(size.sizeCode, sizeRules).materialCoeff
+      : 1;
+    need += perUnit * size.quantity * coeff;
   }
   return need;
 }

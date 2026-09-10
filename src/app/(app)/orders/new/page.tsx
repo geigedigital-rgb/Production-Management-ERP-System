@@ -53,6 +53,7 @@ export default async function NewOrderPage({
           name: material.nameUk,
           materialType: material.type,
           composition: material.composition?.trim() || null,
+          densityGsm: material.densityGsm?.trim() || null,
           priceMeterUahNoVat:
             material.priceMeterUahNoVat != null ? Number(material.priceMeterUahNoVat) : null,
           priceMeterUahVat:

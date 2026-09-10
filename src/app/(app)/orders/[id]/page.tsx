@@ -3,9 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/server/auth";
 import { getOrder, refreshOrderItemFabricPricing } from "@/server/domains/orders/service";
 import { listMaterials, listUnits, getFabricPricingGlobals } from "@/server/domains/catalog/materials";
-import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
+import { listOperations } from "@/server/domains/catalog/operations";
 import { buildCalcFromOrderItem, calcOptionsFromProduct, getPricingDefaults, getPricingForOrder, resolveOrderOperationUnitRate, resolveFixedCostAllocationForOrderItem } from "@/server/domains/calculation/from-entities";
 import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
+import { getScreenPrintCatalog } from "@/server/domains/screen-print/service";
 import {
   resolveSewerCount,
   validateFixedCostParams,
@@ -94,17 +95,17 @@ export default async function OrderDetailPage({
   const tabHref = (key: string) =>
     `/orders/${order.id}?tab=${key}${order.items.length > 1 ? `&item=${item.id}` : ""}`;
 
-  const [materials, units, operationsCatalog, decorationsCatalog, pricing, projectPricing, activityEvents, catalogProducts, fixedCosts] =
+  const [materials, units, operationsCatalog, pricing, projectPricing, activityEvents, catalogProducts, fixedCosts, screenPrintCatalog] =
     await Promise.all([
       listMaterials(),
       listUnits(),
       listOperations(),
-      listDecorations(),
       getPricingForOrder(order.id),
       getPricingDefaults(),
       listEntityActivity("order", order.id, 20),
       listProducts(),
       fixedCostOptionsFromDb(),
+      getScreenPrintCatalog(),
     ]);
 
   const itemCalcOptions = {
@@ -205,7 +206,17 @@ export default async function OrderDetailPage({
       sizeCode: row.sizeCode ?? null,
       groupKey: row.materialId ?? row.nameSnapshot,
       pricingHint,
+      supplierId: row.supplierId ?? null,
       supplierName: row.supplierNameSnapshot ?? row.material?.supplierCode ?? null,
+      colorSnapshot: row.colorSnapshot ?? null,
+      supplierOffers:
+        row.material?.supplierOffers?.map((offer) => ({
+          supplierId: offer.supplierId,
+          supplierName: offer.supplier.nameUk,
+          isPrimary: offer.isPrimary,
+          availableColors: offer.availableColors ?? [],
+        })) ?? [],
+      materialAvailableColors: row.material?.availableColors ?? [],
       isFabric: row.material?.type === "FABRIC",
     };
   });
@@ -827,14 +838,11 @@ export default async function OrderDetailPage({
               id: material.id,
               label: `${material.nameUk} (${formatUnit(material.unitOfMeasure.code)})`,
               composition: material.composition?.trim() || null,
+              densityGsm: material.densityGsm?.trim() || null,
             }))}
             operationOptions={operationsCatalog.map((operation) => ({
               id: operation.id,
               label: operation.nameUk,
-            }))}
-            decorationOptions={decorationsCatalog.map((decoration) => ({
-              id: decoration.id,
-              label: decoration.nameUk,
             }))}
             unitOptions={units.map((unit) => ({ id: unit.id, label: unit.nameUk }))}
             materialsSubtotal={Number(calc.materialsSubtotal)}
@@ -845,6 +853,8 @@ export default async function OrderDetailPage({
             fixedCostAllocation={fixedCostAllocation}
             fixedCostError={fixedCostError}
             canEditFixedCosts={canEditComposition && !locked}
+            screenPrintCells={screenPrintCatalog.cells}
+            screenPrintCoefficients={screenPrintCatalog.coefficients}
             corridorHint={
               action.focusItemId && action.focusItemId !== item.id
                 ? null
@@ -873,8 +883,6 @@ export default async function OrderDetailPage({
                 orderId={order.id}
                 orderItemId={item.id}
                 companySewerCount={fixedCosts?.companySewerCount ?? 0}
-                sewerCountOverride={item.sewerCountOverride}
-                canEditSewerCount={canEditComposition && !locked}
                 sizeQuantities={item.sizes.map((size) => ({
                   sizeCode: size.sizeCode,
                   quantity: size.quantity,

@@ -24,14 +24,6 @@ function primaryPrice(row: ProductsTableRow): number | null {
   return row.prices[1] ?? row.prices[0] ?? row.prices.find((p) => p != null) ?? null;
 }
 
-function primaryTierLabel(row: ProductsTableRow): string | null {
-  if (!row.ready) return null;
-  const idx = row.prices[1] != null ? 1 : row.prices.findIndex((p) => p != null);
-  if (idx < 0) return null;
-  const qty = row.priceTiers[idx];
-  return qty != null ? `від ${qty} шт` : null;
-}
-
 export function ProductsCards({
   rows,
   empty,
@@ -110,8 +102,6 @@ export function ProductsCards({
       <ul className="grid grid-cols-1 gap-2.5 p-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {sorted.map((product) => {
           const isSelected = selection.isSelected(product.id);
-          const price = primaryPrice(product);
-          const tierLabel = primaryTierLabel(product);
           const initial = product.nameUk.trim().charAt(0).toUpperCase() || "В";
 
           return (
@@ -144,6 +134,10 @@ export function ProductsCards({
                         fill
                         sizes="48px"
                         className="object-cover"
+                        unoptimized={
+                          product.imageUrl.startsWith("/uploads/") ||
+                          product.imageUrl.includes("supabase.co")
+                        }
                       />
                     ) : (
                       <div className="flex h-full w-full flex-col items-center justify-center text-[var(--color-text-tertiary)]">
@@ -179,17 +173,26 @@ export function ProductsCards({
                       <p className="text-[11px] text-[var(--color-text-quiet)]">Склад не вказано</p>
                     )}
 
-                    <div className="mt-auto flex items-baseline justify-between gap-2 pt-0.5">
+                    <div className="mt-auto space-y-0.5 pt-0.5">
                       {showPrices ? (
-                        price != null ? (
-                          <p className="tabular text-[13.5px] font-semibold text-[var(--color-text-primary)]">
-                            {formatMoneyUah(price)}
-                            {tierLabel ? (
-                              <span className="ml-1.5 text-[10.5px] font-normal text-[var(--color-text-tertiary)]">
-                                {tierLabel}
-                              </span>
-                            ) : null}
-                          </p>
+                        product.ready && product.prices.some((p) => p != null) ? (
+                          product.priceTiers.map((qty, index) => {
+                            const tierPrice = product.prices[index];
+                            if (tierPrice == null) return null;
+                            return (
+                              <p
+                                key={`${product.id}-${qty}`}
+                                className="flex items-baseline justify-between gap-2 tabular text-[12.5px]"
+                              >
+                                <span className="text-[10.5px] text-[var(--color-text-tertiary)]">
+                                  від {qty} шт
+                                </span>
+                                <span className="font-semibold text-[var(--color-text-primary)]">
+                                  {formatMoneyUah(tierPrice)}
+                                </span>
+                              </p>
+                            );
+                          })
                         ) : (
                           <p className="text-[11.5px] text-[var(--color-text-tertiary)]">
                             Ціна після комплектації

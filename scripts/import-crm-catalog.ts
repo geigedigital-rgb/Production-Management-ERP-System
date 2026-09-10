@@ -323,6 +323,10 @@ async function main() {
     { code: "L", nameUk: "L", sortOrder: 4 },
     { code: "XL", nameUk: "XL", sortOrder: 5 },
     { code: "XXL", nameUk: "XXL", sortOrder: 6 },
+    { code: "3XL", nameUk: "3XL", sortOrder: 7 },
+    { code: "4XL", nameUk: "4XL", sortOrder: 8 },
+    { code: "5XL", nameUk: "5XL", sortOrder: 9 },
+    { code: "6XL", nameUk: "6XL", sortOrder: 10 },
   ]) {
     await prisma.size.upsert({
       where: { code: size.code },

@@ -6,8 +6,8 @@ import { updateOversizeCoeffsAction } from "@/server/domains/settings/actions";
 import { cn } from "@/lib/utils";
 
 /**
- * Right-aligned XXL+ uplift controls next to size tabs.
- * Edits company SizeRule for XXL / 3XL / 4XL (shared %).
+ * Right-aligned 3XL+ uplift controls next to size tabs.
+ * Edits company SizeRule for 3XL / 4XL / 5XL / 6XL (shared %).
  */
 export function OversizeCoeffFields({
   materialPct,
@@ -52,10 +52,10 @@ export function OversizeCoeffFields({
         "flex shrink-0 flex-nowrap items-center justify-end gap-x-3 whitespace-nowrap",
         className,
       )}
-      title="Надбавка XXL / 3XL / 4XL до базових норм з вкладки «Усі». Діє для всіх виробів."
+      title="Надбавка 3XL / 4XL / 5XL / 6XL до базових норм з вкладки «Усі». Діє для всіх виробів."
     >
       <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-quiet)]">
-        XXL+
+        3XL+
       </span>
       <label className="inline-flex items-center gap-1 text-[11.5px] text-[var(--color-text-secondary)]">
         мат.
@@ -69,7 +69,7 @@ export function OversizeCoeffFields({
           onChange={(event) => setMat(event.target.value)}
           onBlur={() => save(mat, ops)}
           className={inputClass}
-          aria-label="Надбавка матеріалів для XXL+"
+          aria-label="Надбавка матеріалів для 3XL+"
         />
         <span>%</span>
       </label>
@@ -85,7 +85,7 @@ export function OversizeCoeffFields({
           onChange={(event) => setOps(event.target.value)}
           onBlur={() => save(mat, ops)}
           className={inputClass}
-          aria-label="Надбавка операцій для XXL+"
+          aria-label="Надбавка операцій для 3XL+"
         />
         <span>%</span>
       </label>

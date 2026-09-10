@@ -9,6 +9,7 @@ import { Banner } from "@/components/ui/Banner";
 import { Breadcrumbs, HeaderBlock, QuickAction, QuickActions } from "@/components/ui/ObjectHeader";
 import { ProductDetailPreviewShell } from "@/components/products/ProductPreviewQtyContext";
 import { ProductImagePicker } from "@/components/products/ProductImagePicker";
+import { ProductIdentityEditor } from "@/components/products/ProductIdentityEditor";
 import { ProductSizesEditor } from "@/components/products/ProductSizesEditor";
 import { DuplicateProductButton } from "@/components/products/DuplicateProductButton";
 import { IconCheckCircle, IconCircle, IconOrders, IconSizes } from "@/components/ui/Icons";
@@ -32,6 +33,10 @@ import {
   pickOperationQuantityTiers,
   resolveQuantityTierRate,
 } from "@/lib/quantity-tiers";
+import {
+  computeFixedCostMetrics,
+  fixedCostPerUnitFromSewing,
+} from "@/lib/fixed-costs";
 import { SHARED_PRODUCT_TIRAGE_QTYS, isSewOperationName } from "@/lib/sewing-markup";
 
 /** Fixed ops use catalog preview qty; cut is shown separately from tier block. */
@@ -257,6 +262,29 @@ export default async function ProductDetailPage({
     .filter((row) => !row.isCut)
     .reduce((sum, row) => sum + row.unitCost, 0);
 
+  let fixedCostPreview: {
+    perUnit: number;
+    coefficient: number;
+    sewingPerUnit: number;
+    sewerCount: number;
+  } | null = null;
+  if (canViewCosts && fixedCosts && economicsSewing > 0) {
+    const metrics = computeFixedCostMetrics({
+      workingDaysPerMonth: fixedCosts.workingDaysPerMonth,
+      sewerCount: fixedCosts.companySewerCount,
+      dailySewerPay: fixedCosts.dailySewerPay,
+      monthlyTotal: fixedCosts.monthlyTotal,
+    });
+    if (metrics) {
+      fixedCostPreview = {
+        perUnit: fixedCostPerUnitFromSewing(economicsSewing, metrics.coefficient),
+        coefficient: metrics.coefficient,
+        sewingPerUnit: economicsSewing,
+        sewerCount: fixedCosts.companySewerCount,
+      };
+    }
+  }
+
   const readiness = [
     { label: "Матеріали", done: product.materials.length > 0, count: product.materials.length },
     { label: "Операції", done: product.operations.length > 0, count: product.operations.length },
@@ -279,21 +307,21 @@ export default async function ProductDetailPage({
       ) : null}
 
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-4">
+        <div className="flex min-w-0 flex-1 items-start gap-4">
           <ProductImagePicker
             productId={product.id}
             imageUrl={product.imageUrl}
             disabled={isArchived}
           />
-          <div className="min-w-0">
-            <h1 className="type-page-title">{product.nameUk}</h1>
-            <p className="type-body-secondary mt-1">
-              {product.internalCode ? `Код ${product.internalCode}` : "Без внутрішнього коду"}
-              {product.description ? ` · ${product.description}` : ""}
-            </p>
-          </div>
+          <ProductIdentityEditor
+            productId={product.id}
+            nameUk={product.nameUk}
+            internalCode={product.internalCode}
+            description={product.description}
+            disabled={isArchived || !canEditSizes}
+          />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {product.isBaseModel ? (
             <StatusBadge tone="info">Базова модель</StatusBadge>
           ) : null}
@@ -477,6 +505,7 @@ export default async function ProductDetailPage({
                 label: `${m.nameUk} (${m.unitOfMeasure.code})`,
                 unit: m.unitOfMeasure.code,
                 composition: m.composition?.trim() || null,
+                densityGsm: m.densityGsm?.trim() || null,
               })),
               operationOptions: operations.map((o) => ({ id: o.id, label: o.nameUk })),
               decorationOptions: decorations.map((d) => ({ id: d.id, label: d.nameUk })),
@@ -488,6 +517,7 @@ export default async function ProductDetailPage({
                   ratePerUnit: Number(tier.ratePerUnit),
                 })),
               },
+              fixedCostPreview,
             }}
             cut={{
               productId: product.id,
@@ -503,6 +533,7 @@ export default async function ProductDetailPage({
               tiers: (product.commercialPriceTiers ?? []).map((tier) => ({
                 minQuantity: tier.minQuantity,
                 pricePerUnit: Number(tier.pricePerUnit),
+                showOnCard: Boolean((tier as { showOnCard?: boolean }).showOnCard),
               })),
               costHints: tirageCostHints,
             }}

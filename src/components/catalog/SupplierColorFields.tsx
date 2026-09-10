@@ -11,6 +11,7 @@ import {
 } from "@/lib/supplier-colors";
 import { swatchForColorLabel } from "@/lib/trim-colors";
 import { cn } from "@/lib/utils";
+import { SoftBusy } from "@/components/ui/SoftBusy";
 
 export type SupplierColorOfferOption = {
   supplierId: string;
@@ -70,18 +71,16 @@ export function SupplierColorFields({
   }
 
   if (compact) {
-    const nativeSelectClass =
-      "h-7 min-w-0 max-w-full rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-primary-500)] disabled:opacity-60";
-
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         {offers.length > 0 ? (
-          <select
-            className={cn(nativeSelectClass, "max-w-[11rem] flex-1 basis-[8.5rem]")}
+          <Select
+            size="sm"
+            className="max-w-[11rem] min-w-0 flex-1 basis-[8.5rem]"
+            selectClassName="!h-7 !min-h-7 !rounded-[6px] !px-1.5 !text-[12px]"
             value={supplierId ?? ""}
             disabled={disabled}
-            aria-label="Постачальник"
-            title="Постачальник"
+            placeholder="Постачальник…"
             onChange={(event) => changeSupplier(event.target.value || null)}
           >
             <option value="">Постачальник…</option>
@@ -91,7 +90,7 @@ export function SupplierColorFields({
                 {offer.isPrimary ? " · осн." : ""}
               </option>
             ))}
-          </select>
+          </Select>
         ) : null}
 
         {supplierId || offers.length === 0 ? (
@@ -208,26 +207,7 @@ export function ProductMaterialSupplierColorEditor({
   }
 
   if (readOnly) {
-    const supplierName =
-      offers.find((row) => row.supplierId === supplierId)?.supplierName ?? null;
-    const parts = [supplierName, color].filter(Boolean);
-    if (parts.length === 0) return null;
-    const swatch = color?.trim() ? swatchForColorLabel(color) : null;
-    return (
-      <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--color-text-quiet)]">
-        {swatch ? (
-          <span
-            className={cn(
-              "size-3 shrink-0 rounded-full ring-1 ring-black/15",
-              swatch.bordered && "border border-[var(--color-border-strong)]",
-            )}
-            style={{ backgroundColor: swatch.swatch }}
-            aria-hidden
-          />
-        ) : null}
-        <span className="truncate">{parts.join(" · ")}</span>
-      </p>
-    );
+    return <SupplierColorReadOnly supplierId={supplierId} color={color} offers={offers} />;
   }
 
   return (
@@ -253,5 +233,113 @@ export function ProductMaterialSupplierColorEditor({
       }}
       onColorChange={(next) => save({ colorSnapshot: next })}
     />
+  );
+}
+
+/** Same compact supplier · color control for order BOM rows. */
+export function OrderMaterialSupplierColorEditor({
+  orderId,
+  orderItemMaterialId,
+  supplierId,
+  color,
+  offers,
+  materialFallbackColors,
+  readOnly,
+}: {
+  orderId: string;
+  orderItemMaterialId: string;
+  supplierId: string | null;
+  color: string | null;
+  offers: SupplierColorOfferOption[];
+  materialFallbackColors?: string[];
+  readOnly?: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  function save(next: { supplierId?: string | null; colorSnapshot?: string | null }) {
+    const formData = new FormData();
+    formData.set("orderId", orderId);
+    formData.set("id", orderItemMaterialId);
+    if (next.supplierId !== undefined) {
+      formData.set("supplierId", next.supplierId ?? "");
+    }
+    if (next.colorSnapshot !== undefined) {
+      formData.set("colorSnapshot", next.colorSnapshot ?? "");
+    }
+    startTransition(async () => {
+      const { updateOrderMaterialTermsAction } = await import(
+        "@/server/domains/orders/actions"
+      );
+      await updateOrderMaterialTermsAction(formData);
+      router.refresh();
+    });
+  }
+
+  if (readOnly) {
+    return <SupplierColorReadOnly supplierId={supplierId} color={color} offers={offers} />;
+  }
+
+  return (
+    <SoftBusy busy={pending} tone="inline" label="Збереження…">
+      <div
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <SupplierColorFields
+          supplierId={supplierId}
+          color={color}
+          offers={offers}
+          materialFallbackColors={materialFallbackColors}
+          disabled={pending}
+          compact
+          onSupplierChange={(next) => {
+            const reconciled = reconcileColorForSupplier({
+              color,
+              supplierId: next,
+              offers: offers.map((row) => ({
+                supplierId: row.supplierId,
+                isPrimary: row.isPrimary,
+                availableColors: row.availableColors,
+              })),
+              materialFallback: materialFallbackColors,
+            });
+            save({ supplierId: next, colorSnapshot: reconciled });
+          }}
+          onColorChange={(next) => save({ colorSnapshot: next })}
+        />
+      </div>
+    </SoftBusy>
+  );
+}
+
+function SupplierColorReadOnly({
+  supplierId,
+  color,
+  offers,
+}: {
+  supplierId: string | null;
+  color: string | null;
+  offers: SupplierColorOfferOption[];
+}) {
+  const supplierName =
+    offers.find((row) => row.supplierId === supplierId)?.supplierName ?? null;
+  const parts = [supplierName, color].filter(Boolean);
+  if (parts.length === 0) return null;
+  const swatch = color?.trim() ? swatchForColorLabel(color) : null;
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--color-text-quiet)]">
+      {swatch ? (
+        <span
+          className={cn(
+            "size-3 shrink-0 rounded-full ring-1 ring-black/15",
+            swatch.bordered && "border border-[var(--color-border-strong)]",
+          )}
+          style={{ backgroundColor: swatch.swatch }}
+          aria-hidden
+        />
+      ) : null}
+      <span className="truncate">{parts.join(" · ")}</span>
+    </p>
   );
 }

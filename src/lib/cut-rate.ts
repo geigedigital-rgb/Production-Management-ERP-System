@@ -1,6 +1,6 @@
 /**
  * Owner rule (CRM sheet comment 1):
- * Cut cost per unit decreases as run size grows until the last (optimal) tirage step.
+ * Cut cost per unit decreases as run size grows until the explicit optimal tirage.
  * Above that quantity the per-unit cut rate stays frozen.
  * Prefer this logic over copying every Google Sheet cell blindly.
  */

@@ -8,7 +8,6 @@ import { Banner } from "@/components/ui/Banner";
 import { Modal } from "@/components/ui/Overlay";
 import { MaterialCreatePanel } from "@/app/(app)/settings/resources/MaterialCreateForm";
 import { OperationCreatePanel } from "@/app/(app)/settings/operations/OperationCreateForm";
-import { DecorationCreatePanel } from "@/app/(app)/settings/applications/DecorationCreateForm";
 import { SizeRun } from "@/components/orders/SizeRun";
 import {
   CellStack,
@@ -26,8 +25,8 @@ import {
 import { IconPlus, IconTrash, IconMaterials, IconOperations, IconDecoration } from "@/components/ui/Icons";
 import { OrderMaterialDetailPanel } from "@/components/orders/OrderMaterialDetailPanel";
 import { cn, formatMoneyUah } from "@/lib/utils";
+import { materialOptionDescription } from "@/lib/material-catalog-options";
 import {
-  addOrderDecorationAction,
   addOrderMaterialAction,
   addOrderOperationAction,
   copyOrderSizeSpecAction,
@@ -36,6 +35,7 @@ import {
   removeOrderOperationAction,
   updateOrderDecorationAction,
   updateOrderMaterialConsumptionAction,
+  updateOrderMaterialTermsAction,
   updateOrderSizesAction,
 } from "@/server/domains/orders/actions";
 import { CopySizeSpec, SizeScopeTabs } from "@/components/catalog/SizeScopeTabs";
@@ -53,9 +53,18 @@ import {
   type SizeScope,
 } from "@/lib/size-bom";
 import { operationMethodLabel } from "@/lib/operation-labels";
-import { OrderFixedCostError, OrderSewerCountControl } from "@/components/orders/OrderSewerCountControl";
+import { OrderFixedCostError } from "@/components/orders/OrderSewerCountControl";
+import { OrderScreenPrintCalculator } from "@/components/orders/OrderScreenPrintCalculator";
+import { OrderMaterialSupplierColorEditor } from "@/components/catalog/SupplierColorFields";
+import { SoftBusy, RowBusyMark, busyRowClass } from "@/components/ui/SoftBusy";
 import { FIXED_COST_LINE_NAME_UK } from "@/lib/fixed-costs";
 import type { FixedCostAllocation, FixedCostValidationError } from "@/lib/fixed-costs";
+import {
+  displayScreenPrintLineName,
+  isScreenPrintDecorationName,
+  type ScreenPrintCoefficient,
+  type ScreenPrintPriceCell,
+} from "@/lib/screen-print-pricing";
 
 export type MaterialRow = {
   id: string;
@@ -69,7 +78,16 @@ export type MaterialRow = {
   sizeCode: string | null;
   groupKey: string;
   pricingHint?: string | null;
+  supplierId?: string | null;
   supplierName?: string | null;
+  colorSnapshot?: string | null;
+  supplierOffers?: Array<{
+    supplierId: string;
+    supplierName: string;
+    isPrimary?: boolean;
+    availableColors: string[];
+  }>;
+  materialAvailableColors?: string[];
   isFabric?: boolean;
 };
 
@@ -116,7 +134,6 @@ export function ConfigurationTab({
   decorations,
   materialOptions,
   operationOptions,
-  decorationOptions,
   unitOptions,
   materialsSubtotal,
   operationsSubtotal,
@@ -129,6 +146,8 @@ export function ConfigurationTab({
   fixedCostAllocation = null,
   fixedCostError = null,
   canEditFixedCosts = false,
+  screenPrintCells = [],
+  screenPrintCoefficients = [],
 }: {
   orderId: string;
   itemId: string;
@@ -139,9 +158,13 @@ export function ConfigurationTab({
   materials: MaterialRow[];
   operations: OperationRow[];
   decorations: DecorationRow[];
-  materialOptions: Array<{ id: string; label: string; composition?: string | null }>;
+  materialOptions: Array<{
+    id: string;
+    label: string;
+    composition?: string | null;
+    densityGsm?: string | null;
+  }>;
   operationOptions: Array<{ id: string; label: string }>;
-  decorationOptions: Array<{ id: string; label: string }>;
   unitOptions: Array<{ id: string; label: string }>;
   materialsSubtotal: number;
   operationsSubtotal: number;
@@ -154,9 +177,12 @@ export function ConfigurationTab({
   fixedCostAllocation?: FixedCostAllocation | null;
   fixedCostError?: FixedCostValidationError | null;
   canEditFixedCosts?: boolean;
+  screenPrintCells?: ScreenPrintPriceCell[];
+  screenPrintCoefficients?: ScreenPrintCoefficient[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>(
     Object.fromEntries(sizes.map((size) => [size.sizeCode, size.quantity])),
   );
@@ -167,6 +193,20 @@ export function ConfigurationTab({
   } | null>(null);
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
   const [sizeScope, setSizeScope] = useState<SizeScope>(ALL_SIZES);
+
+  const isBusy = (key: string) => pending && busyKey === key;
+
+  function runBusy(key: string, work: () => Promise<void>) {
+    setBusyKey(key);
+    startTransition(async () => {
+      try {
+        await work();
+        router.refresh();
+      } finally {
+        setBusyKey(null);
+      }
+    });
+  }
 
   const dirty = sizes.some((size) => (quantities[size.sizeCode] ?? 0) !== size.quantity);
   const totalQuantity = sizes.reduce((sum, size) => sum + (quantities[size.sizeCode] ?? 0), 0);
@@ -192,15 +232,29 @@ export function ConfigurationTab({
     (size) => isOversizeCode(size.sizeCode) && (quantities[size.sizeCode] ?? 0) > 0,
   );
 
+  function decorationLabel(name: string) {
+    if (!isScreenPrintDecorationName(name)) return name;
+    return displayScreenPrintLineName(name, screenPrintCoefficients);
+  }
+
   function saveMaterialConsumption(id: string, consumption: number) {
     const formData = new FormData();
     formData.set("orderId", orderId);
     formData.set("id", id);
     formData.set("consumptionPerUnit", String(consumption));
     formData.set("sizeCode", sizeScope);
-    startTransition(async () => {
+    runBusy(`material:${id}`, async () => {
       await updateOrderMaterialConsumptionAction(formData);
-      router.refresh();
+    });
+  }
+
+  function saveMaterialWaste(id: string, wastePercent: number) {
+    const formData = new FormData();
+    formData.set("orderId", orderId);
+    formData.set("id", id);
+    formData.set("wastePercent", String(wastePercent));
+    runBusy(`material:${id}`, async () => {
+      await updateOrderMaterialTermsAction(formData);
     });
   }
 
@@ -210,9 +264,8 @@ export function ConfigurationTab({
     formData.set("id", id);
     formData.set("setupCost", String(setupCost));
     formData.set("unitRate", String(unitRate));
-    startTransition(async () => {
+    runBusy(`decoration:${id}`, async () => {
       await updateOrderDecorationAction(formData);
-      router.refresh();
     });
   }
 
@@ -222,9 +275,8 @@ export function ConfigurationTab({
     formData.set("orderItemId", itemId);
     formData.set("fromSizeCode", sizeScope);
     for (const code of toCodes) formData.append("toSizeCode", code);
-    startTransition(async () => {
+    runBusy("sizes-copy", async () => {
       await copyOrderSizeSpecAction(formData);
-      router.refresh();
     });
   }
 
@@ -237,9 +289,8 @@ export function ConfigurationTab({
       formData.append("sizeNameUk", size.sizeNameUk);
       formData.append("sizeQty", String(quantities[size.sizeCode] ?? 0));
     });
-    startTransition(async () => {
+    runBusy("sizes", async () => {
       await updateOrderSizesAction(formData);
-      router.refresh();
     });
   }
 
@@ -255,10 +306,10 @@ export function ConfigurationTab({
         : removeTarget.kind === "operation"
           ? removeOrderOperationAction
           : removeOrderDecorationAction;
-    startTransition(async () => {
+    const key = `${removeTarget.kind}:${removeTarget.id}`;
+    runBusy(key, async () => {
       await action(formData);
       setRemoveTarget(null);
-      router.refresh();
     });
   }
 
@@ -274,45 +325,47 @@ export function ConfigurationTab({
         </Banner>
       ) : null}
 
-      <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
-          <div className="min-w-0">
-            <p className="truncate text-[13.5px] font-semibold text-[var(--color-text-primary)]">
-              {productName}
-            </p>
-            <p className="type-caption">
-              {totalQuantity} шт · {materials.length} мат. · {operations.length} оп. ·{" "}
-              {decorations.length} нанес.
-              {locked ? " · зафіксовано" : ""}
-            </p>
+      <SoftBusy busy={isBusy("sizes")} label="Оновлення кількостей…">
+        <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-[13.5px] font-semibold text-[var(--color-text-primary)]">
+                {productName}
+              </p>
+              <p className="type-caption">
+                {totalQuantity} шт · {materials.length} мат. · {operations.length} оп. ·{" "}
+                {decorations.length} нанес.
+                {locked ? " · зафіксовано" : ""}
+              </p>
+            </div>
+            {!locked && dirty ? (
+              <Button size="sm" onClick={saveSizes} disabled={pending} loading={isBusy("sizes")}>
+                Зберегти к-сть
+              </Button>
+            ) : null}
           </div>
-          {!locked && dirty ? (
-            <Button size="sm" onClick={saveSizes} disabled={pending}>
-              {pending ? "…" : "Зберегти к-сть"}
-            </Button>
-          ) : null}
+          <div className="px-3 py-2.5">
+            {sizes.length === 0 ? (
+              <p className="type-caption">Розміри не задані.</p>
+            ) : (
+              <SizeRun
+                sizes={sizes.map((size) => ({ code: size.sizeCode, nameUk: size.sizeNameUk }))}
+                quantities={quantities}
+                disabled={locked || isBusy("sizes")}
+                quiet
+                onChange={(code, quantity) =>
+                  setQuantities((prev) => ({ ...prev, [code]: quantity }))
+                }
+              />
+            )}
+            {dirty && !locked ? (
+              <p className="type-caption mt-2 text-[var(--color-warning-text)]">
+                К-сть змінено — збережіть, щоб перерахувати калькуляцію.
+              </p>
+            ) : null}
+          </div>
         </div>
-        <div className="px-3 py-2.5">
-          {sizes.length === 0 ? (
-            <p className="type-caption">Розміри не задані.</p>
-          ) : (
-            <SizeRun
-              sizes={sizes.map((size) => ({ code: size.sizeCode, nameUk: size.sizeNameUk }))}
-              quantities={quantities}
-              disabled={locked}
-              quiet
-              onChange={(code, quantity) =>
-                setQuantities((prev) => ({ ...prev, [code]: quantity }))
-              }
-            />
-          )}
-          {dirty && !locked ? (
-            <p className="type-caption mt-2 text-[var(--color-warning-text)]">
-              К-сть змінено — збережіть, щоб перерахувати калькуляцію.
-            </p>
-          ) : null}
-        </div>
-      </div>
+      </SoftBusy>
 
       <div className="flex flex-wrap items-center gap-2 px-0.5">
         <SizeScopeTabs
@@ -340,20 +393,20 @@ export function ConfigurationTab({
         />
         <Table>
           <THead>
-            <TH className="min-w-[10rem]">Назва</TH>
-            <TH align="right">Норма</TH>
-            {!hideCosts ? <TH align="right">%</TH> : null}
-            {!hideCosts ? <TH align="right">₴</TH> : null}
-            {!hideCosts ? <TH align="right">/од.</TH> : null}
-            {!locked ? <TH width="40px" /> : null}
+            <TH className="min-w-[12rem] w-[38%]">Матеріал</TH>
+            <TH align="right">Норма / виріб</TH>
+            {!hideCosts ? <TH align="right">Відходи</TH> : null}
+            {!hideCosts ? <TH align="right">Ціна</TH> : null}
+            {!hideCosts ? <TH align="right">Собівартість / од.</TH> : null}
+            {!locked ? <TH width="52px" /> : null}
           </THead>
           <TBody>
             {visibleMaterials.length === 0 ? (
               <TableEmpty
                 colSpan={(hideCosts ? 2 : 5) + (locked ? 0 : 1)}
                 icon={<IconMaterials size={20} />}
-                title={sizeScope === ALL_SIZES ? "Порожньо" : `Немає для ${sizeScope}`}
-                description="Додайте рядок знизу."
+                title={sizeScope === ALL_SIZES ? "Матеріалів ще немає" : `Немає для ${sizeScope}`}
+                description="Додайте рядок знизу — як у картці виробу."
               />
             ) : (
               visibleMaterials.map((row) => {
@@ -365,43 +418,70 @@ export function ConfigurationTab({
                   hasOversizeSizes || scopeIsOversize
                     ? effectiveOversizeConsumption(row.consumption)
                     : null;
+                const showSupplierColor =
+                  (row.supplierOffers?.length ?? 0) > 0 ||
+                  (row.materialAvailableColors?.length ?? 0) > 0 ||
+                  Boolean(row.supplierId) ||
+                  Boolean(row.colorSnapshot);
+                const rowBusy = isBusy(`material:${row.id}`);
                 return (
                   <TR
                     key={row.id}
                     className={cn(
-                      !hideCosts &&
-                        row.isFabric !== false &&
-                        "cursor-pointer hover:bg-[var(--color-surface-subtle)]",
+                      !hideCosts && "cursor-pointer hover:bg-[var(--color-surface-subtle)]",
                       selectedMaterialId === row.id && "bg-[var(--color-primary-50)]/40",
+                      busyRowClass(rowBusy),
                     )}
+                    aria-busy={rowBusy || undefined}
                     onClick={() => {
-                      if (hideCosts) return;
+                      if (hideCosts || rowBusy) return;
                       setSelectedMaterialId(row.id);
                     }}
                   >
-                    <TD title={row.name} className="min-w-[10rem] py-1.5 align-middle">
-                      <CellStack
-                        title={row.name}
-                        subtitle={
-                          [
-                            row.sizeCode ? `Лише ${row.sizeCode}` : null,
-                            !hideCosts && row.supplierName ? row.supplierName : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ") || undefined
-                        }
-                        wrap
-                      />
+                    <TD title={row.name} className="min-w-[12rem] w-[38%] py-1.5 align-top">
+                      <div className="space-y-1">
+                        <div className="flex min-w-0 items-start gap-1">
+                          <div className="min-w-0 flex-1">
+                            <CellStack
+                              title={row.name}
+                              subtitle={
+                                [
+                                  row.sizeCode ? `Лише ${row.sizeCode}` : null,
+                                  !hideCosts && row.pricingHint ? row.pricingHint : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || undefined
+                              }
+                              wrap
+                            />
+                          </div>
+                          <RowBusyMark busy={rowBusy} />
+                        </div>
+                        {showSupplierColor ? (
+                          <OrderMaterialSupplierColorEditor
+                            orderId={orderId}
+                            orderItemMaterialId={row.id}
+                            supplierId={row.supplierId ?? null}
+                            color={row.colorSnapshot ?? null}
+                            offers={row.supplierOffers ?? []}
+                            materialFallbackColors={row.materialAvailableColors}
+                            readOnly={locked || rowBusy}
+                          />
+                        ) : null}
+                      </div>
                     </TD>
                     <TD numeric className="py-1.5">
                       {locked ? (
                         <span className="inline-flex flex-col items-end gap-0.5">
-                          <span>
-                            {row.consumption} {row.unit}
+                          <span className="inline-flex items-center justify-end gap-1">
+                            <span className="tabular">{row.consumption}</span>
+                            <span className="text-[12px] text-[var(--color-text-secondary)]">
+                              {row.unit}
+                            </span>
                           </span>
                           {oversizeNorm != null ? (
                             <span className="text-[10px] text-[var(--color-text-quiet)]">
-                              XXL+ ≈ {oversizeNorm}
+                              3XL+ ≈ {oversizeNorm} {row.unit}
                             </span>
                           ) : null}
                         </span>
@@ -412,23 +492,46 @@ export function ConfigurationTab({
                             min={0}
                             step="0.0001"
                             defaultValue={row.consumption}
+                            disabled={rowBusy}
                             onBlur={(event) => {
                               const next = Math.max(0, Number(event.target.value) || 0);
                               if (next === row.consumption) return;
                               saveMaterialConsumption(row.id, next);
                             }}
                             onClick={(event) => event.stopPropagation()}
-                            className="h-7 w-[64px] rounded-[6px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                            className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)] disabled:opacity-60"
                           />
-                          <span className="w-7 text-left text-[11px] text-[var(--color-text-secondary)]">
+                          <span className="text-[12px] text-[var(--color-text-secondary)]">
                             {row.unit}
                           </span>
                         </span>
                       )}
                     </TD>
                     {!hideCosts ? (
-                      <TD numeric className="py-1.5 text-[var(--color-text-secondary)]">
-                        {row.waste}
+                      <TD numeric className="py-1.5">
+                        {locked ? (
+                          <span className="text-[var(--color-text-secondary)]">{row.waste}%</span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center justify-end gap-0.5"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              defaultValue={row.waste}
+                              disabled={rowBusy}
+                              onBlur={(event) => {
+                                const next = Math.max(0, Number(event.target.value) || 0);
+                                if (next === row.waste) return;
+                                saveMaterialWaste(row.id, next);
+                              }}
+                              className="h-7 w-[56px] rounded-[6px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)] disabled:opacity-60"
+                            />
+                            <span className="text-[12px] text-[var(--color-text-secondary)]">%</span>
+                          </span>
+                        )}
                       </TD>
                     ) : null}
                     {!hideCosts ? (
@@ -450,9 +553,9 @@ export function ConfigurationTab({
                             event.stopPropagation();
                             setRemoveTarget({ kind: "material", id: row.id, name: row.name });
                           }}
-                          className="rounded-[var(--radius-control)] p-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
+                          className="rounded-[var(--radius-control)] p-1.5 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
                         >
-                          <IconTrash size={15} />
+                          <IconTrash size={16} />
                         </button>
                       </TD>
                     ) : null}
@@ -511,38 +614,45 @@ export function ConfigurationTab({
                 description="Додайте рядок знизу."
               />
             ) : (
-              visibleOperations.map((row) => (
-                <TR key={row.id}>
-                  <TD className="py-1.5 font-medium">
-                    {row.name}
-                    {row.sizeCode ? (
-                      <span className="type-caption ml-1.5">лише {row.sizeCode}</span>
+              visibleOperations.map((row) => {
+                const rowBusy = isBusy(`operation:${row.id}`);
+                return (
+                  <TR key={row.id} className={busyRowClass(rowBusy)} aria-busy={rowBusy || undefined}>
+                    <TD className="py-1.5 font-medium">
+                      <span className="inline-flex items-center">
+                        {row.name}
+                        <RowBusyMark busy={rowBusy} />
+                      </span>
+                      {row.sizeCode ? (
+                        <span className="type-caption ml-1.5">лише {row.sizeCode}</span>
+                      ) : null}
+                    </TD>
+                    <TD className="py-1.5 text-[var(--color-text-secondary)]">
+                      {operationMethodLabel(row.method)}
+                    </TD>
+                    {!hideCosts ? (
+                      <TD numeric className="py-1.5 font-medium">
+                        {formatMoneyUah(row.unitCost)}
+                      </TD>
                     ) : null}
-                  </TD>
-                  <TD className="py-1.5 text-[var(--color-text-secondary)]">
-                    {operationMethodLabel(row.method)}
-                  </TD>
-                  {!hideCosts ? (
-                    <TD numeric className="py-1.5 font-medium">
-                      {formatMoneyUah(row.unitCost)}
-                    </TD>
-                  ) : null}
-                  {!locked ? (
-                    <TD align="center" className="py-1.5">
-                      <button
-                        type="button"
-                        aria-label={`Прибрати ${row.name}`}
-                        onClick={() =>
-                          setRemoveTarget({ kind: "operation", id: row.id, name: row.name })
-                        }
-                        className="rounded-[var(--radius-control)] p-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
-                      >
-                        <IconTrash size={15} />
-                      </button>
-                    </TD>
-                  ) : null}
-                </TR>
-              ))
+                    {!locked ? (
+                      <TD align="center" className="py-1.5">
+                        <button
+                          type="button"
+                          aria-label={`Прибрати ${row.name}`}
+                          disabled={rowBusy}
+                          onClick={() =>
+                            setRemoveTarget({ kind: "operation", id: row.id, name: row.name })
+                          }
+                          className="rounded-[var(--radius-control)] p-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-50"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </TD>
+                    ) : null}
+                  </TR>
+                );
+              })
             )}
           </TBody>
           {operations.length > 0 && !hideCosts ? (
@@ -576,13 +686,9 @@ export function ConfigurationTab({
             </span>
           }
           right={
-            <OrderSewerCountControl
-              orderId={orderId}
-              orderItemId={itemId}
-              companySewerCount={companySewerCount}
-              sewerCountOverride={sewerCountOverride}
-              locked={locked || !canEditFixedCosts}
-            />
+            <span className="type-caption">
+              {companySewerCount} швей · довідник ПВ
+            </span>
           }
         />
         <Table>
@@ -660,76 +766,87 @@ export function ConfigurationTab({
                 colSpan={locked ? 3 : 4}
                 icon={<IconDecoration size={20} />}
                 title="Без нанесення"
-                description="Додайте друк/вишивку знизу за потреби."
+                description="Оберіть шовкодрук, поставте коефіцієнти (за потреби) і натисніть «Додати»."
               />
             ) : (
-              decorations.map((row) => (
-                <TR key={row.id}>
-                  <TD className="min-w-0 py-1.5">
-                    <CellStack title={row.name} maxWidth="100%" />
-                  </TD>
-                  {!hideCosts ? (
-                    <TD numeric className="py-1.5">
-                      {locked ? (
-                        <span className="text-[var(--color-text-secondary)]">
-                          {formatMoneyUah(row.setupCost)}
-                        </span>
-                      ) : (
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.1"
-                          defaultValue={row.setupCost}
-                          disabled={pending}
-                          onBlur={(event) => {
-                            const next = Math.max(0, Number(event.target.value) || 0);
-                            if (next === row.setupCost) return;
-                            saveDecorationRates(row.id, next, row.unitRate);
-                          }}
-                          className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
-                          title="Приладка (разово на партію)"
-                        />
-                      )}
+              decorations.map((row) => {
+                const rowBusy = isBusy(`decoration:${row.id}`);
+                return (
+                  <TR key={row.id} className={busyRowClass(rowBusy)} aria-busy={rowBusy || undefined}>
+                    <TD className="min-w-0 py-1.5">
+                      <span className="inline-flex min-w-0 items-center gap-1">
+                        <CellStack title={decorationLabel(row.name)} maxWidth="100%" />
+                        <RowBusyMark busy={rowBusy} />
+                      </span>
                     </TD>
-                  ) : null}
-                  {!hideCosts ? (
-                    <TD numeric className="py-1.5">
-                      {locked ? (
-                        <span className="font-medium">{formatMoneyUah(row.unitRate)}</span>
-                      ) : (
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.1"
-                          defaultValue={row.unitRate}
-                          disabled={pending}
-                          onBlur={(event) => {
-                            const next = Math.max(0, Number(event.target.value) || 0);
-                            if (next === row.unitRate) return;
-                            saveDecorationRates(row.id, row.setupCost, next);
-                          }}
-                          className="h-7 w-[64px] rounded-[6px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
-                          title="Ставка за виріб"
-                        />
-                      )}
-                    </TD>
-                  ) : null}
-                  {!locked ? (
-                    <TD align="center" className="py-1.5">
-                      <button
-                        type="button"
-                        aria-label={`Прибрати ${row.name}`}
-                        onClick={() =>
-                          setRemoveTarget({ kind: "decoration", id: row.id, name: row.name })
-                        }
-                        className="rounded-[var(--radius-control)] p-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
-                      >
-                        <IconTrash size={15} />
-                      </button>
-                    </TD>
-                  ) : null}
-                </TR>
-              ))
+                    {!hideCosts ? (
+                      <TD numeric className="py-1.5">
+                        {locked ? (
+                          <span className="text-[var(--color-text-secondary)]">
+                            {formatMoneyUah(row.setupCost)}
+                          </span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.1"
+                            defaultValue={row.setupCost}
+                            disabled={rowBusy}
+                            onBlur={(event) => {
+                              const next = Math.max(0, Number(event.target.value) || 0);
+                              if (next === row.setupCost) return;
+                              saveDecorationRates(row.id, next, row.unitRate);
+                            }}
+                            className="h-7 w-[72px] rounded-[6px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)] disabled:opacity-60"
+                            title="Приладка (разово на партію)"
+                          />
+                        )}
+                      </TD>
+                    ) : null}
+                    {!hideCosts ? (
+                      <TD numeric className="py-1.5">
+                        {locked ? (
+                          <span className="font-medium">{formatMoneyUah(row.unitRate)}</span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.1"
+                            defaultValue={row.unitRate}
+                            disabled={rowBusy}
+                            onBlur={(event) => {
+                              const next = Math.max(0, Number(event.target.value) || 0);
+                              if (next === row.unitRate) return;
+                              saveDecorationRates(row.id, row.setupCost, next);
+                            }}
+                            className="h-7 w-[64px] rounded-[6px] border border-[var(--color-border)] bg-white px-1 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)] disabled:opacity-60"
+                            title="Ставка за виріб"
+                          />
+                        )}
+                      </TD>
+                    ) : null}
+                    {!locked ? (
+                      <TD align="center" className="py-1.5">
+                        <button
+                          type="button"
+                          aria-label={`Прибрати ${decorationLabel(row.name)}`}
+                          disabled={rowBusy}
+                          onClick={() =>
+                            setRemoveTarget({
+                              kind: "decoration",
+                              id: row.id,
+                              name: decorationLabel(row.name),
+                            })
+                          }
+                          className="rounded-[var(--radius-control)] p-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-50"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </TD>
+                    ) : null}
+                  </TR>
+                );
+              })
             )}
           </TBody>
           {decorations.length > 0 && !hideCosts ? (
@@ -748,14 +865,15 @@ export function ConfigurationTab({
             </TFoot>
           ) : null}
         </Table>
-        {!locked ? (
-          <InlineAddOrderDecoration
-            orderId={orderId}
-            itemId={itemId}
-            decorations={decorationOptions}
-            canCreateCatalog={canCreateCatalog}
-          />
-        ) : null}
+        <OrderScreenPrintCalculator
+          orderId={orderId}
+          orderItemId={itemId}
+          quantity={totalQuantity}
+          cells={screenPrintCells}
+          coefficients={screenPrintCoefficients}
+          existingDecorations={decorations.map((row) => ({ id: row.id, name: row.name }))}
+          locked={locked}
+        />
       </TableCard>
 
       <Modal
@@ -799,7 +917,12 @@ function InlineAddOrderMaterial({
 }: {
   orderId: string;
   itemId: string;
-  materials: Array<{ id: string; label: string; composition?: string | null }>;
+  materials: Array<{
+    id: string;
+    label: string;
+    composition?: string | null;
+    densityGsm?: string | null;
+  }>;
   units: Array<{ id: string; label: string }>;
   sizeCode: string;
   hideCosts?: boolean;
@@ -830,11 +953,13 @@ function InlineAddOrderMaterial({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)] px-3 py-2">
+    <SoftBusy busy={pending} label="Додаємо матеріал…">
+      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)] px-3 py-2">
       <Select
         size="sm"
         className="min-w-[160px] flex-1"
         value={materialId}
+        disabled={pending}
         onChange={(event) => setMaterialId(event.target.value)}
         aria-label="Матеріал з каталогу"
       >
@@ -843,7 +968,7 @@ function InlineAddOrderMaterial({
           <option
             key={row.id}
             value={row.id}
-            data-description={row.composition?.trim() || undefined}
+            data-description={materialOptionDescription(row.densityGsm, row.composition)}
           >
             {row.label}
           </option>
@@ -876,11 +1001,12 @@ function InlineAddOrderMaterial({
         type="button"
         size="sm"
         disabled={!materialId || pending}
+        loading={pending}
         onClick={() => submit()}
         className="inline-flex items-center gap-1"
       >
         <IconPlus size={14} />
-        {pending ? "…" : "Додати"}
+        Додати
       </Button>
       {canCreateCatalog ? (
         <MaterialCreatePanel
@@ -894,7 +1020,8 @@ function InlineAddOrderMaterial({
           }}
         />
       ) : null}
-    </div>
+      </div>
+    </SoftBusy>
   );
 }
 
@@ -930,11 +1057,13 @@ function InlineAddOrderOperation({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)] px-3 py-2">
+    <SoftBusy busy={pending} label="Додаємо операцію…">
+      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)] px-3 py-2">
       <Select
         size="sm"
         className="min-w-[180px] flex-1"
         value={operationId}
+        disabled={pending}
         onChange={(event) => setOperationId(event.target.value)}
         aria-label="Операція з каталогу"
       >
@@ -949,11 +1078,12 @@ function InlineAddOrderOperation({
         type="button"
         size="sm"
         disabled={!operationId || pending}
+        loading={pending}
         onClick={() => submit()}
         className="inline-flex items-center gap-1"
       >
         <IconPlus size={14} />
-        {pending ? "…" : "Додати"}
+        Додати
       </Button>
       {canCreateCatalog ? (
         <OperationCreatePanel
@@ -966,75 +1096,7 @@ function InlineAddOrderOperation({
           }}
         />
       ) : null}
-    </div>
-  );
-}
-
-function InlineAddOrderDecoration({
-  orderId,
-  itemId,
-  decorations,
-  canCreateCatalog = false,
-}: {
-  orderId: string;
-  itemId: string;
-  decorations: Array<{ id: string; label: string }>;
-  canCreateCatalog?: boolean;
-}) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [decorationId, setDecorationId] = useState("");
-
-  function submit(nextId = decorationId) {
-    if (!nextId) return;
-    const formData = new FormData();
-    formData.set("orderId", orderId);
-    formData.set("orderItemId", itemId);
-    formData.set("decorationMethodId", nextId);
-    startTransition(async () => {
-      await addOrderDecorationAction(formData);
-      setDecorationId("");
-      router.refresh();
-    });
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)] px-3 py-2">
-      <Select
-        size="sm"
-        className="min-w-[180px] flex-1"
-        value={decorationId}
-        onChange={(event) => setDecorationId(event.target.value)}
-        aria-label="Нанесення з каталогу"
-      >
-        <option value="">+ нанесення…</option>
-        {decorations.map((row) => (
-          <option key={row.id} value={row.id}>
-            {row.label}
-          </option>
-        ))}
-      </Select>
-      <Button
-        type="button"
-        size="sm"
-        disabled={!decorationId || pending}
-        onClick={() => submit()}
-        className="inline-flex items-center gap-1"
-      >
-        <IconPlus size={14} />
-        {pending ? "…" : "Додати"}
-      </Button>
-      {canCreateCatalog ? (
-        <DecorationCreatePanel
-          variant="ghost"
-          size="sm"
-          triggerLabel="Нове"
-          onCreated={(result) => {
-            const id = typeof result.decorationId === "string" ? result.decorationId : null;
-            if (id) submit(id);
-          }}
-        />
-      ) : null}
-    </div>
+      </div>
+    </SoftBusy>
   );
 }

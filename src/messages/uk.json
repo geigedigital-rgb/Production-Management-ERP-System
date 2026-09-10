@@ -11,7 +11,7 @@
     "settings": "Налаштування",
     "materials": "Матеріали",
     "operations": "Операції",
-    "applications": "Нанесення",
+    "screenPrint": "Шовкотрафарет",
     "fixedCosts": "Постійні витрати",
     "pricing": "Ціноутворення",
     "users": "Користувачі",
@@ -74,7 +74,6 @@
   "settings": {
     "materialsTitle": "Матеріали та фурнітура",
     "operationsTitle": "Операції",
-    "applicationsTitle": "Нанесення",
     "pricingTitle": "Правила калькуляції",
     "usersTitle": "Користувачі",
     "companyTitle": "Компанія та документи",

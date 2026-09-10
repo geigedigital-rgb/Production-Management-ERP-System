@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { updateOrderItemSewerCountAction } from "@/server/domains/orders/actions";
 import { Button } from "@/components/ui/Button";
+import { SoftBusy } from "@/components/ui/SoftBusy";
 import { cn } from "@/lib/utils";
 import {
   fixedCostValidationMessage,
@@ -60,6 +61,7 @@ export function OrderSewerCountControl({
   }
 
   return (
+    <SoftBusy busy={pending} tone="inline" label="Збереження…">
     <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
       <label className="inline-flex items-center gap-1.5 text-[var(--color-text-secondary)]">
         Швачок
@@ -103,6 +105,7 @@ export function OrderSewerCountControl({
       )}
       {error ? <span className="text-[var(--color-danger-text)]">{error}</span> : null}
     </div>
+    </SoftBusy>
   );
 }
 

@@ -127,7 +127,19 @@ export function ProductImagePicker({
               fill
               sizes="112px"
               className="object-cover"
-              unoptimized={display.startsWith("blob:")}
+              unoptimized={
+                display.startsWith("blob:") ||
+                display.startsWith("/uploads/") ||
+                display.includes("supabase.co")
+              }
+              onError={() => {
+                // Stale local /uploads URL or deleted Storage object.
+                if (!display.startsWith("blob:")) {
+                  setError("Фото недоступне — завантажте знову.");
+                  setPreviewUrl(null);
+                  setImageUrl(null);
+                }
+              }}
             />
           ) : (
             <span className="flex flex-col items-center gap-1 px-2 text-center text-[var(--color-text-tertiary)]">

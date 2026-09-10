@@ -16,8 +16,15 @@ import {
   addProductMaterialAction,
   addProductOperationAction,
 } from "@/server/domains/products/actions";
+import { materialOptionDescription } from "@/lib/material-catalog-options";
 
-type Option = { id: string; label: string; unit?: string; composition?: string | null };
+type Option = {
+  id: string;
+  label: string;
+  unit?: string;
+  composition?: string | null;
+  densityGsm?: string | null;
+};
 type UnitOption = { id: string; label: string };
 
 function unitFromMaterialLabel(label: string): string | null {
@@ -163,7 +170,7 @@ export function ProductAddMaterialBar({
             <option
               key={material.id}
               value={material.id}
-              data-description={material.composition?.trim() || undefined}
+              data-description={materialOptionDescription(material.densityGsm, material.composition)}
             >
               {material.label}
             </option>
@@ -279,7 +286,7 @@ export function AddProductMaterialPanel({
             <option
               key={material.id}
               value={material.id}
-              data-description={material.composition?.trim() || undefined}
+              data-description={materialOptionDescription(material.densityGsm, material.composition)}
             >
               {material.label}
             </option>

@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import { config as loadEnv } from "dotenv";
+
+loadEnv({ path: ".env.local" });
+loadEnv({ path: ".env" });
+
 import { calculateCosting } from "../src/server/domains/calculation/engine";
 
 const result = calculateCosting({
@@ -186,8 +191,20 @@ const decoItem = {
 
 const noPriceListDraft = draftLineFromItem(decoItem, costCalcStub);
 assert.equal(noPriceListDraft.fromPriceList, false);
-assert.equal(noPriceListDraft.totalSellingValue, 50077);
-assert.equal(noPriceListDraft.sellingPricePerUnit, 500.77);
+assert.equal(noPriceListDraft.priceSource, "cost");
+assert.equal(noPriceListDraft.sellingPricePerUnit, 350.54);
+assert.equal(noPriceListDraft.totalSellingValue, 35054);
+
+const sewingMarkupDraft = draftLineFromItem(
+  {
+    ...decoItem,
+    operations: [{ nameSnapshot: "Пошив", unitRate: 40, calculationMethod: "UNIT_RATE" }],
+  },
+  costCalcStub,
+);
+assert.equal(sewingMarkupDraft.fromPriceList, false);
+assert.equal(sewingMarkupDraft.priceSource, "sewing_markup");
+assert.ok(sewingMarkupDraft.sellingPricePerUnit > 350.54);
 
 const priceListDraft = draftLineFromItem(
   {
@@ -338,18 +355,20 @@ console.log("fabric cargo + cut/wholesale smoke test passed");
 import { resolveSizeCoeffs, OVERSIZE_DEFAULT_COEFFS } from "../src/lib/size-coeffs";
 
 assert.deepEqual(resolveSizeCoeffs("M"), { materialCoeff: 1, operationCoeff: 1 });
-assert.deepEqual(resolveSizeCoeffs("XXL"), OVERSIZE_DEFAULT_COEFFS);
+assert.deepEqual(resolveSizeCoeffs("XXL"), { materialCoeff: 1, operationCoeff: 1 });
 assert.deepEqual(resolveSizeCoeffs("3XL"), OVERSIZE_DEFAULT_COEFFS);
 assert.deepEqual(resolveSizeCoeffs("4XL"), OVERSIZE_DEFAULT_COEFFS);
+assert.deepEqual(resolveSizeCoeffs("5XL"), OVERSIZE_DEFAULT_COEFFS);
+assert.deepEqual(resolveSizeCoeffs("6XL"), OVERSIZE_DEFAULT_COEFFS);
 assert.deepEqual(
-  resolveSizeCoeffs("XXL", [{ sizeCode: "XXL", materialCoeff: 1.1, operationCoeff: 1.25 }]),
+  resolveSizeCoeffs("3XL", [{ sizeCode: "3XL", materialCoeff: 1.1, operationCoeff: 1.25 }]),
   { materialCoeff: 1.1, operationCoeff: 1.25 },
 );
 
 const oversizeCalc = calculateCosting({
   sizes: [
     { sizeCode: "M", quantity: 50, materialCoeff: 1, operationCoeff: 1 },
-    { sizeCode: "XXL", quantity: 50, materialCoeff: 1.15, operationCoeff: 1.2 },
+    { sizeCode: "3XL", quantity: 50, materialCoeff: 1.15, operationCoeff: 1.2 },
   ],
   materials: [
     {
@@ -399,4 +418,4 @@ const flatCalc = calculateCosting({
 });
 assert.ok(Number(oversizeCalc.materialsSubtotal) > Number(flatCalc.materialsSubtotal));
 assert.ok(Number(oversizeCalc.operationsSubtotal) > Number(flatCalc.operationsSubtotal));
-console.log("oversize XXL+ coeffs smoke test passed");
+console.log("oversize 3XL+ coeffs smoke test passed");

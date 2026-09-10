@@ -8,7 +8,7 @@ import {
 import { listMaterials, listUnits } from "@/server/domains/catalog/materials";
 import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
 import { buildCalcFromProduct, getPricingDefaults } from "@/server/domains/calculation/from-entities";
-import { commercialPriceTiersFromProduct, resolveCommercialPricePerUnit } from "@/lib/commercial-price";
+import { cardCommercialPriceTiersFromProduct, resolveCommercialPricePerUnit } from "@/lib/commercial-price";
 import { getCatalogHealth, tipsForPage } from "@/server/domains/catalog/health";
 import { PageHeader } from "@/components/ui/Page";
 import { Banner } from "@/components/ui/Banner";
@@ -117,6 +117,7 @@ export default async function ProductsPage({
     name: material.nameUk,
     materialType: material.type,
     composition: material.composition?.trim() || null,
+    densityGsm: material.densityGsm?.trim() || null,
     availableColors: material.availableColors ?? [],
   }));
   const operationCatalog = operations.map((operation) => ({
@@ -145,7 +146,7 @@ export default async function ProductsPage({
     const ready = isReady(product);
     const detail = detailById.get(product.id);
     const commercialTiers =
-      showPrices && detail ? commercialPriceTiersFromProduct(detail) : [];
+      showPrices && detail ? cardCommercialPriceTiersFromProduct(detail) : [];
     const tierQtys =
       commercialTiers.length > 0 ? commercialTiers.map((tier) => tier.minQuantity) : PRICE_TIERS;
 

@@ -290,6 +290,30 @@ model DecorationQuantityTier {
   @@map("decoration_quantity_tiers")
 }
 
+/// Silk-screen price cell: ₴/шт for tirage band × color count (base ≤ A4).
+model ScreenPrintPriceCell {
+  id          String  @id @default(cuid())
+  minQuantity Int
+  colorCount  Int
+  unitRate    Decimal @db.Decimal(14, 4)
+
+  @@unique([minQuantity, colorCount])
+  @@index([minQuantity])
+  @@map("screen_print_price_cells")
+}
+
+/// Optional multipliers stacked on top of the silk-screen base rate.
+model ScreenPrintCoefficient {
+  id        String  @id @default(cuid())
+  code      String  @unique
+  nameUk    String
+  factor    Decimal @db.Decimal(8, 4)
+  noteUk    String?
+  sortOrder Int     @default(0)
+
+  @@map("screen_print_coefficients")
+}
+
 model Product {
   id          String       @id @default(cuid())
   nameUk      String
@@ -340,6 +364,8 @@ model ProductCommercialPriceTier {
   productId    String
   minQuantity  Int
   pricePerUnit Decimal @db.Decimal(14, 4)
+  /// Show this tier on product cards in «Вироби» (base price for managers).
+  showOnCard   Boolean @default(false) @map("show_on_card")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 

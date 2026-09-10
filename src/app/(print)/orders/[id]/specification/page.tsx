@@ -3,9 +3,6 @@ import { getOrder } from "@/server/domains/orders/service";
 import { prisma } from "@/server/db/client";
 import { PrintToolbar } from "@/components/print/PrintToolbar";
 import {
-  PrintDocChip,
-  PrintDocChips,
-  PrintDocColumns,
   PrintDocHeader,
   PrintDocMeta,
   PrintDocMuted,
@@ -14,26 +11,82 @@ import {
   PrintDocTable,
   PrintDocument,
 } from "@/components/print/PrintDocument";
-import { formatDateUk, formatMoneyUah, formatUnit } from "@/lib/utils";
+import { formatDateUk, formatUnit } from "@/lib/utils";
 import { lineNeedOnSizes } from "@/lib/size-bom";
+import { operationMethodLabel } from "@/lib/operation-labels";
+import { isOversizeCode, oversizeUpliftCaption } from "@/lib/size-coeffs";
+import { getPricingForOrder } from "@/server/domains/calculation/from-entities";
+import { displayScreenPrintLineName } from "@/lib/screen-print-pricing";
+
+type SpecMaterial = {
+  nameSnapshot: string;
+  unitCodeSnapshot: string;
+  consumptionPerUnit: string | number;
+  wastePercent: string | number;
+  sizeCode?: string | null;
+  materialId?: string | null;
+  colorSnapshot?: string | null;
+  supplierNameSnapshot?: string | null;
+};
+
+type SpecOperation = {
+  nameSnapshot: string;
+  calculationMethod?: string;
+  sizeCode?: string | null;
+};
+
+type SpecDecoration = {
+  nameSnapshot: string;
+};
+
+type SpecSize = {
+  sizeCode?: string;
+  sizeNameUk: string;
+  quantity: number;
+};
 
 type SpecSnapshot = {
   item?: {
     nameUk?: string;
     totalQuantity?: number;
-    sizes?: Array<{ sizeCode?: string; sizeNameUk: string; quantity: number }>;
-    materials?: Array<{
-      nameSnapshot: string;
-      unitCodeSnapshot: string;
-      consumptionPerUnit: string | number;
-      wastePercent: string | number;
-      sizeCode?: string | null;
-      materialId?: string | null;
-    }>;
-    operations?: Array<{ nameSnapshot: string; calculationMethod: string }>;
-    decorations?: Array<{ nameSnapshot: string }>;
+    sizes?: SpecSize[];
+    materials?: SpecMaterial[];
+    operations?: SpecOperation[];
+    decorations?: SpecDecoration[];
   };
 };
+
+function materialNeed(
+  material: SpecMaterial,
+  index: number,
+  materials: SpecMaterial[],
+  sizes: SpecSize[],
+  sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }> | null,
+) {
+  const consumption = Number(material.consumptionPerUnit);
+  const waste = Number(material.wastePercent);
+  const siblings = materials.map((row, rowIndex) => ({
+    id: String(rowIndex),
+    groupKey: row.materialId ?? row.nameSnapshot,
+    sizeCode: row.sizeCode ?? null,
+  }));
+  return lineNeedOnSizes(
+    {
+      id: String(index),
+      groupKey: material.materialId ?? material.nameSnapshot,
+      sizeCode: material.sizeCode ?? null,
+      consumption,
+      waste,
+      applySizeCoeff: !(material.sizeCode != null && isOversizeCode(material.sizeCode)),
+    },
+    siblings,
+    sizes.map((size) => ({
+      sizeCode: size.sizeCode ?? "",
+      quantity: size.quantity,
+    })),
+    sizeRules,
+  );
+}
 
 export default async function SpecificationPage({
   params,
@@ -44,7 +97,11 @@ export default async function SpecificationPage({
 }) {
   const { id } = await params;
   const { item: itemParam } = await searchParams;
-  const [order, company] = await Promise.all([getOrder(id), prisma.companySettings.findFirst()]);
+  const [order, company, pricing] = await Promise.all([
+    getOrder(id),
+    prisma.companySettings.findFirst(),
+    getPricingForOrder(id),
+  ]);
   if (!order) notFound();
 
   const item =
@@ -54,18 +111,27 @@ export default async function SpecificationPage({
   const specification = item?.specification;
   if (!item || !specification) notFound();
 
-  const lockedVersion = item.versions.find((row) => row.id === specification.calculationVersionId);
   const snapshot = specification.snapshotJson as SpecSnapshot;
   const snap = snapshot?.item ?? {};
   const materials = snap.materials ?? [];
   const operations = snap.operations ?? [];
   const decorations = snap.decorations ?? [];
-  const sizes = snap.sizes ?? [];
+  const sizes = (snap.sizes ?? []).filter((row) => row.quantity > 0);
   const quantity = snap.totalQuantity ?? item.totalQuantity;
+  const hasOversize = sizes.some((size) => isOversizeCode(size.sizeCode));
+  const sizeRules = pricing.sizeRules;
   const companyName = company?.legalName ?? "Виробнича компанія";
   const productName = snap.nameUk ?? item.nameUk;
-  const runningTitle = `Специфікація ${order.number} · ${productName}`;
-  const companyLines = [company?.address, company?.phone].filter((line): line is string => Boolean(line));
+  const lockedVersion = item.versions.find((row) => row.id === specification.calculationVersionId);
+  const versionLabel = lockedVersion
+    ? `v${lockedVersion.versionNumber}${lockedVersion.proposalRevision != null ? ` · пропозиція ${lockedVersion.proposalRevision}` : ""}`
+    : null;
+  const runningTitle = `Цех · ${order.number} · ${productName}`;
+  const companyLines = [company?.address, company?.phone].filter((line): line is string =>
+    Boolean(line),
+  );
+  const artworkFiles = order.files;
+  const multiItem = order.items.length > 1;
 
   return (
     <>
@@ -74,16 +140,16 @@ export default async function SpecificationPage({
         title={`Специфікація ${order.number}`}
       />
 
-      <PrintDocument runningTitle={runningTitle}>
+      <PrintDocument runningTitle={runningTitle} className="print-doc--shop">
         <PrintDocHeader
           companyName={companyName}
           companyLines={companyLines.length > 0 ? companyLines : undefined}
-          docType="Специфікація для виробництва"
+          docType="Завдання в цех"
           docNumber={order.number}
           docMeta={[
             productName,
             `Зафіксовано ${formatDateUk(specification.lockedAt)}`,
-            "Документ незмінний",
+            versionLabel ?? "Незмінний знімок",
           ]}
         />
 
@@ -91,146 +157,192 @@ export default async function SpecificationPage({
           cols={3}
           columns={[
             {
-              label: "Замовник",
+              label: "Клієнт",
               content: (
                 <p>
                   <strong>{order.client.companyName}</strong>
+                  {order.title ? <span className="print-doc-meta-muted"> · {order.title}</span> : null}
                 </p>
               ),
             },
             {
-              label: "Замовлення",
-              content: (
-                <p>
-                  <strong>{order.number}</strong>
-                </p>
-              ),
-            },
-            {
-              label: "Дедлайн",
+              label: "Термін",
               content: (
                 <p>
                   <strong>{formatDateUk(order.deadline)}</strong>
                 </p>
               ),
             },
+            {
+              label: "Тираж",
+              content: (
+                <p>
+                  <strong>{quantity} шт</strong>
+                  {multiItem ? (
+                    <span className="print-doc-meta-muted">
+                      {" "}
+                      · поз. {order.items.findIndex((row) => row.id === item.id) + 1}/
+                      {order.items.length}
+                    </span>
+                  ) : null}
+                </p>
+              ),
+            },
           ]}
         />
 
-        <PrintDocSection title={`Кількість за розмірами — разом ${quantity} шт`}>
+        <PrintDocSection title="Розмірна сітка">
           {sizes.length === 0 ? (
-            <PrintDocMuted>Без розмірної сітки</PrintDocMuted>
+            <PrintDocMuted>Без розмірної сітки — {quantity} шт</PrintDocMuted>
           ) : (
-            <PrintDocChips>
-              {sizes.map((size) => (
-                <PrintDocChip key={size.sizeNameUk}>
-                  {size.sizeNameUk}: <strong>{size.quantity}</strong>
-                </PrintDocChip>
-              ))}
-            </PrintDocChips>
+            <PrintDocTable
+              head={
+                <tr>
+                  {sizes.map((size) => (
+                    <th key={size.sizeCode ?? size.sizeNameUk} className="num">
+                      {size.sizeCode ?? size.sizeNameUk}
+                    </th>
+                  ))}
+                  <th className="num">Разом</th>
+                </tr>
+              }
+              rows={
+                <tr>
+                  {sizes.map((size) => (
+                    <td key={size.sizeCode ?? size.sizeNameUk} className="num">
+                      <strong>{size.quantity}</strong>
+                    </td>
+                  ))}
+                  <td className="num">
+                    <strong>{quantity}</strong>
+                  </td>
+                </tr>
+              }
+            />
           )}
         </PrintDocSection>
 
-        <PrintDocSection title="Матеріали та норми витрати" breakable>
-          <PrintDocTable
-            head={
-              <tr>
-                <th>Матеріал</th>
-                <th className="num">Норма / од.</th>
-                <th className="num">Відходи</th>
-                <th className="num">Потреба на партію</th>
-              </tr>
-            }
-            rows={
-              <>
-                {materials.map((material, index) => {
-                  const consumption = Number(material.consumptionPerUnit);
-                  const waste = Number(material.wastePercent);
-                  const siblings = materials.map((row, rowIndex) => ({
-                    id: String(rowIndex),
-                    groupKey: row.materialId ?? row.nameSnapshot,
-                    sizeCode: row.sizeCode ?? null,
-                  }));
-                  const need = lineNeedOnSizes(
-                    {
-                      id: String(index),
-                      groupKey: material.materialId ?? material.nameSnapshot,
-                      sizeCode: material.sizeCode ?? null,
-                      consumption,
-                      waste,
-                    },
-                    siblings,
-                    sizes.map((size) => ({
-                      sizeCode: size.sizeCode ?? "",
-                      quantity: size.quantity,
-                    })),
-                  );
-                  return (
-                    <tr key={`${material.nameSnapshot}-${index}`}>
-                      <td>
-                        {material.nameSnapshot}
-                        {material.sizeCode ? (
-                          <span className="print-doc-item-sub">{material.sizeCode}</span>
-                        ) : null}
-                      </td>
-                      <td className="num">
-                        {consumption} {formatUnit(material.unitCodeSnapshot)}
-                      </td>
-                      <td className="num">{waste}%</td>
-                      <td className="num">
-                        <strong>
-                          {need.toFixed(3)} {formatUnit(material.unitCodeSnapshot)}
-                        </strong>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </>
-            }
-          />
+        <PrintDocSection title="Матеріали — що видати на партію" breakable>
+          {hasOversize ? (
+            <PrintDocMuted>
+              У потребі вже враховано {oversizeUpliftCaption(sizeRules)} на частку 3XL+.
+            </PrintDocMuted>
+          ) : null}
+          {materials.length === 0 ? (
+            <PrintDocMuted>Матеріалів у знімку немає</PrintDocMuted>
+          ) : (
+            <PrintDocTable
+              head={
+                <tr>
+                  <th>Матеріал</th>
+                  <th>Колір</th>
+                  <th>Постачальник</th>
+                  <th className="num">Норма</th>
+                  <th className="num">Відх.</th>
+                  <th className="num">Потреба</th>
+                </tr>
+              }
+              rows={
+                <>
+                  {materials.map((material, index) => {
+                    const consumption = Number(material.consumptionPerUnit);
+                    const waste = Number(material.wastePercent);
+                    const need = materialNeed(material, index, materials, sizes, sizeRules);
+                    const unit = formatUnit(material.unitCodeSnapshot);
+                    return (
+                      <tr key={`${material.nameSnapshot}-${index}`}>
+                        <td>
+                          <strong>{material.nameSnapshot}</strong>
+                          {material.sizeCode ? (
+                            <span className="print-doc-item-sub">лише {material.sizeCode}</span>
+                          ) : null}
+                        </td>
+                        <td>{material.colorSnapshot?.trim() || "—"}</td>
+                        <td>{material.supplierNameSnapshot?.trim() || "—"}</td>
+                        <td className="num">
+                          {consumption} {unit}
+                        </td>
+                        <td className="num">{waste > 0 ? `${waste}%` : "—"}</td>
+                        <td className="num">
+                          <strong>
+                            {need.toFixed(need >= 10 ? 2 : 3)} {unit}
+                          </strong>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </>
+              }
+            />
+          )}
         </PrintDocSection>
 
-        <PrintDocSection title="Технологічна карта">
-          <PrintDocColumns>
-            <div>
-              <h3 className="print-doc-section-title">Операції</h3>
-              <ol className="print-doc-list">
-                {operations.map((operation, index) => (
-                  <li key={`${operation.nameSnapshot}-${index}`}>{operation.nameSnapshot}</li>
-                ))}
-              </ol>
-            </div>
-            <div>
-              <h3 className="print-doc-section-title">Нанесення</h3>
-              {decorations.length === 0 ? (
-                <PrintDocMuted>Не використовується</PrintDocMuted>
-              ) : (
-                <ul className="print-doc-list-plain">
-                  {decorations.map((decoration, index) => (
-                    <li key={`${decoration.nameSnapshot}-${index}`}>{decoration.nameSnapshot}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </PrintDocColumns>
+        <PrintDocSection title="Технологічні операції">
+          {operations.length === 0 ? (
+            <PrintDocMuted>Операцій немає</PrintDocMuted>
+          ) : (
+            <ol className="print-doc-list print-doc-list--shop">
+              {operations.map((operation, index) => (
+                <li key={`${operation.nameSnapshot}-${index}`}>
+                  <span className="print-doc-op-name">{operation.nameSnapshot}</span>
+                  {operation.sizeCode ? (
+                    <span className="print-doc-item-sub"> {operation.sizeCode}</span>
+                  ) : null}
+                  {operation.calculationMethod ? (
+                    <span className="print-doc-op-method">
+                      {" "}
+                      · {operationMethodLabel(operation.calculationMethod)}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
+        </PrintDocSection>
+
+        <PrintDocSection title="Нанесення / брендування">
+          {decorations.length === 0 ? (
+            <PrintDocMuted>Без нанесення</PrintDocMuted>
+          ) : (
+            <ul className="print-doc-list-plain print-doc-list--shop">
+              {decorations.map((decoration, index) => (
+                <li key={`${decoration.nameSnapshot}-${index}`}>
+                  <strong>{displayScreenPrintLineName(decoration.nameSnapshot)}</strong>
+                  <span className="print-doc-op-method"> · за макетом</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </PrintDocSection>
+
+        <PrintDocSection title="Файли макетів">
+          {artworkFiles.length === 0 ? (
+            <PrintDocMuted>
+              {decorations.length > 0
+                ? "Макетів у замовленні немає — перевірте вкладку файлів"
+                : "Не потрібні"}
+            </PrintDocMuted>
+          ) : (
+            <ul className="print-doc-list-plain print-doc-list--shop">
+              {artworkFiles.map((file) => (
+                <li key={file.id}>{file.fileName}</li>
+              ))}
+            </ul>
+          )}
         </PrintDocSection>
 
         <PrintDocSection>
-          <div className="print-doc-summary">
+          <div className="print-doc-summary print-doc-summary--shop">
             <div>
-              <p className="print-doc-label">Планова собівартість партії</p>
-              <p className="print-doc-summary-value">
-                {lockedVersion ? formatMoneyUah(Number(lockedVersion.totalCost)) : "—"}
-              </p>
-              {lockedVersion ? (
-                <PrintDocMuted>версія v{lockedVersion.versionNumber}</PrintDocMuted>
-              ) : null}
+              <p className="print-doc-label">Контроль цеху</p>
+              <p className="print-doc-shop-check">☐ Крій &nbsp; ☐ Пошив &nbsp; ☐ Нанесення &nbsp; ☐ ОТК</p>
+              <PrintDocMuted>
+                Менеджер: {order.manager.name}
+                {order.client.contactPerson ? ` · контакт клієнта: ${order.client.contactPerson}` : ""}
+              </PrintDocMuted>
             </div>
             <PrintDocSignatures
-              items={[
-                { label: `Менеджер · ${order.manager.name}` },
-                { label: "Виробництво" },
-              ]}
+              items={[{ label: "Видав (менеджер)" }, { label: "Прийняв (цех)" }]}
             />
           </div>
         </PrintDocSection>
