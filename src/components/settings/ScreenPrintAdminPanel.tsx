@@ -13,23 +13,31 @@ import {
   TableToolbar,
   TBody,
   TD,
+  TFoot,
   TH,
   THead,
   TR,
 } from "@/components/ui/Table";
 import { saveScreenPrintCatalogAction } from "@/server/domains/screen-print/actions";
-import type {
-  ScreenPrintCoefficient,
-  ScreenPrintPriceCell,
+import {
+  uniqueColorCounts,
+  uniqueQtyBands,
+  type ScreenPrintCoefficient,
+  type ScreenPrintPriceCell,
 } from "@/lib/screen-print-pricing";
 import { cn } from "@/lib/utils";
 
-/** Soft field — light border, no heavy box. */
-const field =
-  "h-8 w-full min-w-0 rounded-[6px] border border-transparent bg-transparent px-1.5 text-[13px] text-[var(--color-text-primary)] outline-none transition-[border-color,background-color] placeholder:text-[var(--color-text-quiet)] hover:border-[var(--color-border)] focus:border-[var(--color-primary-400)] focus:bg-[color-mix(in_srgb,var(--color-primary-50)_40%,transparent)] disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+const softCell =
+  "h-8 w-full min-w-[3.5rem] rounded-[6px] border border-transparent bg-transparent px-1.5 text-right text-[13px] tabular text-[var(--color-text-primary)] outline-none transition-[border-color,background-color] placeholder:text-[var(--color-text-quiet)] hover:border-[var(--color-border)] focus:border-[var(--color-primary-400)] focus:bg-[color-mix(in_srgb,var(--color-primary-50)_40%,transparent)] disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
-const draftField =
-  "h-8 w-full min-w-0 rounded-[6px] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-[13px] outline-none placeholder:text-[var(--color-text-quiet)] focus:border-[var(--color-primary-400)] focus:border-solid [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+const draftCell =
+  "h-8 w-full min-w-[3.5rem] rounded-[6px] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-right text-[13px] tabular outline-none placeholder:text-[var(--color-text-quiet)] focus:border-solid focus:border-[var(--color-primary-400)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+const softLine =
+  "h-8 w-full min-w-0 rounded-[6px] border border-transparent bg-transparent px-1.5 text-[13px] outline-none transition-[border-color,background-color] placeholder:text-[var(--color-text-quiet)] hover:border-[var(--color-border)] focus:border-[var(--color-primary-400)] focus:bg-[color-mix(in_srgb,var(--color-primary-50)_40%,transparent)] disabled:opacity-60";
+
+const draftLine =
+  "h-8 w-full min-w-0 rounded-[6px] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-[13px] outline-none placeholder:text-[var(--color-text-quiet)] focus:border-solid focus:border-[var(--color-primary-400)]";
 
 function slugCode(nameUk: string, used: Set<string>): string {
   const base =
@@ -59,7 +67,8 @@ function sortCells(rows: ScreenPrintPriceCell[]) {
 type CoefRow = ScreenPrintCoefficient & { key: string };
 
 /**
- * Row-first screen-print catalog: empty draft line → fill → add; soft fields like fixed costs.
+ * Screen-print catalog: tirage × colors price matrix + coefficient rows.
+ * New entries via empty draft rows at the bottom.
  */
 export function ScreenPrintAdminPanel({
   cells: initialCells,
@@ -74,9 +83,11 @@ export function ScreenPrintAdminPanel({
     initialCoefficients.map((row, i) => ({ ...row, key: row.code || `c-${i}` })),
   );
 
+  /** Draft new tirage row: qty + rate per existing color column. */
   const [draftQty, setDraftQty] = useState("");
-  const [draftColors, setDraftColors] = useState("");
-  const [draftRate, setDraftRate] = useState("");
+  const [draftRates, setDraftRates] = useState<Record<number, string>>({});
+  /** Draft new color column. */
+  const [draftColor, setDraftColor] = useState("");
 
   const [draftCoefName, setDraftCoefName] = useState("");
   const [draftCoefNote, setDraftCoefNote] = useState("");
@@ -86,6 +97,9 @@ export function ScreenPrintAdminPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  const bands = useMemo(() => uniqueQtyBands(cells), [cells]);
+  const colors = useMemo(() => uniqueColorCounts(cells), [cells]);
+
   useEffect(() => {
     setCells(sortCells(initialCells));
     setCoefficients(
@@ -94,8 +108,7 @@ export function ScreenPrintAdminPanel({
   }, [initialCells, initialCoefficients]);
 
   const dirty = useMemo(() => {
-    const cellKey = (rows: ScreenPrintPriceCell[]) =>
-      JSON.stringify(sortCells(rows));
+    const cellKey = (rows: ScreenPrintPriceCell[]) => JSON.stringify(sortCells(rows));
     const coefKey = (rows: ScreenPrintCoefficient[]) =>
       JSON.stringify(
         rows.map((r) => ({
@@ -110,6 +123,18 @@ export function ScreenPrintAdminPanel({
       coefKey(coefficients) !== coefKey(initialCoefficients)
     );
   }, [cells, coefficients, initialCells, initialCoefficients]);
+
+  function rateAt(qty: number, color: number): number {
+    return cells.find((c) => c.minQuantity === qty && c.colorCount === color)?.unitRate ?? 0;
+  }
+
+  function setRate(qty: number, color: number, unitRate: number) {
+    setCells((prev) => {
+      const next = prev.filter((c) => !(c.minQuantity === qty && c.colorCount === color));
+      next.push({ minQuantity: qty, colorCount: color, unitRate: Math.max(0, unitRate) });
+      return sortCells(next);
+    });
+  }
 
   function persist(nextCells: ScreenPrintPriceCell[], nextCoefs: CoefRow[]) {
     setMessage(null);
@@ -150,44 +175,68 @@ export function ScreenPrintAdminPanel({
     });
   }
 
-  function addPriceRow() {
-    const minQuantity = Math.floor(Number(draftQty));
-    const colorCount = Math.floor(Number(draftColors));
-    const unitRate = Number(String(draftRate).replace(",", "."));
-    if (!Number.isFinite(minQuantity) || minQuantity <= 0) {
+  function addTirageRow() {
+    const qty = Math.floor(Number(draftQty));
+    if (!Number.isFinite(qty) || qty <= 0) {
       setError("Вкажіть тираж від (шт)");
       return;
     }
-    if (!Number.isFinite(colorCount) || colorCount <= 0 || colorCount > 24) {
-      setError("Кількість кольорів: 1–24");
+    if (bands.includes(qty)) {
+      setError(`Тираж від ${qty} уже є`);
       return;
     }
-    if (!Number.isFinite(unitRate) || unitRate < 0) {
-      setError("Вкажіть ціну ₴/шт");
-      return;
+    const colorList = colors.length > 0 ? colors : [1];
+    const additions: ScreenPrintPriceCell[] = [];
+    for (const color of colorList) {
+      const raw = draftRates[color] ?? "";
+      const unitRate = Number(String(raw).replace(",", "."));
+      if (!Number.isFinite(unitRate) || unitRate < 0) {
+        setError(`Вкажіть ціну для ${color} кол.`);
+        return;
+      }
+      additions.push({ minQuantity: qty, colorCount: color, unitRate });
     }
-    if (cells.some((c) => c.minQuantity === minQuantity && c.colorCount === colorCount)) {
-      setError(`Уже є рядок: від ${minQuantity} шт · ${colorCount} кол.`);
-      return;
-    }
+
     setError(null);
-    const next = sortCells([...cells, { minQuantity, colorCount, unitRate }]);
+    const next = sortCells([...cells, ...additions]);
     setCells(next);
     setDraftQty("");
-    setDraftColors("");
-    setDraftRate("");
+    setDraftRates({});
     persist(next, coefficients);
   }
 
-  function updatePriceRow(index: number, patch: Partial<ScreenPrintPriceCell>) {
-    setCells((prev) => {
-      const next = prev.map((row, i) => (i === index ? { ...row, ...patch } : row));
-      return sortCells(next);
-    });
+  function addColorColumn() {
+    const color = Math.floor(Number(draftColor));
+    if (!Number.isFinite(color) || color <= 0 || color > 24) {
+      setError("Кількість кольорів: 1–24");
+      return;
+    }
+    if (colors.includes(color)) {
+      setError(`${color} кол. уже є`);
+      return;
+    }
+    if (bands.length === 0) {
+      setError("Спочатку додайте рядок тиражу");
+      return;
+    }
+    setError(null);
+    const next = sortCells([
+      ...cells,
+      ...bands.map((qty) => ({ minQuantity: qty, colorCount: color, unitRate: 0 })),
+    ]);
+    setCells(next);
+    setDraftColor("");
+    persist(next, coefficients);
   }
 
-  function removePriceRow(index: number) {
-    const next = cells.filter((_, i) => i !== index);
+  function removeBand(qty: number) {
+    const next = cells.filter((c) => c.minQuantity !== qty);
+    setCells(next);
+    persist(next, coefficients);
+  }
+
+  function removeColorColumn(color: number) {
+    const next = cells.filter((c) => c.colorCount !== color);
     setCells(next);
     persist(next, coefficients);
   }
@@ -223,6 +272,8 @@ export function ScreenPrintAdminPanel({
     persist(cells, next);
   }
 
+  const displayColors = colors.length > 0 ? colors : [1];
+
   return (
     <SoftBusy busy={pending} label="Збереження…">
       <div className="space-y-4">
@@ -232,155 +283,195 @@ export function ScreenPrintAdminPanel({
               <div className="min-w-0">
                 <p className="type-subsection">Прайс ₴/шт · база ≤ А4</p>
                 <p className="type-caption mt-0.5">
-                  Один рядок — тираж × кольори × ціна. Додайте порожній рядок знизу.
+                  Шапка — кольори · рядок — тираж · клітинка — ціна. Новий тираж — порожній рядок
+                  знизу.
                 </p>
               </div>
             }
             right={
-              dirty ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={24}
+                  disabled={pending}
+                  className={cn(draftLine, "w-[4.5rem] text-center tabular")}
+                  value={draftColor}
+                  onChange={(event) => setDraftColor(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addColorColumn();
+                    }
+                  }}
+                  placeholder="кол."
+                  aria-label="Нова кількість кольорів"
+                />
                 <Button
                   type="button"
                   size="sm"
-                  loading={pending}
-                  onClick={() => persist(cells, coefficients)}
+                  variant="secondary"
+                  disabled={pending}
+                  onClick={addColorColumn}
                 >
-                  Зберегти зміни
+                  <IconPlus size={14} />
+                  Кольори
                 </Button>
-              ) : (
-                <span className="type-caption">Усе збережено</span>
-              )
+                {dirty ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    loading={pending}
+                    onClick={() => persist(cells, coefficients)}
+                  >
+                    Зберегти зміни
+                  </Button>
+                ) : (
+                  <span className="type-caption">Усе збережено</span>
+                )}
+              </div>
             }
           />
-          <Table>
-            <THead>
-              <TH width="120px">Тираж від, шт</TH>
-              <TH width="100px">Кольорів</TH>
-              <TH width="120px" align="right">
-                ₴ / шт
-              </TH>
-              <TH width="44px" />
-            </THead>
-            <TBody>
-              {cells.length === 0 ? (
-                <TableEmpty
-                  colSpan={4}
-                  title="Порожньо"
-                  description="Заповніть рядок знизу й натисніть «Додати»."
-                />
-              ) : (
-                cells.map((row, index) => (
-                  <TR key={`${row.minQuantity}-${row.colorCount}-${index}`}>
-                    <TD className="py-1">
-                      <input
-                        type="number"
-                        min={1}
-                        disabled={pending}
-                        className={cn(field, "tabular")}
-                        value={row.minQuantity}
-                        aria-label="Тираж від"
-                        onChange={(event) =>
-                          updatePriceRow(index, {
-                            minQuantity: Math.max(1, Math.floor(Number(event.target.value)) || 1),
-                          })
-                        }
-                      />
-                    </TD>
-                    <TD className="py-1">
-                      <input
-                        type="number"
-                        min={1}
-                        max={24}
-                        disabled={pending}
-                        className={cn(field, "tabular")}
-                        value={row.colorCount}
-                        aria-label="Кількість кольорів"
-                        onChange={(event) =>
-                          updatePriceRow(index, {
-                            colorCount: Math.max(
-                              1,
-                              Math.min(24, Math.floor(Number(event.target.value)) || 1),
-                            ),
-                          })
-                        }
-                      />
-                    </TD>
-                    <TD className="py-1" numeric>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        disabled={pending}
-                        className={cn(field, "text-right tabular")}
-                        value={row.unitRate}
-                        aria-label="Ціна за шт"
-                        onChange={(event) =>
-                          updatePriceRow(index, {
-                            unitRate: Math.max(0, Number(event.target.value) || 0),
-                          })
-                        }
-                      />
-                    </TD>
-                    <TD className="py-1" align="center">
-                      <button
-                        type="button"
-                        disabled={pending}
-                        aria-label="Прибрати рядок"
-                        onClick={() => removePriceRow(index)}
-                        className="rounded p-1 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-40"
-                      >
-                        <IconTrash size={14} />
-                      </button>
-                    </TD>
-                  </TR>
-                ))
-              )}
-            </TBody>
-          </Table>
 
-          <form
-            className="grid grid-cols-[120px_100px_120px_auto] items-center gap-2 border-t border-[var(--color-divider)] px-3 py-2.5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              addPriceRow();
-            }}
-          >
-            <input
-              type="number"
-              min={1}
-              disabled={pending}
-              className={cn(draftField, "tabular")}
-              value={draftQty}
-              onChange={(event) => setDraftQty(event.target.value)}
-              placeholder="напр. 50"
-              aria-label="Новий тираж від"
+          <div className="overflow-x-auto">
+            <form
+              id="sp-draft-tirage"
+              className="hidden"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addTirageRow();
+              }}
             />
-            <input
-              type="number"
-              min={1}
-              max={24}
-              disabled={pending}
-              className={cn(draftField, "tabular")}
-              value={draftColors}
-              onChange={(event) => setDraftColors(event.target.value)}
-              placeholder="кол."
-              aria-label="Нова кількість кольорів"
-            />
-            <input
-              type="number"
-              min={0}
-              step="0.01"
-              disabled={pending}
-              className={cn(draftField, "text-right tabular")}
-              value={draftRate}
-              onChange={(event) => setDraftRate(event.target.value)}
-              placeholder="₴"
-              aria-label="Нова ціна"
-            />
-            <Button type="submit" size="sm" variant="secondary" disabled={pending}>
-              <IconPlus size={14} />
-              Додати
-            </Button>
-          </form>
+            <Table>
+              <THead>
+                <TH width="110px">Тираж від</TH>
+                {displayColors.map((c) => (
+                  <TH key={c} align="right" width="96px">
+                    <span className="inline-flex items-center justify-end gap-1">
+                      <span>{c} кол.</span>
+                      {colors.includes(c) ? (
+                        <button
+                          type="button"
+                          title={`Прибрати ${c} кол.`}
+                          aria-label={`Прибрати стовпчик ${c} кол.`}
+                          disabled={pending || colors.length <= 1}
+                          onClick={() => removeColorColumn(c)}
+                          className="rounded p-0.5 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-30"
+                        >
+                          <IconTrash size={12} />
+                        </button>
+                      ) : null}
+                    </span>
+                  </TH>
+                ))}
+                <TH width="88px" />
+              </THead>
+              <TBody>
+                {bands.length === 0 ? (
+                  <TableEmpty
+                    colSpan={displayColors.length + 2}
+                    title="Порожньо"
+                    description="Заповніть новий рядок тиражу знизу й натисніть «Додати»."
+                  />
+                ) : (
+                  bands.map((qty) => (
+                    <TR key={qty}>
+                      <TD className="py-1 tabular font-medium">{qty}</TD>
+                      {displayColors.map((color) => (
+                        <TD key={`${qty}-${color}`} className="py-1" numeric>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            disabled={pending}
+                            className={softCell}
+                            value={rateAt(qty, color)}
+                            aria-label={`₴/шт від ${qty}, ${color} кол.`}
+                            onChange={(event) =>
+                              setRate(qty, color, Number(event.target.value) || 0)
+                            }
+                          />
+                        </TD>
+                      ))}
+                      <TD className="py-1" align="center">
+                        <button
+                          type="button"
+                          disabled={pending}
+                          title={`Прибрати тираж від ${qty}`}
+                          aria-label={`Прибрати тираж від ${qty}`}
+                          onClick={() => removeBand(qty)}
+                          className="rounded p-1 text-[var(--color-text-quiet)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-40"
+                        >
+                          <IconTrash size={14} />
+                        </button>
+                      </TD>
+                    </TR>
+                  ))
+                )}
+              </TBody>
+              <TFoot>
+                <tr className="border-t border-dashed border-[var(--color-border-strong)] bg-[color-mix(in_srgb,var(--color-primary-50)_35%,var(--color-surface))]">
+                  <TD className="py-2 align-bottom">
+                    <label className="flex flex-col gap-0.5">
+                      <span className="type-caption normal-case tracking-normal text-[var(--color-primary-700)]">
+                        Новий тираж
+                      </span>
+                      <input
+                        form="sp-draft-tirage"
+                        type="number"
+                        min={1}
+                        disabled={pending}
+                        className={cn(draftCell, "text-left")}
+                        value={draftQty}
+                        onChange={(event) => setDraftQty(event.target.value)}
+                        placeholder="шт"
+                        aria-label="Новий тираж від"
+                      />
+                    </label>
+                  </TD>
+                  {displayColors.map((color) => (
+                    <TD key={`draft-${color}`} className="py-2 align-bottom" numeric>
+                      <label className="flex flex-col gap-0.5">
+                        <span className="type-caption normal-case tracking-normal text-[var(--color-text-quiet)]">
+                          {color} кол. · ₴
+                        </span>
+                        <input
+                          form="sp-draft-tirage"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          disabled={pending}
+                          className={draftCell}
+                          value={draftRates[color] ?? ""}
+                          onChange={(event) =>
+                            setDraftRates((prev) => ({
+                              ...prev,
+                              [color]: event.target.value,
+                            }))
+                          }
+                          placeholder="0"
+                          aria-label={`Нова ціна ${color} кол.`}
+                        />
+                      </label>
+                    </TD>
+                  ))}
+                  <TD className="py-2 align-bottom" align="center">
+                    <Button
+                      form="sp-draft-tirage"
+                      type="submit"
+                      size="sm"
+                      variant="secondary"
+                      disabled={pending}
+                      className="w-full"
+                    >
+                      <IconPlus size={14} />
+                      Додати
+                    </Button>
+                  </TD>
+                </tr>
+              </TFoot>
+            </Table>
+          </div>
         </TableCard>
 
         <TableCard>
@@ -394,6 +485,14 @@ export function ScreenPrintAdminPanel({
               </div>
             }
           />
+          <form
+            id="sp-draft-coef"
+            className="hidden"
+            onSubmit={(event) => {
+              event.preventDefault();
+              addCoefRow();
+            }}
+          />
           <Table>
             <THead>
               <TH>Назва</TH>
@@ -401,7 +500,7 @@ export function ScreenPrintAdminPanel({
               <TH width="88px" align="right">
                 ×
               </TH>
-              <TH width="44px" />
+              <TH width="88px" />
             </THead>
             <TBody>
               {coefficients.length === 0 ? (
@@ -416,7 +515,7 @@ export function ScreenPrintAdminPanel({
                     <TD className="py-1">
                       <input
                         disabled={pending}
-                        className={field}
+                        className={softLine}
                         value={row.nameUk}
                         aria-label="Назва коефіцієнта"
                         onChange={(event) => {
@@ -430,7 +529,7 @@ export function ScreenPrintAdminPanel({
                     <TD className="py-1">
                       <input
                         disabled={pending}
-                        className={field}
+                        className={softLine}
                         value={row.noteUk ?? ""}
                         placeholder="—"
                         aria-label="Примітка"
@@ -448,7 +547,7 @@ export function ScreenPrintAdminPanel({
                         min={0.01}
                         step="0.01"
                         disabled={pending}
-                        className={cn(field, "text-right tabular")}
+                        className={cn(softLine, "text-right tabular")}
                         value={row.factor}
                         aria-label="Множник"
                         onChange={(event) => {
@@ -474,47 +573,75 @@ export function ScreenPrintAdminPanel({
                 ))
               )}
             </TBody>
+            <TFoot>
+              <tr className="border-t border-dashed border-[var(--color-border-strong)] bg-[color-mix(in_srgb,var(--color-primary-50)_35%,var(--color-surface))]">
+                <TD className="py-2 align-bottom">
+                  <label className="flex flex-col gap-0.5">
+                    <span className="type-caption normal-case tracking-normal text-[var(--color-primary-700)]">
+                      Нова назва
+                    </span>
+                    <input
+                      form="sp-draft-coef"
+                      disabled={pending}
+                      className={draftLine}
+                      value={draftCoefName}
+                      onChange={(event) => setDraftCoefName(event.target.value)}
+                      placeholder="Умова"
+                      aria-label="Нова назва коефіцієнта"
+                    />
+                  </label>
+                </TD>
+                <TD className="py-2 align-bottom">
+                  <label className="flex flex-col gap-0.5">
+                    <span className="type-caption normal-case tracking-normal text-[var(--color-text-quiet)]">
+                      Примітка
+                    </span>
+                    <input
+                      form="sp-draft-coef"
+                      disabled={pending}
+                      className={draftLine}
+                      value={draftCoefNote}
+                      onChange={(event) => setDraftCoefNote(event.target.value)}
+                      placeholder="—"
+                      aria-label="Примітка нового коефіцієнта"
+                    />
+                  </label>
+                </TD>
+                <TD className="py-2 align-bottom" numeric>
+                  <label className="flex flex-col gap-0.5">
+                    <span className="type-caption normal-case tracking-normal text-[var(--color-text-quiet)]">
+                      Множник ×
+                    </span>
+                    <input
+                      form="sp-draft-coef"
+                      type="number"
+                      min={0.01}
+                      step="0.01"
+                      disabled={pending}
+                      className={cn(draftLine, "text-right tabular")}
+                      value={draftCoefFactor}
+                      onChange={(event) => setDraftCoefFactor(event.target.value)}
+                      placeholder="1.5"
+                      aria-label="Множник нового коефіцієнта"
+                    />
+                  </label>
+                </TD>
+                <TD className="py-2 align-bottom" align="center">
+                  <Button
+                    form="sp-draft-coef"
+                    type="submit"
+                    size="sm"
+                    variant="secondary"
+                    disabled={pending}
+                    className="w-full"
+                  >
+                    <IconPlus size={14} />
+                    Додати
+                  </Button>
+                </TD>
+              </tr>
+            </TFoot>
           </Table>
-
-          <form
-            className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_88px_auto] items-center gap-2 border-t border-[var(--color-divider)] px-3 py-2.5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              addCoefRow();
-            }}
-          >
-            <input
-              disabled={pending}
-              className={draftField}
-              value={draftCoefName}
-              onChange={(event) => setDraftCoefName(event.target.value)}
-              placeholder="Назва умови"
-              aria-label="Нова назва коефіцієнта"
-            />
-            <input
-              disabled={pending}
-              className={draftField}
-              value={draftCoefNote}
-              onChange={(event) => setDraftCoefNote(event.target.value)}
-              placeholder="Примітка (необовʼязково)"
-              aria-label="Примітка нового коефіцієнта"
-            />
-            <input
-              type="number"
-              min={0.01}
-              step="0.01"
-              disabled={pending}
-              className={cn(draftField, "text-right tabular")}
-              value={draftCoefFactor}
-              onChange={(event) => setDraftCoefFactor(event.target.value)}
-              placeholder="1.5"
-              aria-label="Множник нового коефіцієнта"
-            />
-            <Button type="submit" size="sm" variant="secondary" disabled={pending}>
-              <IconPlus size={14} />
-              Додати
-            </Button>
-          </form>
         </TableCard>
 
         {error ? <Banner tone="danger">{error}</Banner> : null}

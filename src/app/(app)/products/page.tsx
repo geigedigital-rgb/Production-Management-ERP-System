@@ -255,11 +255,13 @@ export default async function ProductsPage({
       <TableCard>
         <TableToolbar
           left={
-            <span className="type-caption tabular">
-              {filtered.length} з {summaries.length}
-            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              <ProductsViewToggle value={view} />
+              <span className="type-caption tabular text-[var(--color-text-quiet)]">
+                {filtered.length} з {summaries.length}
+              </span>
+            </div>
           }
-          right={<ProductsViewToggle value={view} />}
           filters={
             <>
               <SearchField placeholder="Пошук за назвою або кодом" className="w-64" />

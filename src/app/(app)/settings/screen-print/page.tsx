@@ -15,7 +15,7 @@ export default async function ScreenPrintSettingsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Шовкотрафарет"
-        description="Прайс і коефіцієнти по рядках. Новий запис — порожній рядок знизу, потім «Додати»."
+        description="Таблиця: тираж × кольори × ціна. Новий тираж або коефіцієнт — порожній рядок знизу."
       />
       <ScreenPrintAdminPanel cells={catalog.cells} coefficients={catalog.coefficients} />
     </div>
