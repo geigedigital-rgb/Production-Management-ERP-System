@@ -69,11 +69,6 @@ export function SupplierPaletteEditor({
 
   return (
     <div className="sm:col-span-full space-y-2">
-      <p className="type-caption">
-        Ці кольори зʼявляться кружечками в картці виробу та в замовленні після вибору
-        постачальника.
-      </p>
-
       {colors.length > 0 ? (
         <div className="overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-border)]">
           <table className="w-full text-left text-[13px]">
@@ -132,11 +127,7 @@ export function SupplierPaletteEditor({
             </tbody>
           </table>
         </div>
-      ) : (
-        <p className="type-caption text-[var(--color-warning-text)]">
-          Палітра порожня — додайте хоча б один колір.
-        </p>
-      )}
+      ) : null}
 
       {unusedPresets.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
@@ -162,39 +153,44 @@ export function SupplierPaletteEditor({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="type-label">Зразок</span>
-          <input
-            type="color"
-            value={draftSwatch}
-            onChange={(event) => setDraftSwatch(event.target.value)}
-            className="h-10 w-12 cursor-pointer rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-1"
-            aria-label="Зразок кольору"
+      <div className="rounded-[var(--radius-control)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2.5 py-2">
+        <p className="mb-1.5 text-[12px] font-medium text-[var(--color-text-primary)]">
+          Новий колір
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="type-label">Колір</span>
+            <input
+              type="color"
+              value={draftSwatch}
+              onChange={(event) => setDraftSwatch(event.target.value)}
+              className="h-10 w-12 cursor-pointer rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-1"
+              aria-label="Колір зразка"
+            />
+          </label>
+          <Input
+            className="min-w-[10rem] flex-1"
+            label="Назва"
+            value={draftName}
+            onChange={(event) => setDraftName(event.target.value)}
+            placeholder="Олива"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addColor(draftName, draftSwatch);
+              }
+            }}
           />
-        </label>
-        <Input
-          className="min-w-[10rem] flex-1"
-          label="Нова назва"
-          value={draftName}
-          onChange={(event) => setDraftName(event.target.value)}
-          placeholder="Наприклад Олива"
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              addColor(draftName, draftSwatch);
-            }
-          }}
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          disabled={!draftName.trim()}
-          onClick={() => addColor(draftName, draftSwatch)}
-        >
-          Додати
-        </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={!draftName.trim()}
+            onClick={() => addColor(draftName, draftSwatch)}
+          >
+            Додати колір
+          </Button>
+        </div>
       </div>
     </div>
   );

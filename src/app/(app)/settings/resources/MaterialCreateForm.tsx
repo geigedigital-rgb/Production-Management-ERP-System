@@ -26,6 +26,10 @@ import {
   updateMaterialAction,
 } from "@/server/domains/catalog/actions";
 import { MaterialSuppliersEditor } from "@/components/catalog/MaterialSuppliersEditor";
+import {
+  MaterialSupplierDraftsEditor,
+  type MaterialSupplierOfferDraft,
+} from "@/components/catalog/MaterialSupplierDraftsEditor";
 import { FABRIC_COMPOSITIONS, COMPOSITION_OTHER } from "@/lib/fabric-compositions";
 import { FABRIC_KINDS, FABRIC_KIND_OTHER, normalizeFabricKind } from "@/lib/fabric-kinds";
 import {
@@ -242,6 +246,8 @@ function MaterialFields({
   const [fabricKindOther, setFabricKindOther] = useState(initialKind.other);
   const [supplierSelect, setSupplierSelect] = useState(initialSupplier.select);
   const [supplierOther, setSupplierOther] = useState(initialSupplier.other);
+  const [supplierDrafts, setSupplierDrafts] = useState<MaterialSupplierOfferDraft[]>([]);
+  const [supplierDraftEditing, setSupplierDraftEditing] = useState(false);
 
   const [densityGsm, setDensityGsm] = useState(defaults?.densityGsm ?? "");
   const [widthCm, setWidthCm] = useState(defaults?.widthCm ?? "");
@@ -479,19 +485,57 @@ function MaterialFields({
   const wizardSteps = useMemo(() => {
     if (type !== "FABRIC") return ["Основне", "Ціна", "Готово"];
     if (managePricingSeparately) {
-      return ["Основне", "Тканина", "Параметри", "Доставка", "Готово"];
+      return ["Основне", "Параметри", "Доставка", "Готово"];
+    }
+    // Create wizard: «Основне» = identity + fabric kind/composition
+    if (wizard) {
+      if (fabricEachPricing) {
+        return ["Основне", "Постачальник", "Готово"];
+      }
+      return ["Основне", "Параметри", "Постачальник", "Готово"];
     }
     if (fabricEachPricing) {
-      return ["Основне", "Тканина", "Постачальник", "Ціна", "Готово"];
+      return ["Основне", "Постачальник", "Ціна", "Готово"];
     }
-    return ["Основне", "Тканина", "Параметри", "Постачальник", "Ціни", "Готово"];
-  }, [type, managePricingSeparately, fabricEachPricing]);
+    return ["Основне", "Параметри", "Постачальник", "Ціни", "Готово"];
+  }, [type, managePricingSeparately, fabricEachPricing, wizard]);
 
   useEffect(() => {
     if (wizardStep >= wizardSteps.length) setWizardStep(Math.max(0, wizardSteps.length - 1));
   }, [wizardStep, wizardSteps.length]);
 
   const stepKey = wizardSteps[wizardStep] ?? "Основне";
+
+  const wizardMultiSuppliers =
+    wizard && type === "FABRIC" && !managePricingSeparately;
+
+  /** Mirror primary draft into classic form fields so createMaterial still syncs primary. */
+  useEffect(() => {
+    if (!wizardMultiSuppliers) return;
+    const primary = supplierDrafts.find((row) => row.isPrimary) ?? supplierDrafts[0];
+    if (!primary) return;
+    const name = primary.supplierName.trim();
+    if (!name) return;
+    const known = knownSuppliers.some((item) => item.toLowerCase() === name.toLowerCase());
+    if (known) {
+      setSupplierSelect(name);
+      setSupplierOther("");
+    } else {
+      setSupplierSelect(SUPPLIER_OTHER);
+      setSupplierOther(name);
+    }
+    if (primary.priceKgUsd) setPriceKgUsd(primary.priceKgUsd);
+    if (primary.priceKgUsdVat) setPriceKgUsdVat(primary.priceKgUsdVat);
+    if (primary.priceMeterUahNoVat) setPriceMeterNoVat(primary.priceMeterUahNoVat);
+    if (primary.priceMeterUahVat) setPriceMeterVat(primary.priceMeterUahVat);
+    if (primary.priceMeterUahCutVat) setPriceMeterCutVat(primary.priceMeterUahCutVat);
+    if (primary.minWholesaleMeters) setMinWholesaleMeters(primary.minWholesaleMeters);
+    if (primary.wholesaleNote) setWholesaleNote(primary.wholesaleNote);
+    if (primary.cargoUsdPerKg) setFabricCargoUsdPerKg(primary.cargoUsdPerKg);
+    if (primary.deliveryType) {
+      setDeliveryType(normalizeFabricDeliveryType(primary.deliveryType));
+    }
+  }, [wizardMultiSuppliers, supplierDrafts, knownSuppliers]);
 
   function stepCanNext(): boolean {
     if (stepKey === "Основне") return Boolean(nameUk.trim() && unitOfMeasureId);
@@ -502,6 +546,9 @@ function MaterialFields({
       return Boolean(widthCm.trim());
     }
     if (stepKey === "Постачальник" || stepKey === "Доставка") {
+      if (wizardMultiSuppliers) {
+        return supplierDrafts.length > 0 && !supplierDraftEditing;
+      }
       return Boolean(supplierValue || managePricingSeparately);
     }
     if (stepKey === "Ціни" || stepKey === "Ціна") {
@@ -551,6 +598,9 @@ function MaterialFields({
     fabricUnitMode,
     fabricEachPricing,
     managePricingSeparately,
+    wizardMultiSuppliers,
+    supplierDrafts,
+    supplierDraftEditing,
   ]);
 
   function showStep(title: string) {
@@ -650,7 +700,7 @@ function MaterialFields({
         compact
       >
         <Input
-          name="purchasePrice"
+          name={wizardMultiSuppliers ? undefined : "purchasePrice"}
           label={
             fabricEachPricing
               ? fabricUnitMode === "cone"
@@ -695,7 +745,11 @@ function MaterialFields({
 
       {type === "FABRIC" ? (
         <>
-          <div className={showStep("Тканина") ? "space-y-4" : "hidden"}>
+          <div
+            className={
+              showStep("Тканина") || showStep("Основне") ? "space-y-4" : "hidden"
+            }
+          >
           <FormGroup label={wizard ? undefined : "Тканина"} icon={wizard ? undefined : <IconFabricKind size={14} />} columns={2} compact>
             <div className="space-y-2">
               <Select
@@ -897,77 +951,147 @@ function MaterialFields({
                 : "hidden"
             }
           >
-            <FormGroup
-              label={wizard ? undefined : "Постачальник і доставка"}
-              icon={wizard ? undefined : <IconPurchaseKg size={14} />}
-              columns={2}
-              compact
-            >
-              {!managePricingSeparately ? (
-                <div className="space-y-2 sm:col-span-2">
-                  <Select
-                    label="Постачальник"
-                    required={pricingInline}
-                    value={supplierSelect}
-                    onChange={(event) => setSupplierSelect(event.target.value)}
-                  >
-                    <option value="">Оберіть…</option>
-                    {knownSuppliers.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                    <option value={SUPPLIER_OTHER}>Додати нового…</option>
-                  </Select>
-                  <input type="hidden" name="supplierCode" value={supplierValue} />
-                  {supplierSelect === SUPPLIER_OTHER ? (
+            {wizardMultiSuppliers ? (
+              <>
+                <input
+                  type="hidden"
+                  name="supplierCode"
+                  value={supplierValue || defaults?.supplierCode || ""}
+                />
+                <input type="hidden" name="deliveryType" value={deliveryType} />
+                <input type="hidden" name="fabricCargoUsdPerKg" value={fabricCargoUsdPerKg} />
+                <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
+                {fabricEachPricing ? (
+                  <FormGroup label="Ціна закупки" columns={2} compact>
                     <Input
-                      label="Назва постачальника"
+                      name="purchasePrice"
+                      label="Ціна"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      suffix="₴"
                       required
-                      value={supplierOther}
-                      onChange={(event) => setSupplierOther(event.target.value)}
-                      placeholder="Наприклад Зейджан"
+                      value={purchasePrice}
+                      onChange={(event) => setPurchasePrice(event.target.value)}
                     />
-                  ) : null}
-                </div>
-              ) : (
-                <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
-              )}
-              <Select
-                name="deliveryType"
-                label="Тип доставки"
-                required
-                value={deliveryType}
-                onChange={(event) =>
-                  applyDeliveryType(normalizeFabricDeliveryType(event.target.value))
-                }
+                  </FormGroup>
+                ) : (
+                  <>
+                    <input type="hidden" name="priceKgUsd" value={priceKgUsd} />
+                    <input type="hidden" name="priceKgUsdVat" value={priceKgUsdVat} />
+                    <input
+                      type="hidden"
+                      name="priceKgUsdCargo"
+                      value={derived.priceKgUsdCargo ?? ""}
+                    />
+                    <input type="hidden" name="priceMeterUahNoVat" value={priceMeterNoVat} />
+                    <input type="hidden" name="priceMeterUahVat" value={priceMeterVat} />
+                    <input type="hidden" name="priceMeterUahCutVat" value={priceMeterCutVat} />
+                    <input type="hidden" name="minWholesaleMeters" value={minWholesaleMeters} />
+                    <input type="hidden" name="wholesaleNote" value={wholesaleNote} />
+                    <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
+                  </>
+                )}
+                <input
+                  type="hidden"
+                  name="supplierOffersJson"
+                  value={JSON.stringify(supplierDrafts)}
+                />
+                <MaterialSupplierDraftsEditor
+                  offers={supplierDrafts}
+                  onChange={setSupplierDrafts}
+                  metersPerKg={metersPerKg ? Number(metersPerKg) : null}
+                  fabricGlobals={liveGlobals}
+                  knownSuppliers={knownSuppliers}
+                  defaultDeliveryType={deliveryType}
+                  onEditingChange={setSupplierDraftEditing}
+                />
+              </>
+            ) : (
+              <FormGroup
+                label={wizard ? undefined : "Постачальник і доставка"}
+                icon={wizard ? undefined : <IconPurchaseKg size={14} />}
+                columns={2}
+                compact
               >
-                {FABRIC_DELIVERY_TYPES.map((code) => (
-                  <option key={code} value={code}>
-                    {fabricDeliveryTypeLabel(code)}
-                  </option>
-                ))}
-              </Select>
-              <Input
-                name="fabricCargoUsdPerKg"
-                label="Тариф"
-                type="number"
-                step="0.01"
-                min="0"
-                suffix="$/кг"
-                value={fabricCargoUsdPerKg}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setFabricCargoUsdPerKg(value);
-                  if (pricingInline) recalcMeterPrices({ fabricCargoUsdPerKg: value });
-                }}
-              />
-              <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
-            </FormGroup>
+                {!managePricingSeparately ? (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Select
+                      label="Постачальник"
+                      required={pricingInline}
+                      value={supplierSelect}
+                      onChange={(event) => setSupplierSelect(event.target.value)}
+                    >
+                      <option value="">Оберіть…</option>
+                      {knownSuppliers.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                      <option value={SUPPLIER_OTHER}>Додати нового…</option>
+                    </Select>
+                    <input type="hidden" name="supplierCode" value={supplierValue} />
+                    {supplierSelect === SUPPLIER_OTHER ? (
+                      <Input
+                        label="Назва постачальника"
+                        required
+                        value={supplierOther}
+                        onChange={(event) => setSupplierOther(event.target.value)}
+                        placeholder="Наприклад Зейджан"
+                      />
+                    ) : null}
+                  </div>
+                ) : (
+                  <input
+                    type="hidden"
+                    name="supplierCode"
+                    value={defaults?.supplierCode ?? ""}
+                  />
+                )}
+                <Select
+                  name="deliveryType"
+                  label="Тип доставки"
+                  required
+                  value={deliveryType}
+                  onChange={(event) =>
+                    applyDeliveryType(normalizeFabricDeliveryType(event.target.value))
+                  }
+                >
+                  {FABRIC_DELIVERY_TYPES.map((code) => (
+                    <option key={code} value={code}>
+                      {fabricDeliveryTypeLabel(code)}
+                    </option>
+                  ))}
+                </Select>
+                <Input
+                  name="fabricCargoUsdPerKg"
+                  label="Тариф"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  suffix="$/кг"
+                  value={fabricCargoUsdPerKg}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setFabricCargoUsdPerKg(value);
+                    if (pricingInline) {
+                      recalcMeterPrices({ fabricCargoUsdPerKg: value });
+                    }
+                  }}
+                />
+                <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
+              </FormGroup>
+            )}
           </div>
 
-          <div className={showStep("Ціни") || (!wizard && pricingInline) ? "space-y-4" : "hidden"}>
-          {pricingInline ? (
+          <div
+            className={
+              showStep("Ціни") || showStep("Ціна") || (!wizard && pricingInline)
+                ? "space-y-4"
+                : "hidden"
+            }
+          >
+          {pricingInline && !wizardMultiSuppliers ? (
             <>
               {fabricUnitMode === "kg" || fabricUnitMode === "m" ? (
                 <FormGroup
@@ -1153,7 +1277,11 @@ function MaterialFields({
               <p className="font-medium text-[var(--color-text-primary)]">{nameUk || "Без назви"}</p>
               <p className="type-caption mt-0.5">
                 {selectedUnit?.label ?? "—"}
-                {supplierValue ? ` · ${supplierValue}` : ""}
+                {supplierDrafts.length > 0
+                  ? ` · ${supplierDrafts.length} пост.`
+                  : supplierValue
+                    ? ` · ${supplierValue}`
+                    : ""}
                 {` · ${fabricDeliveryTypeLabel(deliveryType)}`}
                 {derived.purchasePrice > 0
                   ? ` · ${formatMoneyUah(derived.purchasePrice)}/м`
@@ -1269,7 +1397,15 @@ export function MaterialCreatePanel({
 
   return (
     <>
-      <Button variant={variant} size={size} onClick={() => setOpen(true)}>
+      <Button
+        variant={variant}
+        size={size}
+        onClick={() => {
+          setWizardMeta(null);
+          setError(null);
+          setOpen(true);
+        }}
+      >
         {triggerLabel}
       </Button>
       <SidePanel

@@ -130,6 +130,72 @@ export async function createMaterialAction(formData: FormData) {
   await syncFabricGlobalsFromForm(formData);
 
   const result = await createMaterial(parsed.data);
+
+  const offersRaw = formData.get("supplierOffersJson");
+  if (
+    parsed.data.type === "FABRIC" &&
+    typeof offersRaw === "string" &&
+    offersRaw.trim()
+  ) {
+    try {
+      const { upsertMaterialSupplierOffer } = await import(
+        "@/server/domains/catalog/suppliers"
+      );
+      const { splitColorLabels } = await import("@/lib/trim-colors");
+      const drafts = JSON.parse(offersRaw) as Array<{
+        isPrimary?: boolean;
+        supplierName?: string;
+        cargoUsdPerKg?: string;
+        priceKgUsd?: string;
+        priceKgUsdVat?: string;
+        priceMeterUahNoVat?: string;
+        priceMeterUahVat?: string;
+        priceMeterUahCutVat?: string;
+        minWholesaleMeters?: string;
+        wholesaleNote?: string;
+        availableColors?: string;
+      }>;
+      if (Array.isArray(drafts)) {
+        const metersPerKg = formData.get("metersPerKg")
+          ? Number(formData.get("metersPerKg"))
+          : null;
+        // Primary first so catalog mirror is correct, then alternatives.
+        const ordered = [...drafts].sort(
+          (a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)),
+        );
+        for (const draft of ordered) {
+          const name = String(draft.supplierName ?? "").trim();
+          if (!name) continue;
+          await upsertMaterialSupplierOffer(result.material.id, {
+            supplierNameUk: name,
+            isPrimary: Boolean(draft.isPrimary),
+            metersPerKg:
+              metersPerKg != null && Number.isFinite(metersPerKg) ? metersPerKg : null,
+            cargoUsdPerKg: draft.cargoUsdPerKg ? Number(draft.cargoUsdPerKg) : null,
+            priceKgUsd: draft.priceKgUsd ? Number(draft.priceKgUsd) : null,
+            priceKgUsdVat: draft.priceKgUsdVat ? Number(draft.priceKgUsdVat) : null,
+            priceMeterUahNoVat: draft.priceMeterUahNoVat
+              ? Number(draft.priceMeterUahNoVat)
+              : null,
+            priceMeterUahVat: draft.priceMeterUahVat
+              ? Number(draft.priceMeterUahVat)
+              : null,
+            priceMeterUahCutVat: draft.priceMeterUahCutVat
+              ? Number(draft.priceMeterUahCutVat)
+              : null,
+            minWholesaleMeters: draft.minWholesaleMeters
+              ? Number(draft.minWholesaleMeters)
+              : null,
+            wholesaleNote: draft.wholesaleNote || null,
+            availableColors: splitColorLabels(String(draft.availableColors ?? "")),
+          });
+        }
+      }
+    } catch {
+      // Material already created; offers can still be edited later.
+    }
+  }
+
   revalidatePath("/settings/resources");
   revalidatePath("/settings/pricing");
   revalidatePath("/orders");
