@@ -2,16 +2,41 @@ import { prisma } from "@/server/db/client";
 import { materialFormSchema, type MaterialFormValues } from "./schemas";
 import type { MaterialCostVatMode, MaterialType, RecordStatus } from "@prisma/client";
 import {
+  DEFAULT_FABRIC_PRICING_GLOBALS,
   deriveFabricPricing,
   type FabricPricingGlobals,
 } from "@/lib/fabric-pricing";
+import {
+  deliveryRateUsdPerKg,
+  normalizeFabricDeliveryType,
+  type FabricDeliveryTypeCode,
+} from "@/lib/fabric-delivery-types";
 
 export async function getFabricPricingGlobals(): Promise<FabricPricingGlobals> {
   const pricing = await prisma.pricingSettings.findFirst();
   return {
-    usdUahRate: Number(pricing?.usdUahRate ?? 45),
-    fabricCargoUsdPerKg: Number(pricing?.fabricCargoUsdPerKg ?? 1.7),
-    materialCostVatMode: (pricing?.materialCostVatMode ?? "NET") as MaterialCostVatMode,
+    usdUahRate: Number(pricing?.usdUahRate ?? DEFAULT_FABRIC_PRICING_GLOBALS.usdUahRate),
+    fabricCargoUsdPerKg: Number(
+      pricing?.fabricCargoUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.fabricCargoUsdPerKg,
+    ),
+    npStandardUsdPerKg: Number(
+      pricing?.npStandardUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.npStandardUsdPerKg,
+    ),
+    npVolumeUsdPerKg: Number(
+      pricing?.npVolumeUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.npVolumeUsdPerKg,
+    ),
+    materialCostVatMode: (pricing?.materialCostVatMode ??
+      DEFAULT_FABRIC_PRICING_GLOBALS.materialCostVatMode) as MaterialCostVatMode,
+  };
+}
+
+function globalsForDeliveryType(
+  globals: FabricPricingGlobals,
+  deliveryType: FabricDeliveryTypeCode | null | undefined,
+): FabricPricingGlobals {
+  return {
+    ...globals,
+    fabricCargoUsdPerKg: deliveryRateUsdPerKg(deliveryType, globals),
   };
 }
 
@@ -19,6 +44,8 @@ function fabricDataFromForm(
   data: MaterialFormValues,
   globals: FabricPricingGlobals,
 ) {
+  const deliveryType = normalizeFabricDeliveryType(data.deliveryType);
+
   if (data.type !== "FABRIC") {
     return {
       densityGsm: null,
@@ -37,10 +64,12 @@ function fabricDataFromForm(
       metersPerRoll: null,
       minWholesaleMeters: null,
       costVatOverride: null,
+      deliveryType: "CARGO" as FabricDeliveryTypeCode,
       purchasePrice: data.purchasePrice,
     };
   }
 
+  const pricingGlobals = globalsForDeliveryType(globals, deliveryType);
   const derived = deriveFabricPricing(
     {
       metersPerKg: data.metersPerKg,
@@ -55,7 +84,7 @@ function fabricDataFromForm(
       minWholesaleMeters: data.minWholesaleMeters,
       costVatOverride: data.costVatOverride,
     },
-    globals,
+    pricingGlobals,
   );
 
   const purchasePrice =
@@ -78,6 +107,7 @@ function fabricDataFromForm(
     metersPerRoll: derived.metersPerRoll,
     minWholesaleMeters: data.minWholesaleMeters ?? derived.minWholesaleMeters,
     costVatOverride: data.costVatOverride ?? null,
+    deliveryType,
     purchasePrice,
   };
 }
@@ -166,6 +196,7 @@ export async function createMaterial(raw: MaterialFormValues) {
       metersPerRoll: fabric.metersPerRoll,
       minWholesaleMeters: fabric.minWholesaleMeters,
       costVatOverride: fabric.costVatOverride,
+      deliveryType: fabric.deliveryType,
     },
     include: {
       unitOfMeasure: true,
@@ -177,6 +208,7 @@ export async function createMaterial(raw: MaterialFormValues) {
     const { syncPrimarySupplierOfferFromMaterial } = await import(
       "@/server/domains/catalog/suppliers"
     );
+    const cargoUsdPerKg = deliveryRateUsdPerKg(fabric.deliveryType, globals);
     await syncPrimarySupplierOfferFromMaterial({
       materialId: material.id,
       supplierNameUk: data.supplierCode,
@@ -196,7 +228,8 @@ export async function createMaterial(raw: MaterialFormValues) {
       minWholesaleMeters:
         fabric.minWholesaleMeters != null ? Number(fabric.minWholesaleMeters) : null,
       wholesaleNote: fabric.wholesaleNote,
-      globals,
+      cargoUsdPerKg,
+      globals: globalsForDeliveryType(globals, fabric.deliveryType),
     });
   }
 
@@ -239,6 +272,7 @@ export async function updateMaterial(
       metersPerRoll: fabric.metersPerRoll,
       minWholesaleMeters: fabric.minWholesaleMeters,
       costVatOverride: fabric.costVatOverride,
+      deliveryType: fabric.deliveryType,
       ...(preserve
         ? {}
         : {
@@ -263,6 +297,7 @@ export async function updateMaterial(
     const { syncPrimarySupplierOfferFromMaterial } = await import(
       "@/server/domains/catalog/suppliers"
     );
+    const cargoUsdPerKg = deliveryRateUsdPerKg(fabric.deliveryType, globals);
     await syncPrimarySupplierOfferFromMaterial({
       materialId: material.id,
       supplierNameUk: data.supplierCode,
@@ -282,7 +317,8 @@ export async function updateMaterial(
       minWholesaleMeters:
         fabric.minWholesaleMeters != null ? Number(fabric.minWholesaleMeters) : null,
       wholesaleNote: fabric.wholesaleNote,
-      globals,
+      cargoUsdPerKg,
+      globals: globalsForDeliveryType(globals, fabric.deliveryType),
     });
   }
 

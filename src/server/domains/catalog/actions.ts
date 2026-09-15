@@ -29,6 +29,10 @@ import {
 import { prisma } from "@/server/db/client";
 import { materialFormSchema } from "@/server/domains/catalog/schemas";
 import {
+  normalizeFabricDeliveryType,
+  pricingSettingsRatePatch,
+} from "@/lib/fabric-delivery-types";
+import {
   decorationFormSchema,
   operationFormSchema,
 } from "@/server/domains/catalog/operation-schemas";
@@ -107,6 +111,7 @@ export async function getMaterialForEditAction(id: string) {
       minWholesaleMeters:
         row.minWholesaleMeters != null ? Number(row.minWholesaleMeters) : null,
       costVatOverride: row.costVatOverride,
+      deliveryType: row.deliveryType,
     },
   };
 }
@@ -216,7 +221,7 @@ export async function updateMaterialAvailableColorsAction(
   };
 }
 
-/** Persist course/cargo from the material form into shared PricingSettings. */
+/** Persist course/delivery rates from the material form into shared PricingSettings. */
 async function syncFabricGlobalsFromForm(formData: FormData) {
   const access = await getCurrentUserAccess();
   if (!access) return;
@@ -228,20 +233,36 @@ async function syncFabricGlobalsFromForm(formData: FormData) {
   }
 
   const usdUahRate = Number(formData.get("usdUahRate"));
-  const fabricCargoUsdPerKg = Number(formData.get("fabricCargoUsdPerKg"));
+  const deliveryRate = Number(formData.get("fabricCargoUsdPerKg"));
+  const deliveryType = normalizeFabricDeliveryType(formData.get("deliveryType"));
   if (!Number.isFinite(usdUahRate) || usdUahRate <= 0) return;
-  if (!Number.isFinite(fabricCargoUsdPerKg) || fabricCargoUsdPerKg < 0) return;
+  if (!Number.isFinite(deliveryRate) || deliveryRate < 0) return;
 
   const existing = await prisma.pricingSettings.findFirst();
   if (!existing) return;
 
+  const ratePatch = pricingSettingsRatePatch(deliveryType, deliveryRate);
+  const nextCargo =
+    ratePatch.fabricCargoUsdPerKg ?? Number(existing.fabricCargoUsdPerKg);
+  const nextNpStandard =
+    ratePatch.npStandardUsdPerKg ?? Number(existing.npStandardUsdPerKg ?? 0.4);
+  const nextNpVolume =
+    ratePatch.npVolumeUsdPerKg ?? Number(existing.npVolumeUsdPerKg ?? 0.8);
+
   const sameRate = Number(existing.usdUahRate) === usdUahRate;
-  const sameCargo = Number(existing.fabricCargoUsdPerKg) === fabricCargoUsdPerKg;
-  if (sameRate && sameCargo) return;
+  const sameCargo = Number(existing.fabricCargoUsdPerKg) === nextCargo;
+  const sameNpStandard = Number(existing.npStandardUsdPerKg ?? 0.4) === nextNpStandard;
+  const sameNpVolume = Number(existing.npVolumeUsdPerKg ?? 0.8) === nextNpVolume;
+  if (sameRate && sameCargo && sameNpStandard && sameNpVolume) return;
 
   await prisma.pricingSettings.update({
     where: { id: existing.id },
-    data: { usdUahRate, fabricCargoUsdPerKg },
+    data: {
+      usdUahRate,
+      fabricCargoUsdPerKg: nextCargo,
+      npStandardUsdPerKg: nextNpStandard,
+      npVolumeUsdPerKg: nextNpVolume,
+    },
   });
   await resyncFabricPurchasePrices();
 }
@@ -273,6 +294,7 @@ function materialFormData(formData: FormData) {
     metersPerRoll: formData.get("metersPerRoll"),
     minWholesaleMeters: formData.get("minWholesaleMeters"),
     costVatOverride: formData.get("costVatOverride") || null,
+    deliveryType: formData.get("deliveryType") || "CARGO",
   };
 }
 

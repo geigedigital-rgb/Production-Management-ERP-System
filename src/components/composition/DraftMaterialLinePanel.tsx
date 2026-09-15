@@ -81,14 +81,15 @@ export function DraftMaterialLinePanel({
   }, [row, quantitiesBySize]);
 
   if (!row) return null;
+  const line = row;
 
-  const showPricing = enablePricingControls && materialHasPricingControls(row);
-  const hasCut = row.priceMeterUahCutVat != null && row.priceMeterUahCutVat > 0;
-  const vatChosen = row.costVatMode != null;
-  const needsPriceMode = materialNeedsPriceModeChoice(row);
-  const priceModeMissing = needsPriceMode && !row.priceMode;
+  const showPricing = enablePricingControls && materialHasPricingControls(line);
+  const hasCut = line.priceMeterUahCutVat != null && line.priceMeterUahCutVat > 0;
+  const vatChosen = line.costVatMode != null;
+  const needsPriceMode = materialNeedsPriceModeChoice(line);
+  const priceModeMissing = needsPriceMode && !line.priceMode;
   const pricing = showPricing
-    ? resolveDraftMaterialPrice(row, quantitiesBySize, companyCostMode)
+    ? resolveDraftMaterialPrice(line, quantitiesBySize, companyCostMode)
     : null;
   const priceCaption =
     pricing?.hint ||
@@ -97,20 +98,20 @@ export function DraftMaterialLinePanel({
       : showPricing && priceModeMissing
         ? "оберіть режим ціни"
         : "");
-  const showColorPicker = enablePricingControls && draftMaterialNeedsColor(row);
-  const isFabric = row.materialType === "FABRIC";
-  const offers = row.supplierOffers ?? [];
-  const supplierMissing = showColorPicker && offers.length > 0 && !row.supplierId;
+  const showColorPicker = enablePricingControls && draftMaterialNeedsColor(line);
+  const isFabric = line.materialType === "FABRIC";
+  const offers = line.supplierOffers ?? [];
+  const supplierMissing = showColorPicker && offers.length > 0 && !line.supplierId;
   const colorMissing =
     showColorPicker &&
-    !row.lineColor?.trim() &&
-    (offers.length === 0 || Boolean(row.supplierId));
+    !line.lineColor?.trim() &&
+    (offers.length === 0 || Boolean(line.supplierId));
 
   const wholesaleThreshold = hasCut
-    ? row.minWholesaleMeters != null && row.minWholesaleMeters > 0
-      ? row.minWholesaleMeters
-      : row.metersPerRoll != null && row.metersPerRoll > 0
-        ? row.metersPerRoll
+    ? line.minWholesaleMeters != null && line.minWholesaleMeters > 0
+      ? line.minWholesaleMeters
+      : line.metersPerRoll != null && line.metersPerRoll > 0
+        ? line.metersPerRoll
         : null
     : null;
   const isWholesale =
@@ -126,44 +127,44 @@ export function DraftMaterialLinePanel({
           : null;
 
   const cargo =
-    row.cargoUsdPerKg != null && row.cargoUsdPerKg >= 0
-      ? row.cargoUsdPerKg
+    line.cargoUsdPerKg != null && line.cargoUsdPerKg >= 0
+      ? line.cargoUsdPerKg
       : (fabricGlobals?.fabricCargoUsdPerKg ?? 0);
   const rate =
-    row.usdUahRate != null && row.usdUahRate > 0
-      ? row.usdUahRate
+    line.usdUahRate != null && line.usdUahRate > 0
+      ? line.usdUahRate
       : (fabricGlobals?.usdUahRate ?? 0);
-  const metersPerKg = row.metersPerKg != null && row.metersPerKg > 0 ? row.metersPerKg : null;
+  const metersPerKg = line.metersPerKg != null && line.metersPerKg > 0 ? line.metersPerKg : null;
   const kgNeeded =
     metersPerKg != null && metersNeeded > 0
       ? round1(metersNeeded / metersPerKg)
       : null;
   const deliveryAuto =
     kgNeeded != null && cargo > 0 && rate > 0 ? round1(kgNeeded * cargo * rate) : 0;
-  const deliveryManual = Boolean(row.fabricDeliveryManual);
+  const deliveryManual = Boolean(line.fabricDeliveryManual);
   const deliveryInCalc = deliveryManual
-    ? Math.max(0, Number(row.fabricDeliveryAmount) || 0)
+    ? Math.max(0, Number(line.fabricDeliveryAmount) || 0)
     : deliveryAuto;
 
   function changeSupplier(next: string | null) {
     const color = reconcileColorForSupplier({
-      color: row.lineColor,
+      color: line.lineColor,
       supplierId: next,
       offers,
-      materialFallback: row.availableColors,
+      materialFallback: line.availableColors,
     });
     // Choosing supplier clears color if not in the new palette — user must confirm color.
-    const palette = colorsForSupplier(offers, next, row.availableColors);
+    const palette = colorsForSupplier(offers, next, line.availableColors);
     const keep =
-      color && row.lineColor && color.toLowerCase() === row.lineColor.trim().toLowerCase()
+      color && line.lineColor && color.toLowerCase() === line.lineColor.trim().toLowerCase()
         ? color
         : null;
     onChange({
       supplierId: next,
       lineColor: keep,
-      availableColors: palette.length > 0 ? palette : row.availableColors,
+      availableColors: palette.length > 0 ? palette : line.availableColors,
     });
-    if (palette.length > 0) onCatalogColorsChange?.(row.materialId, palette);
+    if (palette.length > 0) onCatalogColorsChange?.(line.materialId, palette);
   }
 
   return (

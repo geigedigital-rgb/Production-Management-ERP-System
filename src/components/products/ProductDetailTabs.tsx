@@ -61,7 +61,7 @@ export function ProductDetailTabs({
               ? showPricing
                 ? "Матеріали й операції для собівартості"
                 : "Склад виробу (без цін і калькуляції)"
-              : "Спільні тиражі: крій і прайс в одній таблиці"}
+              : "Тиражі з кроєм, прайсом і економікою партії під кожним рядком"}
           </p>
         </div>
         {tabs.length > 1 ? <SegmentedTabs items={tabs} active={effectiveTab} /> : null}

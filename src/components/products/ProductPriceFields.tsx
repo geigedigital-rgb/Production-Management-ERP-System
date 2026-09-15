@@ -23,6 +23,11 @@ export type TirageCostHint = {
   costPerUnit: number;
   sewingPerUnit: number;
   cutPerUnit: number;
+  /** Per-unit breakdown for the economics strip under each tirage row. */
+  materialsPerUnit?: number;
+  operationsPerUnit?: number;
+  additionalPerUnit?: number;
+  decorationsPerUnit?: number;
 };
 
 export function hintForQty(hints: TirageCostHint[] | undefined, qty: number): TirageCostHint | null {

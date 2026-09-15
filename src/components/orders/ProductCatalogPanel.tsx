@@ -38,6 +38,15 @@ export type ProductCompositionTemplate = {
     lineColor?: string | null;
     /** Palette from Material.availableColors for this line. */
     availableColors?: string[];
+    /** Per-supplier palettes (order draft). */
+    supplierOffers?: Array<{
+      supplierId: string;
+      supplierName: string;
+      isPrimary?: boolean;
+      availableColors: string[];
+    }>;
+    /** Selected supplier for color palette / terms. */
+    supplierId?: string | null;
     /** User confirmed row in the side panel (order draft only). */
     specReviewed?: boolean;
     /** Fabric delivery / cargo overrides for this draft line. */

@@ -67,7 +67,7 @@ export default async function PricingSettingsPage() {
                 </Select>
               </FormGroup>
 
-              <FormGroup label="Закупівля тканин (курс і карго)" columns={2}>
+              <FormGroup label="Закупівля тканин (курс і доставка)" columns={2}>
                 <Input
                   name="usdUahRate"
                   label="Курс доллара, грн"
@@ -79,12 +79,28 @@ export default async function PricingSettingsPage() {
                 />
                 <Input
                   name="fabricCargoUsdPerKg"
-                  label="Карго, $/кг"
+                  label="CARGO, $/кг"
                   type="number"
                   step="0.01"
                   min="0"
                   defaultValue={Number(pricing?.fabricCargoUsdPerKg ?? 1.7)}
-                  hint="Додається до ціни $/кг (не множник)"
+                  hint="Тип доставки на картці тканини"
+                />
+                <Input
+                  name="npStandardUsdPerKg"
+                  label="НП стандарт, $/кг"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={Number(pricing?.npStandardUsdPerKg ?? 0.4)}
+                />
+                <Input
+                  name="npVolumeUsdPerKg"
+                  label="НП обʼємні, $/кг"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={Number(pricing?.npVolumeUsdPerKg ?? 0.8)}
                 />
               </FormGroup>
 

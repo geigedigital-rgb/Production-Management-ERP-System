@@ -179,16 +179,28 @@ export function TR({
   children,
   className,
   muted,
+  style,
   onClick,
+  onDragOver,
+  onDrop,
+  onDragLeave,
 }: {
   children: React.ReactNode;
   className?: string;
   muted?: boolean;
+  style?: React.CSSProperties;
   onClick?: () => void;
+  onDragOver?: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  onDrop?: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  onDragLeave?: (event: React.DragEvent<HTMLTableRowElement>) => void;
 }) {
   return (
     <tr
       onClick={onClick}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragLeave={onDragLeave}
+      style={style}
       className={cn(
         "group border-b border-[var(--color-divider)] transition-colors last:border-0 hover:bg-[var(--color-surface-hover)]",
         muted && "text-[var(--color-text-tertiary)]",

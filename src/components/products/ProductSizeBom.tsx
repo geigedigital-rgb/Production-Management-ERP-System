@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, type CSSProperties, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   CellStack,
@@ -16,7 +16,7 @@ import {
   THead,
   TR,
 } from "@/components/ui/Table";
-import { IconTrash } from "@/components/ui/Icons";
+import { IconGrip, IconTrash } from "@/components/ui/Icons";
 import { formatMoneyUah, formatUnit, cn } from "@/lib/utils";
 import { CopySizeSpec, SizeScopeTabs } from "@/components/catalog/SizeScopeTabs";
 import { SizeBomScopeHint } from "@/components/catalog/SizeBomScopeHint";
@@ -40,6 +40,7 @@ import {
   copyProductSizeSpecAction,
   removeProductMaterialAction,
   removeProductOperationAction,
+  reorderProductBomAction,
   updateProductMaterialConsumptionAction,
   updateProductMaterialWasteAction,
   updateProductOperationRateAction,
@@ -59,6 +60,63 @@ import {
   type CutRateTier,
 } from "@/lib/cut-rate";
 
+function moveIdRelative(
+  ids: string[],
+  fromId: string,
+  targetId: string,
+  edge: "before" | "after",
+): string[] {
+  if (fromId === targetId) return ids;
+  const without = ids.filter((id) => id !== fromId);
+  let to = without.indexOf(targetId);
+  if (to < 0) return ids;
+  if (edge === "after") to += 1;
+  without.splice(to, 0, fromId);
+  return without;
+}
+
+function dropEdgeFromEvent(event: DragEvent<HTMLElement>): "before" | "after" {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+}
+
+function runWithReorderMotion(apply: () => void) {
+  const reduced =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const doc = typeof document !== "undefined" ? document : null;
+  if (!reduced && doc && "startViewTransition" in doc) {
+    (
+      doc as Document & { startViewTransition: (cb: () => void) => void }
+    ).startViewTransition(apply);
+    return;
+  }
+  apply();
+}
+
+function BomDragHandle({
+  disabled,
+  onDragStart,
+}: {
+  disabled?: boolean;
+  onDragStart: (event: DragEvent) => void;
+}) {
+  if (disabled) return null;
+  return (
+    <span
+      draggable
+      onDragStart={onDragStart}
+      onClick={(event) => event.preventDefault()}
+      className="inline-flex h-7 w-6 cursor-grab items-center justify-center rounded-[6px] text-[var(--color-text-secondary)] transition-colors active:cursor-grabbing hover:bg-[var(--color-primary-50)] hover:text-[var(--color-primary-700)]"
+      title="Перетягніть, щоб змінити порядок"
+      aria-label="Перемістити рядок"
+      role="button"
+      tabIndex={0}
+    >
+      <IconGrip size={15} />
+    </span>
+  );
+}
 type SizeOpt = { id: string; code: string; nameUk: string };
 type MaterialView = {
   id: string;
@@ -196,20 +254,53 @@ export function ProductSizeBom({
   const previewQty = useProductPreviewQty();
   const [pending, startTransition] = useTransition();
   const [sizeScope, setSizeScope] = useState<SizeScope>(ALL_SIZES);
+  const [materialIds, setMaterialIds] = useState(() => materials.map((row) => row.id));
+  const [operationIds, setOperationIds] = useState(() => operations.map((row) => row.id));
+  const [dragMaterialId, setDragMaterialId] = useState<string | null>(null);
+  const [dragOperationId, setDragOperationId] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{
+    kind: "materials" | "operations";
+    id: string;
+    edge: "before" | "after";
+  } | null>(null);
+
+  useEffect(() => {
+    setMaterialIds(materials.map((row) => row.id));
+  }, [materials]);
+  useEffect(() => {
+    setOperationIds(operations.map((row) => row.id));
+  }, [operations]);
+
   const sizeRefs = sizes.map((size) => ({ code: size.code, nameUk: size.nameUk }));
   const activeSize = sizes.find((size) => size.code === sizeScope);
   const sizeIdsForAdd = sizeScope === ALL_SIZES || !activeSize ? [] : [activeSize.id];
   const sizeLabelForAdd =
     sizeScope === ALL_SIZES || !activeSize ? undefined : activeSize.nameUk;
 
+  const materialsById = useMemo(
+    () => new Map(materials.map((row) => [row.id, row])),
+    [materials],
+  );
+  const operationsById = useMemo(
+    () => new Map(operations.map((row) => [row.id, row])),
+    [operations],
+  );
+  const orderedMaterials = materialIds
+    .map((id) => materialsById.get(id))
+    .filter((row): row is MaterialView => Boolean(row));
+  const orderedOperations = operationIds
+    .map((id) => operationsById.get(id))
+    .filter((row): row is OperationView => Boolean(row));
+
+  const canReorder = !readOnly && sizeScope === ALL_SIZES;
   const visibleMaterials =
     sizeScope === ALL_SIZES
-      ? materials
-      : materials.filter((row) => appliesToSize(row.sizeCodes, sizeScope));
+      ? orderedMaterials
+      : orderedMaterials.filter((row) => appliesToSize(row.sizeCodes, sizeScope));
   const visibleOperations =
     sizeScope === ALL_SIZES
-      ? operations
-      : operations.filter((row) => appliesToSize(row.sizeCodes, sizeScope));
+      ? orderedOperations
+      : orderedOperations.filter((row) => appliesToSize(row.sizeCodes, sizeScope));
   const customized = customizedSizeCodes({
     allCodes: sizes.map((size) => size.code),
     materials,
@@ -220,6 +311,56 @@ export function ProductSizeBom({
   const oversizeUplift = resolveOversizeUplift(sizeRules);
   const materialPct = Math.round((oversizeUplift.materialCoeff - 1) * 100);
   const operationPct = Math.round((oversizeUplift.operationCoeff - 1) * 100);
+
+  function persistBomOrder(kind: "materials" | "operations", orderedIds: string[]) {
+    startTransition(async () => {
+      await reorderProductBomAction({ productId, kind, orderedIds });
+      router.refresh();
+    });
+  }
+
+  function clearDrag() {
+    setDragMaterialId(null);
+    setDragOperationId(null);
+    setDropHint(null);
+  }
+
+  useEffect(() => {
+    if (!dragMaterialId && !dragOperationId) return;
+    function onDragEnd() {
+      clearDrag();
+    }
+    window.addEventListener("dragend", onDragEnd);
+    return () => window.removeEventListener("dragend", onDragEnd);
+  }, [dragMaterialId, dragOperationId]);
+
+  function previewMaterialDrop(targetId: string, edge: "before" | "after") {
+    if (!canReorder || !dragMaterialId) return;
+    setDropHint({ kind: "materials", id: targetId, edge });
+  }
+
+  function previewOperationDrop(targetId: string, edge: "before" | "after") {
+    if (!canReorder || !dragOperationId) return;
+    setDropHint({ kind: "operations", id: targetId, edge });
+  }
+
+  function dropMaterialOn(targetId: string, edge: "before" | "after") {
+    if (!canReorder || !dragMaterialId) return;
+    const next = moveIdRelative(materialIds, dragMaterialId, targetId, edge);
+    clearDrag();
+    if (next.join() === materialIds.join()) return;
+    runWithReorderMotion(() => setMaterialIds(next));
+    persistBomOrder("materials", next);
+  }
+
+  function dropOperationOn(targetId: string, edge: "before" | "after") {
+    if (!canReorder || !dragOperationId) return;
+    const next = moveIdRelative(operationIds, dragOperationId, targetId, edge);
+    clearDrag();
+    if (next.join() === operationIds.join()) return;
+    runWithReorderMotion(() => setOperationIds(next));
+    persistBomOrder("operations", next);
+  }
 
   function saveConsumption(id: string, consumption: number) {
     const formData = new FormData();
@@ -343,6 +484,7 @@ export function ProductSizeBom({
         />
         <Table>
           <THead>
+            {canReorder ? <TH width="36px" /> : null}
             <TH className="min-w-[12rem] w-[38%]">Матеріал</TH>
             <TH align="right">Норма / виріб</TH>
             {!hideCosts ? <TH align="right">Відходи</TH> : null}
@@ -353,7 +495,7 @@ export function ProductSizeBom({
           <TBody>
             {visibleMaterials.length === 0 ? (
               <TableEmpty
-                colSpan={2 + (hideCosts ? 0 : 3) + (readOnly ? 0 : 1)}
+                colSpan={2 + (canReorder ? 1 : 0) + (hideCosts ? 0 : 3) + (readOnly ? 0 : 1)}
                 title={
                   sizeScope === ALL_SIZES
                     ? "Матеріалів ще немає"
@@ -393,7 +535,68 @@ export function ProductSizeBom({
                 const autoFromBase = scopeIsOversize && !hasSizeNorm;
                 const specHint = materialOptionDescription(row.densityGsm, row.composition);
                 return (
-                  <TR key={row.id}>
+                  <TR
+                    key={row.id}
+                    style={
+                      canReorder
+                        ? ({ viewTransitionName: `bom-m-${row.id}` } as CSSProperties)
+                        : undefined
+                    }
+                    className={cn(
+                      canReorder && "bom-sortable",
+                      dragMaterialId === row.id && "bom-dragging",
+                      dropHint?.kind === "materials" &&
+                        dropHint.id === row.id &&
+                        dropHint.edge === "before" &&
+                        "bom-drop-before",
+                      dropHint?.kind === "materials" &&
+                        dropHint.id === row.id &&
+                        dropHint.edge === "after" &&
+                        "bom-drop-after",
+                    )}
+                    onDragOver={
+                      canReorder
+                        ? (event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                            previewMaterialDrop(row.id, dropEdgeFromEvent(event));
+                          }
+                        : undefined
+                    }
+                    onDragLeave={
+                      canReorder
+                        ? (event) => {
+                            if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                            setDropHint((prev) =>
+                              prev?.kind === "materials" && prev.id === row.id ? null : prev,
+                            );
+                          }
+                        : undefined
+                    }
+                    onDrop={
+                      canReorder
+                        ? (event) => {
+                            event.preventDefault();
+                            const edge =
+                              dropHint?.kind === "materials" && dropHint.id === row.id
+                                ? dropHint.edge
+                                : dropEdgeFromEvent(event);
+                            dropMaterialOn(row.id, edge);
+                          }
+                        : undefined
+                    }
+                  >
+                    {canReorder ? (
+                      <TD className="!px-1 align-middle">
+                        <BomDragHandle
+                          onDragStart={(event) => {
+                            setDragMaterialId(row.id);
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", row.id);
+                          }}
+                        />
+                      </TD>
+                    ) : null}
                     <TD title={row.name} className="min-w-[12rem] w-[38%] align-top">
                       <div className="space-y-1">
                         <div className="min-w-0">
@@ -545,7 +748,10 @@ export function ProductSizeBom({
           {materials.length > 0 && !hideCosts ? (
             <TFoot>
               <tr>
-                <TD colSpan={4} className="text-[var(--color-text-secondary)]">
+                <TD
+                  colSpan={4 + (canReorder ? 1 : 0)}
+                  className="text-[var(--color-text-secondary)]"
+                >
                   Матеріали разом / од.
                 </TD>
                 <TD numeric>{formatMoneyUah(materialsSubtotal)}</TD>
@@ -581,6 +787,7 @@ export function ProductSizeBom({
         />
         <Table>
           <THead>
+            {canReorder ? <TH width="36px" /> : null}
             <TH>Операція</TH>
             <TH>Метод</TH>
             {!hideCosts ? <TH align="right">Вартість / од.</TH> : null}
@@ -589,7 +796,7 @@ export function ProductSizeBom({
           <TBody>
             {visibleOperations.length === 0 ? (
               <TableEmpty
-                colSpan={4}
+                colSpan={2 + (canReorder ? 1 : 0) + (hideCosts ? 0 : 1) + (readOnly ? 0 : 1)}
                 title={
                   sizeScope === ALL_SIZES ? "Операцій ще немає" : "Немає операцій для цього розміру"
                 }
@@ -599,7 +806,68 @@ export function ProductSizeBom({
               visibleOperations.map((row) => {
                 const cutCell = row.isCut ? formatCutCostCell(row, previewQty, cutRateContext) : null;
                 return (
-                <TR key={row.id}>
+                <TR
+                  key={row.id}
+                  style={
+                    canReorder
+                      ? ({ viewTransitionName: `bom-o-${row.id}` } as CSSProperties)
+                      : undefined
+                  }
+                  className={cn(
+                    canReorder && "bom-sortable",
+                    dragOperationId === row.id && "bom-dragging",
+                    dropHint?.kind === "operations" &&
+                      dropHint.id === row.id &&
+                      dropHint.edge === "before" &&
+                      "bom-drop-before",
+                    dropHint?.kind === "operations" &&
+                      dropHint.id === row.id &&
+                      dropHint.edge === "after" &&
+                      "bom-drop-after",
+                  )}
+                  onDragOver={
+                    canReorder
+                      ? (event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                          previewOperationDrop(row.id, dropEdgeFromEvent(event));
+                        }
+                      : undefined
+                  }
+                  onDragLeave={
+                    canReorder
+                      ? (event) => {
+                          if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                          setDropHint((prev) =>
+                            prev?.kind === "operations" && prev.id === row.id ? null : prev,
+                          );
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    canReorder
+                      ? (event) => {
+                          event.preventDefault();
+                          const edge =
+                            dropHint?.kind === "operations" && dropHint.id === row.id
+                              ? dropHint.edge
+                              : dropEdgeFromEvent(event);
+                          dropOperationOn(row.id, edge);
+                        }
+                      : undefined
+                  }
+                >
+                  {canReorder ? (
+                    <TD className="!px-1 align-middle">
+                      <BomDragHandle
+                        onDragStart={(event) => {
+                          setDragOperationId(row.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", row.id);
+                        }}
+                      />
+                    </TD>
+                  ) : null}
                   <TD className="min-w-0">
                     <CellStack
                       title={row.name}
@@ -706,15 +974,21 @@ export function ProductSizeBom({
           {operations.length > 0 && !hideCosts ? (
             <TFoot>
               <tr>
-                <TD colSpan={2} className="text-[var(--color-text-secondary)]">
+                <TD
+                  colSpan={2 + (canReorder ? 1 : 0)}
+                  className="text-[var(--color-text-secondary)]"
+                >
                   {hasCutOperation ? "Операції без крою / од." : "Операції разом / од."}
                 </TD>
                 <TD numeric>{formatMoneyUah(operationsSubtotal)}</TD>
-                <TD />
+                {!readOnly ? <TD /> : null}
               </tr>
               {hasCutOperation ? (
                 <tr>
-                  <TD colSpan={2} className="text-[var(--color-text-secondary)]">
+                  <TD
+                    colSpan={2 + (canReorder ? 1 : 0)}
+                    className="text-[var(--color-text-secondary)]"
+                  >
                     Крій
                   </TD>
                   <TD numeric className="font-medium">
@@ -725,7 +999,7 @@ export function ProductSizeBom({
                       return cell.primary;
                     })()}
                   </TD>
-                  <TD />
+                  {!readOnly ? <TD /> : null}
                 </tr>
               ) : null}
             </TFoot>

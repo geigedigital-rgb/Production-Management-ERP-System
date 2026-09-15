@@ -36,6 +36,7 @@ import { formatDateUk, formatMoneyUah, formatUnit } from "@/lib/utils";
 import { materialOptionDescription } from "@/lib/material-catalog-options";
 import { formatSizeRun, lineCostOnSizes, uniqueBomCount } from "@/lib/size-bom";
 import { fabricMetersNeeded } from "@/lib/fabric-pricing";
+import { deliveryRateUsdPerKg } from "@/lib/fabric-delivery-types";
 import {
   accessHas,
   canEditOrderComposition,
@@ -280,7 +281,7 @@ export default async function OrderDetailPage({
         cargoUsdPerKg:
           row.cargoUsdPerKg != null
             ? Number(row.cargoUsdPerKg)
-            : fabricGlobals.fabricCargoUsdPerKg,
+            : deliveryRateUsdPerKg(row.material?.deliveryType, fabricGlobals),
         usdUahRate:
           row.usdUahRate != null ? Number(row.usdUahRate) : fabricGlobals.usdUahRate,
         kgNeeded,
@@ -850,7 +851,11 @@ export default async function OrderDetailPage({
               id: operation.id,
               label: operation.nameUk,
             }))}
-            unitOptions={units.map((unit) => ({ id: unit.id, label: unit.nameUk }))}
+            unitOptions={units.map((unit) => ({
+              id: unit.id,
+              label: unit.nameUk,
+              code: unit.code,
+            }))}
             materialsSubtotal={Number(calc.materialsSubtotal)}
             operationsSubtotal={Number(calc.operationsSubtotal)}
             decorationsSubtotal={Number(calc.decorationsSubtotal)}

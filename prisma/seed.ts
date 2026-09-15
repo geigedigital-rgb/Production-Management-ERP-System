@@ -443,7 +443,7 @@ async function main() {
   });
 
   const units = [
-    { code: "m", nameUk: "м" },
+    { code: "m", nameUk: "м.п." },
     { code: "m2", nameUk: "м²" },
     { code: "pcs", nameUk: "шт" },
     { code: "kg", nameUk: "кг" },
@@ -492,6 +492,8 @@ async function main() {
       roundingRule: "ROUND_2",
       usdUahRate: 45,
       fabricCargoUsdPerKg: 1.7,
+      npStandardUsdPerKg: 0.4,
+      npVolumeUsdPerKg: 0.8,
       inputVatRatePercent: 20,
       materialCostVatMode: "NET",
     },

@@ -3,6 +3,7 @@ import {
   resolveCargoUsdPerKg,
   type FabricPricingGlobals,
 } from "@/lib/fabric-pricing";
+import { deliveryRateUsdPerKg } from "@/lib/fabric-delivery-types";
 
 export type FabricDeliveryMaterialSource = {
   type?: string | null;
@@ -11,6 +12,8 @@ export type FabricDeliveryMaterialSource = {
   priceKgUsdCargo?: number | null;
   /** Explicit cargo override ($/kg) for this line. */
   cargoUsdPerKg?: number | null;
+  /** Material catalog delivery type — used when cargoUsdPerKg is unset. */
+  deliveryType?: string | null;
   /** Explicit USD/UAH rate override for this line. */
   usdUahRate?: number | null;
   consumptionPerUnit: number;
@@ -28,11 +31,17 @@ function round1(value: number) {
 }
 
 function resolveLineCargoUsdPerKg(
-  row: Pick<FabricDeliveryMaterialSource, "priceKgUsd" | "priceKgUsdCargo" | "cargoUsdPerKg">,
+  row: Pick<
+    FabricDeliveryMaterialSource,
+    "priceKgUsd" | "priceKgUsdCargo" | "cargoUsdPerKg" | "deliveryType"
+  >,
   globals: FabricPricingGlobals,
 ): number {
   const explicit = num(row.cargoUsdPerKg);
   if (explicit != null) return explicit;
+  if (row.deliveryType) {
+    return deliveryRateUsdPerKg(row.deliveryType, globals);
+  }
   return resolveCargoUsdPerKg(
     { priceKgUsd: row.priceKgUsd, priceKgUsdCargo: row.priceKgUsdCargo },
     globals,

@@ -32,6 +32,8 @@ export default async function MaterialsSettingsPage({
   let fabricGlobals: Awaited<ReturnType<typeof getFabricPricingGlobals>> = {
     usdUahRate: 45,
     fabricCargoUsdPerKg: 1.7,
+    npStandardUsdPerKg: 0.4,
+    npVolumeUsdPerKg: 0.8,
     materialCostVatMode: "NET",
   };
   let dbError = false;
@@ -71,7 +73,7 @@ export default async function MaterialsSettingsPage({
     accessHas(access, "createInlineCatalog") ||
     accessHas(access, "manageCatalogs");
   const canDelete = accessHas(access, "archiveRecords");
-  const unitOptions = units.map((u) => ({ id: u.id, label: u.nameUk }));
+  const unitOptions = units.map((u) => ({ id: u.id, label: u.nameUk, code: u.code }));
   const suppliers = [
     ...new Set(
       materials

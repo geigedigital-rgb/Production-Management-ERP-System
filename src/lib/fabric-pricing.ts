@@ -1,9 +1,21 @@
+import {
+  DEFAULT_FABRIC_DELIVERY_RATES,
+  type FabricDeliveryRateGlobals,
+} from "@/lib/fabric-delivery-types";
+
 export type MaterialCostVatMode = "NET" | "GROSS";
 
-export type FabricPricingGlobals = {
+export type FabricPricingGlobals = FabricDeliveryRateGlobals & {
   usdUahRate: number;
-  fabricCargoUsdPerKg: number;
   materialCostVatMode: MaterialCostVatMode;
+};
+
+export const DEFAULT_FABRIC_PRICING_GLOBALS: FabricPricingGlobals = {
+  usdUahRate: 45,
+  fabricCargoUsdPerKg: DEFAULT_FABRIC_DELIVERY_RATES.CARGO,
+  npStandardUsdPerKg: DEFAULT_FABRIC_DELIVERY_RATES.NP_STANDARD,
+  npVolumeUsdPerKg: DEFAULT_FABRIC_DELIVERY_RATES.NP_VOLUME,
+  materialCostVatMode: "NET",
 };
 
 export type FabricPriceInputs = {
@@ -78,6 +90,64 @@ export function metersPerRollFromWeight(
   const mpk = num(metersPerKg);
   if (weight == null || mpk == null) return null;
   return round1(weight * mpk);
+}
+
+/** First positive number in free-text catalog fields (e.g. "170 г/м²", "180 см"). */
+export function parsePositiveMeasure(value: string | number | null | undefined): number | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") return num(value) != null && value > 0 ? value : null;
+  const match = String(value).replace(",", ".").match(/(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Classic textile conversion: м.п. in 1 kg = 100_000 / (gsm × width_cm).
+ * gsm = г/м², width in cm.
+ */
+export function metersPerKgFromDensityWidth(
+  densityGsm: string | number | null | undefined,
+  widthCm: string | number | null | undefined,
+): number | null {
+  const gsm = parsePositiveMeasure(densityGsm);
+  const width = parsePositiveMeasure(widthCm);
+  if (gsm == null || width == null) return null;
+  return round1(100_000 / (gsm * width));
+}
+
+/** ₴/м.п. = ₴/м² × ширина(м) = ₴/м² × (ширина_см / 100). */
+export function linearMeterPriceFromSquareMeter(
+  pricePerM2: number | null | undefined,
+  widthCm: string | number | null | undefined,
+): number | null {
+  const price = num(pricePerM2);
+  const width = parsePositiveMeasure(widthCm);
+  if (price == null || width == null) return null;
+  return round1(price * (width / 100));
+}
+
+/** Reverse of linearMeterPriceFromSquareMeter. */
+export function squareMeterPriceFromLinearMeter(
+  pricePerMeter: number | null | undefined,
+  widthCm: string | number | null | undefined,
+): number | null {
+  const price = num(pricePerMeter);
+  const width = parsePositiveMeasure(widthCm);
+  if (price == null || width == null || width <= 0) return null;
+  return round1(price / (width / 100));
+}
+
+/** Purchase / BOM unit mode for fabric catalog forms. */
+export type FabricUnitMode = "m" | "kg" | "m2" | "pcs" | "cone";
+
+export function resolveFabricUnitMode(code: string | null | undefined): FabricUnitMode {
+  const normalized = (code ?? "").trim().toLowerCase();
+  if (normalized === "kg") return "kg";
+  if (normalized === "m2" || normalized === "m²") return "m2";
+  if (normalized === "pcs" || normalized === "шт") return "pcs";
+  if (normalized === "cone" || normalized === "бобіна") return "cone";
+  return "m";
 }
 
 export function resolveCostMode(

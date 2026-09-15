@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -12,7 +12,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump when Prisma schema changes so dev HMR does not keep a stale client.
  * Also bump after `prisma generate` if a previous bump raced ahead of generation.
  */
-const PRISMA_CLIENT_VERSION = "20260910140000_screen_print_v1";
+const PRISMA_CLIENT_VERSION = "20260915150000_product_bom_sort_order";
 
 function clientHasCurrentDelegates(client: PrismaClient | undefined): boolean {
   if (!client) return false;
@@ -41,24 +41,61 @@ if (shouldRecreateClient()) {
   void stalePool?.end().catch(() => undefined);
 }
 
+/**
+ * Prisma's pg adapter can fire concurrent queries on one PoolClient inside
+ * transactions / nested includes. pg@8.20+ warns; pg@9 will throw.
+ * Serialize query() on each checked-out client — pool-level parallelism stays.
+ */
+function serializeClientQueries(client: PoolClient): PoolClient {
+  const originalQuery = client.query.bind(client) as (...args: unknown[]) => unknown;
+  let tail: Promise<unknown> = Promise.resolve();
+
+  const serialized = ((...args: unknown[]) => {
+    const run = () => originalQuery(...args);
+    const result = tail.then(run, run);
+    tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }) as typeof client.query;
+
+  client.query = serialized;
+  return client;
+}
+
+function createPool(connectionString: string): Pool {
+  const pool = new Pool({
+    connectionString,
+    max: 10,
+    // Fail fast instead of hanging the whole Next request forever.
+    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis: 30_000,
+    ssl: connectionString.includes("supabase.com")
+      ? { rejectUnauthorized: false }
+      : undefined,
+  });
+
+  const connect = pool.connect.bind(pool);
+  pool.connect = ((onConnect?: (err: Error | undefined, client?: PoolClient) => void) => {
+    if (typeof onConnect === "function") {
+      return connect((err, client) => {
+        onConnect(err, client ? serializeClientQueries(client) : client);
+      });
+    }
+    return connect().then(serializeClientQueries);
+  }) as typeof pool.connect;
+
+  return pool;
+}
+
 function createPrismaClient() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set");
   }
 
-  const pool =
-    globalForPrisma.pgPool ??
-    new Pool({
-      connectionString,
-      max: 10,
-      // Fail fast instead of hanging the whole Next request forever.
-      connectionTimeoutMillis: 10_000,
-      idleTimeoutMillis: 30_000,
-      ssl: connectionString.includes("supabase.com")
-        ? { rejectUnauthorized: false }
-        : undefined,
-    });
+  const pool = globalForPrisma.pgPool ?? createPool(connectionString);
 
   if (process.env.NODE_ENV !== "production") {
     globalForPrisma.pgPool = pool;

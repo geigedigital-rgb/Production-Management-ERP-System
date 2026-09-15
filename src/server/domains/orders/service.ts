@@ -45,6 +45,10 @@ import {
   type MaterialCostVatMode,
 } from "@/lib/fabric-pricing";
 import { getFabricPricingGlobals } from "@/server/domains/catalog/materials";
+import {
+  deliveryRateUsdPerKg,
+  type FabricDeliveryTypeCode,
+} from "@/lib/fabric-delivery-types";
 
 type FabricMaterialFields = {
   type?: string | null;
@@ -58,6 +62,7 @@ type FabricMaterialFields = {
   metersPerRoll?: { toString(): string } | number | null;
   minWholesaleMeters?: { toString(): string } | number | null;
   costVatOverride?: MaterialCostVatMode | null;
+  deliveryType?: FabricDeliveryTypeCode | string | null;
 };
 
 function numField(value: { toString(): string } | number | null | undefined): number | null {
@@ -198,7 +203,7 @@ function previewFabricLineTerms(input: {
     input.cargoOverride ??
     numField(input.row.cargoUsdPerKg) ??
     (input.offer ? numField(input.offer.cargoUsdPerKg) : null) ??
-    input.globals.fabricCargoUsdPerKg;
+    deliveryRateUsdPerKg(input.material.deliveryType, input.globals);
   const usdUahRate =
     input.usdUahRateOverride ??
     numField(input.row.usdUahRate) ??
@@ -290,6 +295,7 @@ function fabricDeliverySourceForLine(input: {
     priceKgUsd: merged.priceKgUsd,
     priceKgUsdCargo: merged.priceKgUsdCargo,
     cargoUsdPerKg: cargoOverride,
+    deliveryType: input.material.deliveryType ?? null,
     usdUahRate: usdUahRateOverride,
     consumptionPerUnit: Number(input.row.consumptionPerUnit),
     wastePercent: Number(input.row.wastePercent),
@@ -393,6 +399,8 @@ export async function getOrder(id: string) {
                   metersPerRoll: true,
                   minWholesaleMeters: true,
                   costVatOverride: true,
+                  deliveryType: true,
+                  wholesaleNote: true,
                   supplierOffers: {
                     include: {
                       supplier: { select: { id: true, nameUk: true } },
@@ -1448,7 +1456,7 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
     cargoUsdPerKg:
       numField(row.cargoUsdPerKg) ??
       activePreview?.cargoUsdPerKg ??
-      globals.fabricCargoUsdPerKg,
+      deliveryRateUsdPerKg(row.material.deliveryType, globals),
     fabricDeliveryAmount: Number(row.fabricDeliveryAmount),
     fabricDeliveryComputed: Number(
       row.fabricDeliveryComputed ?? activePreview?.deliveryAmount ?? 0,
@@ -1472,7 +1480,7 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       activePreview?.usdUahRate ??
       globals.usdUahRate,
     defaultUsdUahRate: globals.usdUahRate,
-    defaultCargoUsdPerKg: globals.fabricCargoUsdPerKg,
+    defaultCargoUsdPerKg: deliveryRateUsdPerKg(row.material.deliveryType, globals),
     offers,
     catalogPreview,
   };

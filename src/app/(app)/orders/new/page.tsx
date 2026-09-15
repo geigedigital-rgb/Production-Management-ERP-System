@@ -62,7 +62,8 @@ export default async function NewOrderPage({
         }))}
         unitOptions={units.map((unit) => ({
           id: unit.id,
-          label: `${unit.nameUk} (${unit.code})`,
+          label: unit.nameUk,
+          code: unit.code,
         }))}
         materialCatalog={materials.map((material) => ({
           id: material.id,

@@ -31,11 +31,52 @@ import { FABRIC_COMPOSITIONS, COMPOSITION_OTHER } from "@/lib/fabric-composition
 import { FABRIC_KINDS, FABRIC_KIND_OTHER, normalizeFabricKind } from "@/lib/fabric-kinds";
 import {
   deriveFabricPricing,
+  linearMeterPriceFromSquareMeter,
+  metersPerKgFromDensityWidth,
+  resolveFabricUnitMode,
+  squareMeterPriceFromLinearMeter,
+  DEFAULT_FABRIC_PRICING_GLOBALS,
   type FabricPricingGlobals,
+  type FabricUnitMode,
 } from "@/lib/fabric-pricing";
+import {
+  FABRIC_DELIVERY_TYPES,
+  deliveryRateUsdPerKg,
+  fabricDeliveryTypeLabel,
+  normalizeFabricDeliveryType,
+  type FabricDeliveryTypeCode,
+} from "@/lib/fabric-delivery-types";
 import { formatMoneyUah } from "@/lib/utils";
 
-type UnitOption = { id: string; label: string };
+type UnitOption = { id: string; label: string; code?: string };
+
+function resolveUnitCode(unit: UnitOption | undefined): string {
+  if (!unit) return "m";
+  if (unit.code?.trim()) return unit.code.trim().toLowerCase();
+  const fromLabel = unit.label.match(/\(([a-z0-9]+)\)\s*$/i);
+  if (fromLabel) return fromLabel[1].toLowerCase();
+  const label = unit.label.toLowerCase();
+  if (label.includes("кг") || label.includes("kg")) return "kg";
+  if (label.includes("м²") || label.includes("m2") || label.includes("м2")) return "m2";
+  if (label.includes("боб") || label.includes("cone")) return "cone";
+  if (label.includes("шт") || label.includes("pcs")) return "pcs";
+  return "m";
+}
+
+function fabricUnitHint(mode: FabricUnitMode): string {
+  switch (mode) {
+    case "kg":
+      return "Купівля в кг → система переводить у ₴/м.п. для виробу й замовлення. Обовʼязково м.п./кг (або щільність + ширина).";
+    case "m2":
+      return "Купівля в м² → ₴/м.п. = ₴/м² × ширина(м). У складі виробу норма лишається в метрах погонних.";
+    case "pcs":
+      return "Од. виміру «шт»: собівартість і норма в складі — у штуках. Карго/м.п. для тканин не застосовуються.";
+    case "cone":
+      return "Од. виміру «бобіна»: собівартість і норма в складі — за бобіну. Для рулонної тканини краще м.п. або кг.";
+    default:
+      return "Купівля в м.п. · у виробі/замовленні витрата теж у метрах. м.п./кг потрібне для доставки (кг) і авто м.п./рул.";
+  }
+}
 
 export type MaterialFormDefaults = {
   id: string;
@@ -63,6 +104,7 @@ export type MaterialFormDefaults = {
   metersPerRoll?: number | null;
   minWholesaleMeters?: number | null;
   costVatOverride?: "NET" | "GROSS" | null;
+  deliveryType?: FabricDeliveryTypeCode | null;
 };
 
 function numStr(value: number | null | undefined) {
@@ -165,6 +207,9 @@ function MaterialFields({
 
   const initialSupplier = resolveSupplierSelect(defaults?.supplierCode, knownSuppliers);
   const [type, setType] = useState(defaults?.type ?? "FABRIC");
+  const [unitOfMeasureId, setUnitOfMeasureId] = useState(
+    defaults?.unitOfMeasureId ?? units[0]?.id ?? "",
+  );
   const [compositionSelect, setCompositionSelect] = useState(() =>
     resolveCompositionSelect(defaults?.composition, [
       ...FABRIC_COMPOSITIONS,
@@ -185,11 +230,22 @@ function MaterialFields({
   const [densityGsm, setDensityGsm] = useState(defaults?.densityGsm ?? "");
   const [widthCm, setWidthCm] = useState(defaults?.widthCm ?? "");
   const [metersPerKg, setMetersPerKg] = useState(numStr(defaults?.metersPerKg));
+  const [metersPerKgManual, setMetersPerKgManual] = useState(
+    () => defaults?.metersPerKg != null && Number(defaults.metersPerKg) > 0,
+  );
   const [priceKgUsd, setPriceKgUsd] = useState(numStr(defaults?.priceKgUsd));
   const [priceKgUsdVat, setPriceKgUsdVat] = useState(numStr(defaults?.priceKgUsdVat));
   const [priceMeterNoVat, setPriceMeterNoVat] = useState(numStr(defaults?.priceMeterUahNoVat));
   const [priceMeterVat, setPriceMeterVat] = useState(numStr(defaults?.priceMeterUahVat));
   const [priceMeterCutVat, setPriceMeterCutVat] = useState(numStr(defaults?.priceMeterUahCutVat));
+  const [priceM2NoVat, setPriceM2NoVat] = useState(() =>
+    numStr(
+      squareMeterPriceFromLinearMeter(defaults?.priceMeterUahNoVat, defaults?.widthCm),
+    ),
+  );
+  const [priceM2Vat, setPriceM2Vat] = useState(() =>
+    numStr(squareMeterPriceFromLinearMeter(defaults?.priceMeterUahVat, defaults?.widthCm)),
+  );
   const [minWholesaleMeters, setMinWholesaleMeters] = useState(
     numStr(defaults?.minWholesaleMeters),
   );
@@ -197,13 +253,34 @@ function MaterialFields({
   const [wholesaleNote, setWholesaleNote] = useState(defaults?.wholesaleNote ?? "");
   const [note, setNote] = useState(defaults?.note ?? "");
   const [costOverride, setCostOverride] = useState(defaults?.costVatOverride ?? "");
-  const [fabricCargoUsdPerKg, setFabricCargoUsdPerKg] = useState(
-    String(fabricGlobals.fabricCargoUsdPerKg),
+  const [deliveryType, setDeliveryType] = useState<FabricDeliveryTypeCode>(
+    normalizeFabricDeliveryType(defaults?.deliveryType),
+  );
+  const [fabricCargoUsdPerKg, setFabricCargoUsdPerKg] = useState(() =>
+    String(
+      deliveryRateUsdPerKg(normalizeFabricDeliveryType(defaults?.deliveryType), fabricGlobals),
+    ),
   );
 
   const [purchasePrice, setPurchasePrice] = useState(String(defaults?.purchasePrice ?? 0));
 
-  const pricingInline = type === "FABRIC" && !managePricingSeparately;
+  const selectedUnit = units.find((unit) => unit.id === unitOfMeasureId) ?? units[0];
+  const fabricUnitMode = resolveFabricUnitMode(resolveUnitCode(selectedUnit));
+  const fabricMeterPricing =
+    type === "FABRIC" && (fabricUnitMode === "m" || fabricUnitMode === "kg" || fabricUnitMode === "m2");
+  const fabricEachPricing =
+    type === "FABRIC" && (fabricUnitMode === "pcs" || fabricUnitMode === "cone");
+  const pricingInline = fabricMeterPricing && !managePricingSeparately;
+  const showRollParams = type === "FABRIC" && fabricMeterPricing;
+  const metersPerKgRequired = type === "FABRIC" && fabricUnitMode === "kg";
+  const widthRequiredForM2 = type === "FABRIC" && fabricUnitMode === "m2";
+  const autoMetersPerKg = metersPerKgFromDensityWidth(densityGsm, widthCm);
+  const metersPerRollReady = Boolean(
+    metersPerKg &&
+      Number(metersPerKg) > 0 &&
+      rollWeightKg &&
+      Number(rollWeightKg) > 0,
+  );
 
   const liveGlobals = useMemo<FabricPricingGlobals>(
     () => ({
@@ -211,10 +288,17 @@ function MaterialFields({
       fabricCargoUsdPerKg:
         Number(fabricCargoUsdPerKg) >= 0
           ? Number(fabricCargoUsdPerKg)
-          : fabricGlobals.fabricCargoUsdPerKg,
+          : deliveryRateUsdPerKg(deliveryType, fabricGlobals),
     }),
-    [fabricGlobals, fabricCargoUsdPerKg],
+    [fabricGlobals, fabricCargoUsdPerKg, deliveryType],
   );
+
+  function applyDeliveryType(nextType: FabricDeliveryTypeCode) {
+    setDeliveryType(nextType);
+    const rate = deliveryRateUsdPerKg(nextType, fabricGlobals);
+    setFabricCargoUsdPerKg(String(rate));
+    recalcMeterPrices({ fabricCargoUsdPerKg: String(rate) });
+  }
 
   const derived = useMemo(
     () =>
@@ -245,6 +329,47 @@ function MaterialFields({
       liveGlobals,
     ],
   );
+
+  function applyMetersPerKg(value: string, opts?: { fromAuto?: boolean }) {
+    setMetersPerKg(value);
+    if (opts?.fromAuto) {
+      // keep manual flag as-is when syncing from density/width only if empty before
+    } else {
+      setMetersPerKgManual(Boolean(value.trim()));
+    }
+    if (pricingInline) recalcMeterPrices({ metersPerKg: value });
+  }
+
+  function syncMetersPerKgFromDensity(
+    nextDensity: string,
+    nextWidth: string,
+    force = false,
+  ) {
+    const auto = metersPerKgFromDensityWidth(nextDensity, nextWidth);
+    if (auto == null) return;
+    if (!force && metersPerKgManual && metersPerKg.trim()) return;
+    applyMetersPerKg(String(auto), { fromAuto: true });
+    setMetersPerKgManual(false);
+  }
+
+  function applyM2Prices(next: {
+    priceM2NoVat?: string;
+    priceM2Vat?: string;
+    widthCm?: string;
+  }) {
+    const width = next.widthCm ?? widthCm;
+    const noVatRaw = next.priceM2NoVat ?? priceM2NoVat;
+    const vatRaw = next.priceM2Vat ?? priceM2Vat;
+    if (next.priceM2NoVat != null) setPriceM2NoVat(next.priceM2NoVat);
+    if (next.priceM2Vat != null) setPriceM2Vat(next.priceM2Vat);
+    const linearNoVat = linearMeterPriceFromSquareMeter(
+      noVatRaw ? Number(noVatRaw) : null,
+      width,
+    );
+    const linearVat = linearMeterPriceFromSquareMeter(vatRaw ? Number(vatRaw) : null, width);
+    if (linearNoVat != null) setPriceMeterNoVat(String(linearNoVat));
+    if (linearVat != null) setPriceMeterVat(String(linearVat));
+  }
 
   function recalcMeterPrices(next: {
     fabricCargoUsdPerKg?: string;
@@ -290,15 +415,18 @@ function MaterialFields({
 
   const purchaseDisplay =
     type === "FABRIC"
-      ? managePricingSeparately
-        ? String(defaults?.purchasePrice ?? purchasePrice)
-        : derived.purchasePrice > 0
-          ? String(derived.purchasePrice)
-          : purchasePrice
+      ? fabricEachPricing
+        ? purchasePrice
+        : managePricingSeparately
+          ? String(defaults?.purchasePrice ?? purchasePrice)
+          : derived.purchasePrice > 0
+            ? String(derived.purchasePrice)
+            : purchasePrice
       : purchasePrice;
 
   const policyLabel =
     liveGlobals.materialCostVatMode === "GROSS" ? "GROSS" : "NET";
+  const purchaseReadOnly = type === "FABRIC" && !fabricEachPricing;
 
   return (
     <div className="space-y-4">
@@ -331,7 +459,9 @@ function MaterialFields({
           name="unitOfMeasureId"
           label="Од. виміру"
           required
-          defaultValue={defaults?.unitOfMeasureId ?? units[0]?.id}
+          value={unitOfMeasureId}
+          onChange={(event) => setUnitOfMeasureId(event.target.value)}
+          hint={type === "FABRIC" ? fabricUnitHint(fabricUnitMode) : undefined}
         >
           {units.map((unit) => (
             <option key={unit.id} value={unit.id}>
@@ -344,24 +474,34 @@ function MaterialFields({
       <FormGroup label="У розрахунку" icon={<IconCalc size={14} />} columns={2} compact>
         <Input
           name="purchasePrice"
-          label={type === "FABRIC" ? "Собівартість, ₴ (авто)" : "Собівартість, ₴"}
+          label={
+            fabricEachPricing
+              ? fabricUnitMode === "cone"
+                ? "Собівартість, ₴/бобіна"
+                : "Собівартість, ₴/шт"
+              : type === "FABRIC"
+                ? "Собівартість, ₴/м.п. (авто)"
+                : "Собівартість, ₴"
+          }
           type="number"
           step="0.01"
           min="0"
           required
           value={purchaseDisplay}
-          readOnly={type === "FABRIC"}
-          tabIndex={type === "FABRIC" ? -1 : undefined}
+          readOnly={purchaseReadOnly}
+          tabIndex={purchaseReadOnly ? -1 : undefined}
           onChange={
-            type === "FABRIC" ? undefined : (event) => setPurchasePrice(event.target.value)
+            purchaseReadOnly ? undefined : (event) => setPurchasePrice(event.target.value)
           }
           hint={
             type === "FABRIC"
-              ? managePricingSeparately
-                ? "З умов основного постачальника нижче"
-                : derived.costMode === "NET"
-                  ? "Без ПДВ"
-                  : "З ПДВ"
+              ? fabricEachPricing
+                ? "Норма в складі виробу — в цій же одиниці"
+                : managePricingSeparately
+                  ? "З умов основного постачальника нижче"
+                  : derived.costMode === "NET"
+                    ? "Без ПДВ · для калькуляції завжди ₴/м.п."
+                    : "З ПДВ · для калькуляції завжди ₴/м.п."
               : undefined
           }
         />
@@ -429,144 +569,303 @@ function MaterialFields({
           </FormGroup>
 
           <FormGroup label="Параметри" icon={<IconParams size={14} />} columns={3} compact>
+            <Select
+              name="deliveryType"
+              label="Тип доставки"
+              value={deliveryType}
+              onChange={(event) =>
+                applyDeliveryType(normalizeFabricDeliveryType(event.target.value))
+              }
+              hint="CARGO / НП — тарифи в «Ціноутворення»"
+            >
+              {FABRIC_DELIVERY_TYPES.map((code) => (
+                <option key={code} value={code}>
+                  {fabricDeliveryTypeLabel(code)} —{" "}
+                  {deliveryRateUsdPerKg(code, fabricGlobals)} $/кг
+                </option>
+              ))}
+            </Select>
+            <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
+            {!pricingInline ? (
+              <input type="hidden" name="fabricCargoUsdPerKg" value={fabricCargoUsdPerKg} />
+            ) : null}
             <Input
               name="densityGsm"
-              label="Щільність"
+              label="Щільність, г/м²"
               placeholder="170"
               value={densityGsm}
-              onChange={(event) => setDensityGsm(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDensityGsm(value);
+                syncMetersPerKgFromDensity(value, widthCm);
+              }}
+              hint={autoMetersPerKg != null ? `→ ${autoMetersPerKg} м.п./кг` : undefined}
             />
             <Input
               name="widthCm"
               label="Ширина, см"
               value={widthCm}
-              onChange={(event) => setWidthCm(event.target.value)}
-            />
-            <Input
-              name="metersPerKg"
-              label="м.п. / кг"
-              type="number"
-              step="0.01"
-              min="0"
-              value={metersPerKg}
+              required={widthRequiredForM2}
               onChange={(event) => {
                 const value = event.target.value;
-                setMetersPerKg(value);
-                if (pricingInline) recalcMeterPrices({ metersPerKg: value });
+                setWidthCm(value);
+                syncMetersPerKgFromDensity(densityGsm, value);
+                if (fabricUnitMode === "m2") applyM2Prices({ widthCm: value });
               }}
+              hint={
+                widthRequiredForM2
+                  ? "Потрібна для переводу м² → м.п."
+                  : "Разом зі щільністю дає м.п./кг"
+              }
             />
-            <Input
-              name="rollWeightKg"
-              label="Вага рул., кг"
-              type="number"
-              step="0.01"
-              min="0"
-              value={rollWeightKg}
-              onChange={(event) => setRollWeightKg(event.target.value)}
-            />
-            <Input
-              label="м.п. / рул. (авто)"
-              value={derived.metersPerRoll ?? ""}
-              readOnly
-              tabIndex={-1}
-            />
-            <input type="hidden" name="metersPerRoll" value={derived.metersPerRoll ?? ""} />
+            {showRollParams || metersPerKgRequired ? (
+              <Input
+                name="metersPerKg"
+                label="м.п. / кг"
+                type="number"
+                step="0.01"
+                min="0"
+                value={metersPerKg}
+                required={metersPerKgRequired}
+                onChange={(event) => applyMetersPerKg(event.target.value)}
+                hint={
+                  metersPerKgRequired
+                    ? "Обовʼязково при купівлі в кг (або зі щільності+ширини)"
+                    : autoMetersPerKg != null && !metersPerKgManual
+                      ? "Авто зі щільності × ширини"
+                      : "Для доставки й авто м.п./рул."
+                }
+              />
+            ) : (
+              <input type="hidden" name="metersPerKg" value={metersPerKg} />
+            )}
+            {showRollParams ? (
+              <>
+                <Input
+                  name="rollWeightKg"
+                  label="Вага рул., кг"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={rollWeightKg}
+                  onChange={(event) => setRollWeightKg(event.target.value)}
+                  hint="Разом з м.п./кг заповнює м.п./рул."
+                />
+                <Input
+                  label="м.п. / рул. (авто)"
+                  value={derived.metersPerRoll ?? ""}
+                  readOnly
+                  tabIndex={-1}
+                  hint={
+                    metersPerRollReady
+                      ? "вага рул. × м.п./кг"
+                      : "Заповніть вагу рулона і м.п./кг"
+                  }
+                />
+                <input type="hidden" name="metersPerRoll" value={derived.metersPerRoll ?? ""} />
+              </>
+            ) : (
+              <>
+                <input type="hidden" name="rollWeightKg" value={rollWeightKg} />
+                <input type="hidden" name="metersPerRoll" value={derived.metersPerRoll ?? ""} />
+              </>
+            )}
           </FormGroup>
 
           {pricingInline ? (
             <>
+              {fabricUnitMode === "kg" || fabricUnitMode === "m" ? (
+                <FormGroup
+                  label={
+                    fabricUnitMode === "kg"
+                      ? "Закупівля в кг"
+                      : "Закупівля в $/кг (опційно)"
+                  }
+                  icon={<IconPurchaseKg size={14} />}
+                  columns={3}
+                  compact
+                >
+                  <p className="type-caption sm:col-span-3">
+                    {fabricUnitMode === "kg"
+                      ? `Ціна за кг + м.п./кг → ₴/м.п. Курс ₴/$: ${fabricGlobals.usdUahRate}.`
+                      : `Якщо постачальник дає $/кг — заповніть тут, ₴/м порахується автоматично. Курс: ${fabricGlobals.usdUahRate}.`}
+                  </p>
+                  <div className="space-y-2 sm:col-span-3 lg:col-span-2">
+                    <Select
+                      label="Постачальник"
+                      value={supplierSelect}
+                      onChange={(event) => setSupplierSelect(event.target.value)}
+                    >
+                      <option value="">Оберіть…</option>
+                      {knownSuppliers.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                      <option value={SUPPLIER_OTHER}>Додати нового…</option>
+                    </Select>
+                    <input type="hidden" name="supplierCode" value={supplierValue} />
+                    {supplierSelect === SUPPLIER_OTHER ? (
+                      <Input
+                        label="Назва постачальника"
+                        value={supplierOther}
+                        onChange={(event) => setSupplierOther(event.target.value)}
+                        placeholder="Наприклад Зейджан"
+                      />
+                    ) : null}
+                  </div>
+                  <Input
+                    name="fabricCargoUsdPerKg"
+                    label="Доставка $/кг"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={fabricCargoUsdPerKg}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setFabricCargoUsdPerKg(value);
+                      recalcMeterPrices({ fabricCargoUsdPerKg: value });
+                    }}
+                    hint={`Тариф «${fabricDeliveryTypeLabel(deliveryType)}» (можна змінити)`}
+                  />
+                  <Input
+                    name="priceKgUsd"
+                    label="$ / кг"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required={fabricUnitMode === "kg"}
+                    value={priceKgUsd}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setPriceKgUsd(value);
+                      recalcMeterPrices({ priceKgUsd: value });
+                    }}
+                  />
+                  <Input
+                    label="$ / кг з доставкою (довідково)"
+                    value={derived.priceKgUsdCargo ?? ""}
+                    readOnly
+                    tabIndex={-1}
+                  />
+                  <input type="hidden" name="priceKgUsdCargo" value={derived.priceKgUsdCargo ?? ""} />
+                  <Input
+                    name="priceKgUsdVat"
+                    label="$ / кг з ПДВ"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={priceKgUsdVat}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setPriceKgUsdVat(value);
+                      recalcMeterPrices({ priceKgUsdVat: value });
+                    }}
+                  />
+                </FormGroup>
+              ) : null}
+
+              {fabricUnitMode === "m2" ? (
+                <FormGroup
+                  label="Закупівля в м²"
+                  icon={<IconPurchaseKg size={14} />}
+                  columns={3}
+                  compact
+                >
+                  <p className="type-caption sm:col-span-3">
+                    ₴/м.п. = ₴/м² × (ширина см ÷ 100). Курс ₴/$: {fabricGlobals.usdUahRate}.
+                  </p>
+                  <div className="space-y-2 sm:col-span-3 lg:col-span-2">
+                    <Select
+                      label="Постачальник"
+                      value={supplierSelect}
+                      onChange={(event) => setSupplierSelect(event.target.value)}
+                    >
+                      <option value="">Оберіть…</option>
+                      {knownSuppliers.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                      <option value={SUPPLIER_OTHER}>Додати нового…</option>
+                    </Select>
+                    <input type="hidden" name="supplierCode" value={supplierValue} />
+                    {supplierSelect === SUPPLIER_OTHER ? (
+                      <Input
+                        label="Назва постачальника"
+                        value={supplierOther}
+                        onChange={(event) => setSupplierOther(event.target.value)}
+                        placeholder="Наприклад Зейджан"
+                      />
+                    ) : null}
+                  </div>
+                  <Input
+                    name="fabricCargoUsdPerKg"
+                    label="Доставка $/кг"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={fabricCargoUsdPerKg}
+                    onChange={(event) => setFabricCargoUsdPerKg(event.target.value)}
+                    hint={`Тариф «${fabricDeliveryTypeLabel(deliveryType)}»`}
+                  />
+                  <Input
+                    label="₴/м² без ПДВ"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    required
+                    value={priceM2NoVat}
+                    onChange={(event) => applyM2Prices({ priceM2NoVat: event.target.value })}
+                  />
+                  <Input
+                    label="₴/м² з ПДВ"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={priceM2Vat}
+                    onChange={(event) => applyM2Prices({ priceM2Vat: event.target.value })}
+                  />
+                  <input type="hidden" name="priceKgUsd" value={priceKgUsd} />
+                  <input type="hidden" name="priceKgUsdVat" value={priceKgUsdVat} />
+                  <input type="hidden" name="priceKgUsdCargo" value={derived.priceKgUsdCargo ?? ""} />
+                </FormGroup>
+              ) : null}
+
               <FormGroup
-                label="Основний постачальник"
-                icon={<IconPurchaseKg size={14} />}
+                label={
+                  fabricUnitMode === "m2"
+                    ? "Ціна за м.п. (з м²) і гурт"
+                    : fabricUnitMode === "kg"
+                      ? "Ціна за м.п. (з кг) і гурт"
+                      : "Ціна за м.п. і гурт"
+                }
+                icon={<IconMeterPrice size={14} />}
                 columns={3}
                 compact
               >
-                <p className="type-caption sm:col-span-3">
-                  Ці умови стануть собівартістю в каталозі. Курс ₴/$: {fabricGlobals.usdUahRate}{" "}
-                  (з налаштувань).
-                </p>
-                <div className="space-y-2 sm:col-span-3 lg:col-span-2">
-                  <Select
-                    label="Постачальник"
-                    value={supplierSelect}
-                    onChange={(event) => setSupplierSelect(event.target.value)}
-                  >
-                    <option value="">Оберіть…</option>
-                    {knownSuppliers.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                    <option value={SUPPLIER_OTHER}>Додати нового…</option>
-                  </Select>
-                  <input type="hidden" name="supplierCode" value={supplierValue} />
-                  {supplierSelect === SUPPLIER_OTHER ? (
-                    <Input
-                      label="Назва постачальника"
-                      value={supplierOther}
-                      onChange={(event) => setSupplierOther(event.target.value)}
-                      placeholder="Наприклад Зейджан"
-                    />
-                  ) : null}
-                </div>
-                <Input
-                  name="fabricCargoUsdPerKg"
-                  label="Карго $/кг"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={fabricCargoUsdPerKg}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setFabricCargoUsdPerKg(value);
-                    recalcMeterPrices({ fabricCargoUsdPerKg: value });
-                  }}
-                />
-                <Input
-                  name="priceKgUsd"
-                  label="$ / кг"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={priceKgUsd}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setPriceKgUsd(value);
-                    recalcMeterPrices({ priceKgUsd: value });
-                  }}
-                />
-                <Input
-                  label="$ / кг з карго (довідково)"
-                  value={derived.priceKgUsdCargo ?? ""}
-                  readOnly
-                  tabIndex={-1}
-                />
-                <input type="hidden" name="priceKgUsdCargo" value={derived.priceKgUsdCargo ?? ""} />
-                <Input
-                  name="priceKgUsdVat"
-                  label="$ / кг з ПДВ"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={priceKgUsdVat}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setPriceKgUsdVat(value);
-                    recalcMeterPrices({ priceKgUsdVat: value });
-                  }}
-                />
-              </FormGroup>
-
-              <FormGroup label="Ціна за м.п. і гурт" icon={<IconMeterPrice size={14} />} columns={3} compact>
                 <Input
                   name="priceMeterUahNoVat"
                   label="₴/м без ПДВ (гурт)"
                   type="number"
                   step="0.1"
                   min="0"
+                  required={fabricUnitMode === "m" || fabricUnitMode === "m2"}
                   value={priceMeterNoVat}
-                  onChange={(event) => setPriceMeterNoVat(event.target.value)}
-                  hint="Ціна після межі гурту"
+                  readOnly={fabricUnitMode === "kg" || fabricUnitMode === "m2"}
+                  tabIndex={fabricUnitMode === "kg" || fabricUnitMode === "m2" ? -1 : undefined}
+                  onChange={
+                    fabricUnitMode === "kg" || fabricUnitMode === "m2"
+                      ? undefined
+                      : (event) => setPriceMeterNoVat(event.target.value)
+                  }
+                  hint={
+                    fabricUnitMode === "kg"
+                      ? "Авто з $/кг ÷ м.п./кг"
+                      : fabricUnitMode === "m2"
+                        ? "Авто з ₴/м² × ширина"
+                        : "Ціна після межі гурту"
+                  }
                 />
                 <Input
                   name="priceMeterUahVat"
@@ -575,8 +874,18 @@ function MaterialFields({
                   step="0.1"
                   min="0"
                   value={priceMeterVat}
-                  onChange={(event) => setPriceMeterVat(event.target.value)}
-                  hint="Ціна після межі гурту · з ПДВ"
+                  readOnly={fabricUnitMode === "kg" || fabricUnitMode === "m2"}
+                  tabIndex={fabricUnitMode === "kg" || fabricUnitMode === "m2" ? -1 : undefined}
+                  onChange={
+                    fabricUnitMode === "kg" || fabricUnitMode === "m2"
+                      ? undefined
+                      : (event) => setPriceMeterVat(event.target.value)
+                  }
+                  hint={
+                    fabricUnitMode === "kg" || fabricUnitMode === "m2"
+                      ? "Авто"
+                      : "Ціна після межі гурту · з ПДВ"
+                  }
                 />
                 <Input
                   name="priceMeterUahCutVat"
@@ -617,6 +926,35 @@ function MaterialFields({
           ) : (
             <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
           )}
+
+          {fabricEachPricing && !managePricingSeparately ? (
+            <FormGroup label="Постачальник" icon={<IconPurchaseKg size={14} />} columns={2} compact>
+              <div className="space-y-2 sm:col-span-2">
+                <Select
+                  label="Постачальник"
+                  value={supplierSelect}
+                  onChange={(event) => setSupplierSelect(event.target.value)}
+                >
+                  <option value="">Оберіть…</option>
+                  {knownSuppliers.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                  <option value={SUPPLIER_OTHER}>Додати нового…</option>
+                </Select>
+                <input type="hidden" name="supplierCode" value={supplierValue} />
+                {supplierSelect === SUPPLIER_OTHER ? (
+                  <Input
+                    label="Назва постачальника"
+                    value={supplierOther}
+                    onChange={(event) => setSupplierOther(event.target.value)}
+                    placeholder="Наприклад Зейджан"
+                  />
+                ) : null}
+              </div>
+            </FormGroup>
+          ) : null}
 
           <FormGroup label="ПДВ" icon={<IconCalc size={14} />} columns={1} compact>
             <Select
@@ -668,7 +1006,7 @@ export function MaterialCreatePanel({
   variant = "primary",
   size = "md",
   triggerLabel = "Новий матеріал",
-  fabricGlobals = { usdUahRate: 45, fabricCargoUsdPerKg: 1.7, materialCostVatMode: "NET" },
+  fabricGlobals = DEFAULT_FABRIC_PRICING_GLOBALS,
   onCreated,
 }: {
   units: UnitOption[];
@@ -682,7 +1020,7 @@ export function MaterialCreatePanel({
   return (
     <CreatePanel
       title="Новий матеріал"
-      description="Тканини: вкажіть основного постачальника й ціни — це собівартість каталогу. Альтернативи додасте після створення."
+      description="Одиниця виміру задає шлях закупівлі (м.п. / кг / м² / шт / бобіна). Для тканини калькуляція в складі йде в м.п., крім шт і бобіни."
       triggerLabel={triggerLabel}
       submitLabel="Створити"
       action={createMaterialAction}
@@ -700,7 +1038,7 @@ export function MaterialEditPanel({
   material,
   units,
   suppliers = [],
-  fabricGlobals = { usdUahRate: 45, fabricCargoUsdPerKg: 1.7, materialCostVatMode: "NET" },
+  fabricGlobals = DEFAULT_FABRIC_PRICING_GLOBALS,
 }: {
   material: MaterialFormDefaults;
   units: UnitOption[];

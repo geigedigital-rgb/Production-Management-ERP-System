@@ -39,6 +39,13 @@ enum MaterialCostVatMode {
   GROSS
 }
 
+/// Fabric delivery tariff preset ($/кг). Rates live on PricingSettings.
+enum FabricDeliveryType {
+  CARGO
+  NP_STANDARD
+  NP_VOLUME
+}
+
 enum OrderStatus {
   DRAFT
   CALCULATION
@@ -157,6 +164,8 @@ model Material {
   minWholesaleMeters   Decimal?  @db.Decimal(14, 4)
   /// null = follow company PricingSettings.materialCostVatMode
   costVatOverride      MaterialCostVatMode?
+  /// Delivery tariff for fabric kg → ₴ (rates in PricingSettings).
+  deliveryType         FabricDeliveryType @default(CARGO)
 
   category      Category?      @relation(fields: [categoryId], references: [id])
   unitOfMeasure UnitOfMeasure  @relation(fields: [unitOfMeasureId], references: [id])
@@ -397,6 +406,8 @@ model ProductMaterial {
   supplierId         String?
   /// Default color for this product line (from the chosen supplier palette).
   colorSnapshot      String?
+  /// Manual display/calc order; copied into order BOM as sortOrder.
+  sortOrder          Int     @default(0) @map("sort_order")
 
   product    Product                    @relation(fields: [productId], references: [id], onDelete: Cascade)
   material   Material                   @relation(fields: [materialId], references: [id])
@@ -404,7 +415,7 @@ model ProductMaterial {
   sizeNorms  ProductMaterialSizeNorm[]
   sizeScopes ProductMaterialSizeScope[]
 
-  @@index([productId])
+  @@index([productId, sortOrder])
   @@index([supplierId])
   @@map("product_materials")
 }
@@ -445,13 +456,15 @@ model ProductOperation {
   rateOverride     Decimal? @db.Decimal(14, 4)
   standardOverride Decimal? @db.Decimal(14, 4)
   note             String?
+  /// Manual display/calc order; copied into order BOM as sortOrder.
+  sortOrder        Int      @default(0) @map("sort_order")
 
   product    Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
   operation  Operation                   @relation(fields: [operationId], references: [id])
   sizeScopes ProductOperationSizeScope[]
   rateTiers  ProductOperationRateTier[]
 
-  @@index([productId])
+  @@index([productId, sortOrder])
   @@map("product_operations")
 }
 
@@ -748,8 +761,12 @@ model PricingSettings {
   roundingRule          String        @default("ROUND_2")
   /// USD → UAH for fabric sheet formulas
   usdUahRate            Decimal       @default(45) @db.Decimal(14, 4)
-  /// Added to $/kg for cargo (not multiplied)
+  /// CARGO delivery $/kg (added to $/kg, not multiplied)
   fabricCargoUsdPerKg   Decimal       @default(1.7) @db.Decimal(14, 4)
+  /// Nova Poshta standard delivery $/kg
+  npStandardUsdPerKg    Decimal       @default(0.4) @db.Decimal(14, 4)
+  /// Nova Poshta volumetric delivery $/kg
+  npVolumeUsdPerKg      Decimal       @default(0.8) @db.Decimal(14, 4)
   /// Reference rate for hints (UA standard 20)
   inputVatRatePercent   Decimal       @default(20) @db.Decimal(8, 4)
   /// NET = COGS without recoverable VAT; GROSS = full price with VAT

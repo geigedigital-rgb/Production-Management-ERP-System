@@ -73,6 +73,7 @@ export async function syncPrimarySupplierOfferFromMaterial(input: {
   materialId: string;
   supplierNameUk?: string | null;
   metersPerKg?: number | null;
+  cargoUsdPerKg?: number | null;
   priceKgUsd?: number | null;
   priceKgUsdCargo?: number | null;
   priceKgUsdVat?: number | null;
@@ -93,9 +94,11 @@ export async function syncPrimarySupplierOfferFromMaterial(input: {
 
   const globals = input.globals ?? (await getFabricPricingGlobals());
   const cargoUsdPerKg =
-    input.priceKgUsd != null && input.priceKgUsdCargo != null
-      ? Number(input.priceKgUsdCargo) - Number(input.priceKgUsd)
-      : globals.fabricCargoUsdPerKg;
+    input.cargoUsdPerKg != null && Number.isFinite(input.cargoUsdPerKg)
+      ? Number(input.cargoUsdPerKg)
+      : input.priceKgUsd != null && input.priceKgUsdCargo != null
+        ? Number(input.priceKgUsdCargo) - Number(input.priceKgUsd)
+        : globals.fabricCargoUsdPerKg;
 
   const derived = deriveFabricPricing(
     {

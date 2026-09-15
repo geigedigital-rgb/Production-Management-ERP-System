@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const materialTypeSchema = z.enum(["FABRIC", "OTHER_MATERIAL", "TRIM"]);
 export const materialCostVatModeSchema = z.enum(["NET", "GROSS"]);
+export const fabricDeliveryTypeSchema = z.enum(["CARGO", "NP_STANDARD", "NP_VOLUME"]);
 
 const emptyToNull = (value: unknown) => {
   if (value === "" || value === undefined) return null;
@@ -50,6 +51,10 @@ export const materialFormSchema = z.object({
   costVatOverride: z.preprocess(
     emptyToNull,
     materialCostVatModeSchema.nullable().optional(),
+  ),
+  deliveryType: z.preprocess(
+    emptyToNull,
+    fabricDeliveryTypeSchema.optional().default("CARGO"),
   ),
 });
 

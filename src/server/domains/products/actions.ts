@@ -17,6 +17,7 @@ import {
   removeProductMaterialFromSize,
   removeProductOperationFromSize,
   removeProductDecoration,
+  reorderProductBomLines,
   setProductDecorationSetupCost,
   setProductMaterialConsumption,
   setProductMaterialWaste,
@@ -278,6 +279,31 @@ export async function addProductOperationAction(formData: FormData) {
     operationId,
     sizeIds: sizeIds.length > 0 ? sizeIds : undefined,
   });
+  revalidatePath(`/products/${productId}`);
+  return { ok: true as const };
+}
+
+export async function reorderProductBomAction(input: {
+  productId: string;
+  kind: "materials" | "operations";
+  orderedIds: string[];
+}) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const productId = String(input.productId ?? "");
+  const kind = input.kind;
+  const orderedIds = Array.isArray(input.orderedIds) ? input.orderedIds.map(String) : [];
+  if (!productId || (kind !== "materials" && kind !== "operations") || orderedIds.length === 0) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+
+  try {
+    await reorderProductBomLines({ productId, kind, orderedIds });
+  } catch {
+    return { ok: false as const, error: "REORDER_FAILED" as const };
+  }
   revalidatePath(`/products/${productId}`);
   return { ok: true as const };
 }

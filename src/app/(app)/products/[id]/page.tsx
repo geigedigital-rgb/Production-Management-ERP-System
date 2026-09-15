@@ -232,6 +232,10 @@ export default async function ProductDetailPage({
           costPerUnit: Number(calc.costPerUnit),
           sewingPerUnit,
           cutPerUnit,
+          materialsPerUnit: Number(calc.materialsSubtotal) / qty,
+          operationsPerUnit: Number(calc.operationsSubtotal) / qty,
+          additionalPerUnit: Number(calc.additionalCostsSubtotal) / qty,
+          decorationsPerUnit: Number(calc.decorationsSubtotal) / qty,
         };
       })
     : [];
@@ -424,7 +428,7 @@ export default async function ProductDetailPage({
         initialCalc={calc}
         initialQuantity={ECONOMICS_PREVIEW_QTY}
         minimumMarginPercent={pricing.minimumMarginPercent}
-        showEconomics={canViewCosts}
+        showEconomics={false}
       >
           <ProductDetailTabs
             productId={product.id}
@@ -511,7 +515,7 @@ export default async function ProductDetailPage({
               })),
               operationOptions: operations.map((o) => ({ id: o.id, label: o.nameUk })),
               decorationOptions: decorations.map((d) => ({ id: d.id, label: d.nameUk })),
-              unitOptions: units.map((u) => ({ id: u.id, label: u.nameUk })),
+              unitOptions: units.map((u) => ({ id: u.id, label: u.nameUk, code: u.code })),
               cutRateContext: {
                 optimalQty: product.optimalQty,
                 tiers: (product.cutRateTiers ?? []).map((tier) => ({

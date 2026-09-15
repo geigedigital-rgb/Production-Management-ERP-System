@@ -97,8 +97,8 @@ const productOperationInclude = {
 const productDetailInclude = {
   category: true,
   sizes: { include: { size: true }, orderBy: { size: { sortOrder: "asc" as const } } },
-  materials: { include: productMaterialInclude },
-  operations: { include: productOperationInclude },
+  materials: { include: productMaterialInclude, orderBy: { sortOrder: "asc" as const } },
+  operations: { include: productOperationInclude, orderBy: { sortOrder: "asc" as const } },
   decorations: { include: { decorationMethod: true } },
   additionalCosts: true,
   cutRateTiers: { orderBy: { minQuantity: "asc" as const } },
@@ -160,7 +160,7 @@ export async function listProductsSummary() {
             },
           },
         },
-        orderBy: { id: "asc" },
+        orderBy: { sortOrder: "asc" },
         take: 4,
       },
       _count: {
@@ -279,19 +279,20 @@ export async function createProductDraft(raw: ProductFormValues) {
         create: data.sizeIds.map((sizeId) => ({ sizeId })),
       },
       materials: {
-        create: data.materials.map((row) => {
+        create: data.materials.map((row, index) => {
           const catalog = materialById.get(row.materialId);
           return {
             materialId: row.materialId,
             consumptionPerUnit: row.consumptionPerUnit,
             wastePercent: row.wastePercent ?? catalog?.defaultWastePercent ?? 0,
+            sortOrder: index,
             sizeScopes: sizeCreateForCodes(row.sizeCodes, sizeIdByCode),
             sizeNorms: normCreateForMap(row.sizeConsumption, sizeIdByCode),
           };
         }),
       },
       operations: {
-        create: data.operations.map((row) => {
+        create: data.operations.map((row, index) => {
           const catalog = operationById.get(row.operationId);
           const tiers =
             catalog?.calculationMethod === "QUANTITY_TIER"
@@ -306,6 +307,7 @@ export async function createProductDraft(raw: ProductFormValues) {
               : [];
           return {
             operationId: row.operationId,
+            sortOrder: index,
             sizeScopes: sizeCreateForCodes(row.sizeCodes, sizeIdByCode),
             rateTiers:
               tiers.length > 0
@@ -446,6 +448,12 @@ export async function addProductMaterial(input: {
           materialFallback: material.availableColors,
         });
 
+  const maxSort = await prisma.productMaterial.aggregate({
+    where: { productId: input.productId },
+    _max: { sortOrder: true },
+  });
+  const sortOrder = (maxSort._max.sortOrder ?? -1) + 1;
+
   return prisma.productMaterial.create({
     data: {
       productId: input.productId,
@@ -454,6 +462,7 @@ export async function addProductMaterial(input: {
       wastePercent: input.wastePercent ?? material.defaultWastePercent,
       supplierId,
       colorSnapshot,
+      sortOrder,
       sizeScopes:
         input.sizeIds && input.sizeIds.length > 0
           ? { create: input.sizeIds.map((sizeId) => ({ sizeId })) }
@@ -531,10 +540,17 @@ export async function addProductOperation(input: {
           )
       : [];
 
+  const maxSort = await prisma.productOperation.aggregate({
+    where: { productId: input.productId },
+    _max: { sortOrder: true },
+  });
+  const sortOrder = (maxSort._max.sortOrder ?? -1) + 1;
+
   return prisma.productOperation.create({
     data: {
       productId: input.productId,
       operationId: input.operationId,
+      sortOrder,
       sizeScopes:
         input.sizeIds && input.sizeIds.length > 0
           ? { create: input.sizeIds.map((sizeId) => ({ sizeId })) }
@@ -551,6 +567,51 @@ export async function addProductOperation(input: {
     },
     include: productOperationInclude,
   });
+}
+
+/** Persist manual material/operation order for a product (0-based sortOrder). */
+export async function reorderProductBomLines(input: {
+  productId: string;
+  kind: "materials" | "operations";
+  orderedIds: string[];
+}) {
+  const orderedIds = [...new Set(input.orderedIds.filter(Boolean))];
+  if (orderedIds.length === 0) return;
+
+  if (input.kind === "materials") {
+    const existing = await prisma.productMaterial.findMany({
+      where: { productId: input.productId },
+      select: { id: true },
+    });
+    const allowed = new Set(existing.map((row) => row.id));
+    const ids = orderedIds.filter((id) => allowed.has(id));
+    if (ids.length !== existing.length) throw new Error("BOM_REORDER_MISMATCH");
+    await prisma.$transaction(
+      ids.map((id, index) =>
+        prisma.productMaterial.update({
+          where: { id },
+          data: { sortOrder: index },
+        }),
+      ),
+    );
+    return;
+  }
+
+  const existing = await prisma.productOperation.findMany({
+    where: { productId: input.productId },
+    select: { id: true },
+  });
+  const allowed = new Set(existing.map((row) => row.id));
+  const ids = orderedIds.filter((id) => allowed.has(id));
+  if (ids.length !== existing.length) throw new Error("BOM_REORDER_MISMATCH");
+  await prisma.$transaction(
+    ids.map((id, index) =>
+      prisma.productOperation.update({
+        where: { id },
+        data: { sortOrder: index },
+      }),
+    ),
+  );
 }
 
 export async function setProductOperationRateTiers(input: {
@@ -1169,6 +1230,9 @@ export async function duplicateProduct(sourceId: string) {
           materialId: row.materialId,
           consumptionPerUnit: row.consumptionPerUnit,
           wastePercent: row.wastePercent,
+          sortOrder: row.sortOrder,
+          supplierId: row.supplierId,
+          colorSnapshot: row.colorSnapshot,
           sizeScopes: {
             create: row.sizeScopes.map((scope) => ({ sizeId: scope.sizeId })),
           },
@@ -1186,6 +1250,7 @@ export async function duplicateProduct(sourceId: string) {
           operationId: row.operationId,
           rateOverride: row.rateOverride,
           standardOverride: row.standardOverride,
+          sortOrder: row.sortOrder,
           sizeScopes: {
             create: row.sizeScopes.map((scope) => ({ sizeId: scope.sizeId })),
           },

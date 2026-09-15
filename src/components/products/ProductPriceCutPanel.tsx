@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ComponentProps } from "react";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { updateProductCommercialPricesAction, updateProductCutRatesAction } from "@/server/domains/products/actions";
 import {
   hintForQty,
@@ -22,27 +21,31 @@ type Row = {
   showOnCard: boolean;
 };
 
-function CompactInput(props: React.ComponentProps<"input">) {
-  return (
-    <input
-      {...props}
-      className={[
-        "h-7 w-full min-w-0 rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-[12.5px] tabular-nums text-[var(--color-text)]",
-        "focus-visible:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--color-accent)_22%,transparent)]",
-        "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-        props.className ?? "",
-      ].join(" ")}
-    />
-  );
+/** Digit inputs — width comes from the column / className. */
+const DIGIT_INPUT =
+  "h-7 min-w-0 rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-right text-[12.5px] tabular-nums text-[var(--color-text)] " +
+  "focus-visible:border-[var(--color-border-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--color-text-secondary)_18%,transparent)] " +
+  "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+function CompactInput({ className, ...props }: ComponentProps<"input">) {
+  return <input {...props} className={[DIGIT_INPUT, className ?? ""].join(" ")} />;
 }
 
-function MoneyCell({ value }: { value: number }) {
+function MoneyCell({ value, tone }: { value: number; tone?: "quiet" | "strong" }) {
+  const color =
+    tone === "strong"
+      ? "font-medium text-[var(--color-text)]"
+      : "text-[var(--color-text-secondary)]";
   return (
-    <span className="type-mono text-[11.5px] tabular-nums text-[var(--color-text-quiet)]">
+    <span className={`type-mono text-[12px] tabular-nums ${color}`}>
       {Number.isFinite(value) ? formatMoneyUah(value) : "—"}
     </span>
   );
 }
+
+const thClass = "px-2 py-2 type-caption font-medium text-[var(--color-text-quiet)]";
+const tdClass = "px-2 py-1.5 align-middle";
+const tdNum = `${tdClass} whitespace-nowrap text-right`;
 
 function cutRateFromOptimalTotal(optimalTotal: number, qty: number): number {
   if (!(qty > 0) || !(optimalTotal >= 0) || !Number.isFinite(optimalTotal)) return 0;
@@ -246,7 +249,7 @@ export function ProductPriceCutPanel({
         <div>
           <p className="type-label">Прайс і крій</p>
           <p className="type-caption mt-0.5">
-            Спочатку оптимум: вартість крою ÷ тираж → ₴/шт. Галочка «У картці» — базовий прайс у меню
+            Колонки економіки партії рахуються з складу. Галочка «Картка» — базовий прайс у меню
             «Вироби».
           </p>
         </div>
@@ -261,32 +264,34 @@ export function ProductPriceCutPanel({
         </label>
       </div>
 
-      <div className="grid gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-2.5 sm:grid-cols-[7.5rem_9rem_auto] sm:items-end">
-        <label className="block space-y-1">
-          <span className="type-caption">Оптимум, шт</span>
-          <Input
+      <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+        <label className="flex flex-col gap-1">
+          <span className="type-caption text-[var(--color-text-quiet)]">Оптимум, шт</span>
+          <CompactInput
             type="number"
             min={1}
             step={1}
-            inputClassName="h-8 text-[13px]"
+            inputMode="numeric"
+            className="h-8 w-[7rem] text-[13px]"
             value={optimalQty}
             onChange={(event) => applyOptimal(Number(event.target.value), optimalCutTotal, true)}
           />
         </label>
-        <label className="block space-y-1">
-          <span className="type-caption">Крій на оптимум, ₴</span>
-          <Input
+        <label className="flex flex-col gap-1">
+          <span className="type-caption text-[var(--color-text-quiet)]">Крій на оптимум, ₴</span>
+          <CompactInput
             type="number"
             min={0}
             step="0.01"
-            inputClassName="h-8 text-[13px]"
+            inputMode="decimal"
+            className="h-8 w-[8rem] text-[13px]"
             value={optimalCutTotal}
             onChange={(event) => applyOptimal(optimalQty, Number(event.target.value), true)}
           />
         </label>
-        <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5">
-          <p className="type-caption">₴/шт</p>
-          <p className="type-mono text-[14px] font-semibold tabular-nums">
+        <div className="flex flex-col gap-1">
+          <span className="type-caption text-[var(--color-text-quiet)]">₴/шт</span>
+          <p className="flex h-8 items-center type-mono text-[13px] font-semibold tabular-nums text-[var(--color-text)]">
             {formatMoneyUah(cutRateFromOptimalTotal(optimalCutTotal, optimalQty))}
           </p>
         </div>
@@ -294,21 +299,54 @@ export function ProductPriceCutPanel({
 
       {message ? <p className="type-caption text-[var(--color-text-muted)]">{message}</p> : null}
 
-      <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
-        <table className="w-auto min-w-0 border-collapse text-left">
+      <div className="w-full overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
+        <table className="w-full min-w-[56rem] table-fixed border-collapse text-left">
+          <colgroup>
+            <col className="w-[3.5rem]" />
+            <col className="w-[5.75rem]" />
+            <col className="w-[6rem]" />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col className="w-[4.5rem]" />
+            <col />
+            <col className="w-[4rem]" />
+            <col />
+            <col />
+            <col className="w-[7.25rem]" />
+            <col className="w-[2.5rem]" />
+          </colgroup>
           <thead>
             <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg)]/50">
-              <th className="whitespace-nowrap px-1 py-1.5 type-caption font-medium" title="Показувати в картці виробу">
+              <th className={`${thClass} text-center`} title="Показувати в картці виробу">
                 Картка
               </th>
-              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Тираж</th>
-              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Крій</th>
-              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Собів.</th>
-              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Пошив</th>
-              <th className="whitespace-nowrap px-1 py-1.5 type-caption font-medium">×</th>
-              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Націнка</th>
-              <th className="whitespace-nowrap px-1.5 py-1.5 type-caption font-medium">Ціна</th>
-              <th className="w-7 px-0.5 py-1.5" />
+              <th className={thClass}>Тираж</th>
+              <th className={thClass}>Крій</th>
+              <th className={`${thClass} text-right`} title="Матеріали / шт">
+                Мат.
+              </th>
+              <th className={`${thClass} text-right`} title="Операції / шт">
+                Опер.
+              </th>
+              <th className={`${thClass} text-right`} title="Інші / шт">
+                Інші
+              </th>
+              <th className={`${thClass} text-right`}>Собів.</th>
+              <th className={`${thClass} text-right`}>Пошив</th>
+              <th className={`${thClass} text-center`}>×</th>
+              <th className={`${thClass} text-right`}>Націнка</th>
+              <th className={`${thClass} text-right`}>Маржа</th>
+              <th className={`${thClass} text-right`} title="Прибуток / шт">
+                Приб.
+              </th>
+              <th className={`${thClass} text-right`} title="Прибуток партії">
+                Партія
+              </th>
+              <th className={thClass}>Ціна</th>
+              <th className={thClass} />
             </tr>
           </thead>
           <tbody>
@@ -317,16 +355,23 @@ export function ProductPriceCutPanel({
               const sewing = hint?.sewingPerUnit ?? 0;
               const cost = hint?.costPerUnit ?? 0;
               const markup = row.pricePerUnit - cost;
+              const profitPerUnit = markup;
+              const marginPercent =
+                row.pricePerUnit > 0 ? (profitPerUnit / row.pricePerUnit) * 100 : 0;
+              const qty = row.minQuantity;
+              const materialsPerUnit = hint?.materialsPerUnit ?? 0;
+              const operationsPerUnit = hint?.operationsPerUnit ?? 0;
+              const additionalPerUnit = hint?.additionalPerUnit ?? 0;
               const isOptimal = row.minQuantity === optimalQty;
               return (
                 <tr
                   key={`${row.minQuantity}-${index}`}
                   className={[
                     "border-b border-[var(--color-divider)] last:border-0",
-                    isOptimal ? "bg-[color-mix(in_srgb,var(--color-accent)_8%,transparent)]" : "",
+                    isOptimal ? "bg-[var(--color-surface-subtle)]" : "",
                   ].join(" ")}
                 >
-                  <td className="px-1 py-0.5 text-center">
+                  <td className={`${tdClass} text-center`}>
                     <input
                       type="checkbox"
                       className="h-3.5 w-3.5 rounded border-[var(--color-border)]"
@@ -342,14 +387,14 @@ export function ProductPriceCutPanel({
                       }}
                     />
                   </td>
-                  <td className="px-1 py-0.5">
-                    <div className="flex items-center gap-0.5">
+                  <td className={tdClass}>
+                    <div className="flex items-center gap-1">
                       <CompactInput
                         type="number"
                         min={1}
                         step={1}
                         inputMode="numeric"
-                        className="w-[3.25rem] text-right"
+                        className="w-full"
                         value={row.minQuantity}
                         onChange={(event) => {
                           const minQuantity = Math.max(1, Math.round(Number(event.target.value)) || 1);
@@ -365,19 +410,19 @@ export function ProductPriceCutPanel({
                         }}
                       />
                       {isOptimal ? (
-                        <span className="type-caption shrink-0 text-[10px] text-[var(--color-accent)]">
+                        <span className="type-caption shrink-0 text-[10px] text-[var(--color-text-quiet)]">
                           опт
                         </span>
                       ) : null}
                     </div>
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className={tdClass}>
                     <CompactInput
                       type="number"
                       min={0}
                       step="0.01"
                       inputMode="decimal"
-                      className="w-[3.75rem] text-right"
+                      className="w-full"
                       value={row.cutRate}
                       title="Можна підправити вручну; «Розкласти крій» знову візьме від оптимуму"
                       onChange={(event) => {
@@ -393,19 +438,28 @@ export function ProductPriceCutPanel({
                       }}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-1.5 py-0.5 text-right">
-                    <MoneyCell value={cost} />
+                  <td className={tdNum}>
+                    <MoneyCell value={materialsPerUnit} />
                   </td>
-                  <td className="whitespace-nowrap px-1.5 py-0.5 text-right">
+                  <td className={tdNum}>
+                    <MoneyCell value={operationsPerUnit} />
+                  </td>
+                  <td className={tdNum}>
+                    <MoneyCell value={additionalPerUnit} />
+                  </td>
+                  <td className={tdNum}>
+                    <MoneyCell value={cost} tone="strong" />
+                  </td>
+                  <td className={tdNum}>
                     <MoneyCell value={sewing} />
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className={tdClass}>
                     <CompactInput
                       type="number"
                       min={1}
                       step="0.01"
                       inputMode="decimal"
-                      className="w-[2.75rem] text-right"
+                      className="w-full text-center"
                       value={row.sewingMultiplier}
                       onChange={(event) => {
                         const sewingMultiplier = Number(event.target.value);
@@ -421,16 +475,27 @@ export function ProductPriceCutPanel({
                       }}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-1.5 py-0.5 text-right">
+                  <td className={tdNum}>
                     <MoneyCell value={markup} />
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className={tdNum}>
+                    <span className="type-mono text-[12px] font-medium tabular-nums text-[var(--color-text)]">
+                      {Number.isFinite(marginPercent) ? `${marginPercent.toFixed(0)}%` : "—"}
+                    </span>
+                  </td>
+                  <td className={tdNum}>
+                    <MoneyCell value={profitPerUnit} />
+                  </td>
+                  <td className={tdNum}>
+                    <MoneyCell value={profitPerUnit * qty} tone="strong" />
+                  </td>
+                  <td className={tdClass}>
                     <CompactInput
                       type="number"
                       min={0}
                       step="0.01"
                       inputMode="decimal"
-                      className="w-[4.25rem] text-right font-semibold"
+                      className="w-full font-semibold"
                       value={row.pricePerUnit}
                       onChange={(event) => {
                         const pricePerUnit = Number(event.target.value);
@@ -442,7 +507,7 @@ export function ProductPriceCutPanel({
                       }}
                     />
                   </td>
-                  <td className="px-0.5 py-0.5 text-center">
+                  <td className={`${tdClass} text-center`}>
                     <button
                       type="button"
                       className="inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-[11px] text-[var(--color-text-quiet)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-danger-text)] disabled:opacity-40"
@@ -469,7 +534,16 @@ export function ProductPriceCutPanel({
           variant="ghost"
           size="sm"
           onClick={() =>
-            setRows((prev) => spreadCutFromOptimal(ensureOptimalRow(prev, optimalQty, cutRateFromOptimalTotal(optimalCutTotal, optimalQty)), optimalCutTotal))
+            setRows((prev) =>
+              spreadCutFromOptimal(
+                ensureOptimalRow(
+                  prev,
+                  optimalQty,
+                  cutRateFromOptimalTotal(optimalCutTotal, optimalQty),
+                ),
+                optimalCutTotal,
+              ),
+            )
           }
         >
           Розкласти крій

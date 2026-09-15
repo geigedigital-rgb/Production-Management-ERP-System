@@ -106,7 +106,8 @@ export default async function ProductsPage({
   }));
   const unitOptions = units.map((unit) => ({
     id: unit.id,
-    label: `${unit.nameUk} (${unit.code})`,
+    label: unit.nameUk,
+    code: unit.code,
   }));
   const materialCatalog = materials.map((material) => ({
     id: material.id,

@@ -75,7 +75,7 @@ export function MaterialsTable({
   canEdit = false,
 }: {
   rows: MaterialsTableRow[];
-  units: Array<{ id: string; label: string }>;
+  units: Array<{ id: string; label: string; code?: string }>;
   suppliers?: string[];
   fabricGlobals?: FabricPricingGlobals;
   empty: { title: string; description?: string; action?: React.ReactNode };

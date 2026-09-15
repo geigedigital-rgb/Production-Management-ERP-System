@@ -16,6 +16,8 @@ const pricingSchema = z.object({
   roundingRule: z.string().min(1),
   usdUahRate: z.coerce.number().positive(),
   fabricCargoUsdPerKg: z.coerce.number().min(0),
+  npStandardUsdPerKg: z.coerce.number().min(0),
+  npVolumeUsdPerKg: z.coerce.number().min(0),
   inputVatRatePercent: z.coerce.number().min(0).max(100),
   materialCostVatMode: z.enum(["NET", "GROSS"]),
 });
@@ -33,6 +35,8 @@ export async function updatePricingSettingsAction(formData: FormData) {
     roundingRule: formData.get("roundingRule") || "ROUND_2",
     usdUahRate: formData.get("usdUahRate") || 45,
     fabricCargoUsdPerKg: formData.get("fabricCargoUsdPerKg") || 1.7,
+    npStandardUsdPerKg: formData.get("npStandardUsdPerKg") || 0.4,
+    npVolumeUsdPerKg: formData.get("npVolumeUsdPerKg") || 0.8,
     inputVatRatePercent: formData.get("inputVatRatePercent") || 20,
     materialCostVatMode: formData.get("materialCostVatMode") || "NET",
   });

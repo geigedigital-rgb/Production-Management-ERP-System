@@ -277,6 +277,21 @@ export function IconTrash(props: IconProps) {
   );
 }
 
+/** Six-dot grip for drag-reorder handles — filled dots for contrast on light rows. */
+export function IconGrip(props: IconProps) {
+  const attrs = base(props);
+  return (
+    <svg {...attrs} fill="currentColor" stroke="none">
+      <circle cx="9" cy="6.5" r="1.85" />
+      <circle cx="15" cy="6.5" r="1.85" />
+      <circle cx="9" cy="12" r="1.85" />
+      <circle cx="15" cy="12" r="1.85" />
+      <circle cx="9" cy="17.5" r="1.85" />
+      <circle cx="15" cy="17.5" r="1.85" />
+    </svg>
+  );
+}
+
 export function IconAlert(props: IconProps) {
   return (
     <svg {...base(props)}>
