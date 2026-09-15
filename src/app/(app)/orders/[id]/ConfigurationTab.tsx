@@ -376,7 +376,7 @@ export function ConfigurationTab({
           onChange={setSizeScope}
           customized={customized}
         />
-        {sizes.length > 1 ? (
+        {sizes.length > 1 && sizeScope !== ALL_SIZES ? (
           <SizeBomScopeHint
             sizeScope={sizeScope}
             hasOversizeSizes={hasOversizeSizes}
@@ -778,10 +778,14 @@ export function ConfigurationTab({
           <TBody>
             {decorations.length === 0 ? (
               <TableEmpty
-                colSpan={locked ? 3 : 4}
+                colSpan={locked ? (hideCosts ? 1 : 3) : hideCosts ? 2 : 4}
                 icon={<IconDecoration size={20} />}
                 title="Без нанесення"
-                description="Оберіть шовкодрук, поставте коефіцієнти (за потреби) і натисніть «Додати»."
+                description={
+                  locked
+                    ? "Нанесення не додано."
+                    : "За потреби додайте шовкодрук нижче."
+                }
               />
             ) : (
               decorations.map((row) => {

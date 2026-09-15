@@ -730,6 +730,7 @@ export default async function OrderDetailPage({
                 {order.status === "DRAFT" && accessHas(access, "manageOrders") ? (
                   <SubmitForCalculationButton
                     orderId={order.id}
+                    asAdmin={canViewCosts}
                     disabled={
                       !order.items.every(
                         (row) =>

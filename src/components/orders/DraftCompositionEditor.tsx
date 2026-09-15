@@ -41,6 +41,8 @@ export function DraftCompositionEditor({
   quantities,
   comment,
   editing,
+  inList = false,
+  confirmLabel,
   materialOptions = [],
   operationOptions = [],
   decorationOptions = [],
@@ -66,6 +68,9 @@ export function DraftCompositionEditor({
   quantities: Record<string, number>;
   comment: string;
   editing?: boolean;
+  /** Line already in the order list and no unsaved edits. */
+  inList?: boolean;
+  confirmLabel?: string;
   materialOptions?: MaterialCatalogOption[];
   operationOptions?: OperationCatalogOption[];
   decorationOptions?: DecorationCatalogOption[];
@@ -157,7 +162,11 @@ export function DraftCompositionEditor({
               <h3 className="type-subsection truncate">
                 {editing ? "Редагування складу" : "Склад позиції"}
               </h3>
-              {compositionReadyLabel ? (
+              {inList ? (
+                <StatusBadge tone="success" dot>
+                  У списку
+                </StatusBadge>
+              ) : compositionReadyLabel ? (
                 <StatusBadge tone="warning" dot>
                   {compositionReadyLabel}
                 </StatusBadge>
@@ -165,9 +174,11 @@ export function DraftCompositionEditor({
             </div>
             <p className="type-caption mt-0.5 truncate">
               {product.nameUk ?? product.label}
-              {enableLinePricingControls && !choicesComplete
-                ? " · оберіть колір і ПДВ у рядках з маркером"
-                : " · склад і тираж; колір і постачальник — у замовленні"}
+              {inList
+                ? " · збережено нижче в «Позиції замовлення»"
+                : enableLinePricingControls && !choicesComplete
+                  ? " · оберіть колір і ПДВ у рядках з маркером"
+                  : " · вкажіть тираж і натисніть кнопку нижче"}
             </p>
           </div>
         </div>
@@ -176,7 +187,8 @@ export function DraftCompositionEditor({
             Скасувати
           </Button>
           <Button type="button" size="sm" disabled={confirmDisabled} onClick={onConfirm}>
-            {editing ? "Зберегти в список" : "Погодити і додати"}
+            {confirmLabel ??
+              (editing ? "Зберегти в список" : "Погодити і додати")}
           </Button>
         </div>
       </div>
@@ -247,9 +259,15 @@ export function DraftCompositionEditor({
             <span className="type-caption text-[var(--color-text-tertiary)]">
               {enableLinePricingControls && incompleteMaterials.length > 0
                 ? `${incompleteMaterials.length} без параметрів`
-                : "вкажіть кількість"}
+                : inList
+                  ? "змініть тираж або склад, щоб знову зберегти"
+                  : "вкажіть кількість"}
             </span>
-          ) : null}
+          ) : (
+            <span className="type-caption text-[var(--color-primary-700)]">
+              {editing ? "є зміни — збережіть у список" : "готово до додавання"}
+            </span>
+          )}
         </div>
         {qtyMode === "total" && hasRealSizes ? (
           <p className="type-caption text-[var(--color-text-tertiary)]">
@@ -269,7 +287,8 @@ export function DraftCompositionEditor({
             Скасувати
           </Button>
           <Button type="button" size="sm" disabled={confirmDisabled} onClick={onConfirm}>
-            {editing ? "Зберегти в список" : "Погодити і додати"}
+            {confirmLabel ??
+              (editing ? "Зберегти в список" : "Погодити і додати")}
           </Button>
         </div>
       </div>

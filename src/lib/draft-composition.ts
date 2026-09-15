@@ -113,10 +113,8 @@ export function cloneComposition(
       ...row,
       key: draftKey(),
     })),
-    decorations: product.composition.decorations.map((row) => ({
-      ...row,
-      key: draftKey(),
-    })),
+    // Screen print is priced on the order (stage 2+), not copied from product catalog.
+    decorations: [],
   };
 }
 

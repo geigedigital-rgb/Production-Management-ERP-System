@@ -205,11 +205,8 @@ export async function createOrderAction(formData: FormData) {
                     },
               ),
               operations: item.composition.operations,
-              decorations: item.composition.decorations.map((row) =>
-                allowPricing
-                  ? row
-                  : { decorationMethodId: row.decorationMethodId },
-              ),
+              // Screen print is configured on the order after create, never from product draft.
+              decorations: [],
             }
           : undefined,
       }));

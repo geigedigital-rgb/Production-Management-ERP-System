@@ -9,10 +9,13 @@ export function SubmitForCalculationButton({
   orderId,
   disabled,
   disabledReason,
+  asAdmin = false,
 }: {
   orderId: string;
   disabled?: boolean;
   disabledReason?: string;
+  /** Admin already does calc — wording is «start calculation», not «send to admin». */
+  asAdmin?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -21,7 +24,9 @@ export function SubmitForCalculationButton({
     if (disabled) return;
     if (
       !window.confirm(
-        "Передати замовлення адміністратору на розрахунок? Після цього комплектацію зможе змінювати лише адмін.",
+        asAdmin
+          ? "Перевести замовлення в статус «Розрахунок» і продовжити калькуляцію?"
+          : "Передати замовлення адміністратору на розрахунок? Після цього комплектацію зможе змінювати лише адмін.",
       )
     ) {
       return;
@@ -53,7 +58,13 @@ export function SubmitForCalculationButton({
         disabled={disabled || pending}
         title={disabled ? disabledReason : undefined}
       >
-        {pending ? "Передача…" : "На розрахунок адміну"}
+        {pending
+          ? asAdmin
+            ? "Перехід…"
+            : "Передача…"
+          : asAdmin
+            ? "До розрахунку"
+            : "На розрахунок адміну"}
       </Button>
       {disabled && disabledReason ? (
         <p className="max-w-[16rem] text-right text-[11.5px] text-[var(--color-text-quiet)]">
@@ -61,7 +72,9 @@ export function SubmitForCalculationButton({
         </p>
       ) : (
         <p className="max-w-[16rem] text-right text-[11.5px] text-[var(--color-text-quiet)]">
-          Адміністратор перевірить склад і зробить калькуляцію.
+          {asAdmin
+            ? "Далі — ПДВ, кольори постачальників, доставка й калькуляція."
+            : "Адміністратор перевірить склад і зробить калькуляцію."}
         </p>
       )}
     </div>

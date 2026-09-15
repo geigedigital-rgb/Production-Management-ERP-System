@@ -159,6 +159,55 @@ export function OrderCreateForm({
     stagingProductId && stagingComposition && stagingTotal > 0,
   );
 
+  const editingLine = editingKey ? lines.find((row) => row.key === editingKey) : null;
+  const stagingDirty = useMemo(() => {
+    if (!stagingReady || !stagingComposition) return false;
+    if (!editingLine) return true;
+    const qtyKeys = new Set([
+      ...Object.keys(stagingQty),
+      ...Object.keys(editingLine.quantities),
+    ]);
+    for (const key of qtyKeys) {
+      if ((stagingQty[key] || 0) !== (editingLine.quantities[key] || 0)) return true;
+    }
+    if (stagingComment.trim() !== editingLine.comment) return true;
+    if (stagingComposition.materials.length !== editingLine.composition.materials.length) {
+      return true;
+    }
+    if (stagingComposition.operations.length !== editingLine.composition.operations.length) {
+      return true;
+    }
+    for (let i = 0; i < stagingComposition.materials.length; i++) {
+      const a = stagingComposition.materials[i]!;
+      const b = editingLine.composition.materials[i]!;
+      if (
+        a.materialId !== b.materialId ||
+        a.consumption !== b.consumption ||
+        a.waste !== b.waste
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [
+    stagingReady,
+    stagingComposition,
+    stagingQty,
+    stagingComment,
+    editingLine,
+  ]);
+
+  const confirmDisabled = !stagingReady || (Boolean(editingKey) && !stagingDirty);
+  const confirmLabel = !stagingReady
+    ? editingKey
+      ? "Зберегти зміни"
+      : "Погодити і додати"
+    : editingKey
+      ? stagingDirty
+        ? "Зберегти зміни"
+        : "Збережено в списку"
+      : "Погодити і додати";
+
   const linesQty = lines.reduce(
     (sum, line) =>
       sum +
@@ -326,11 +375,7 @@ export function OrderCreateForm({
             operationId: row.operationId,
             sizeCodes: row.sizeCodes ?? null,
           })),
-          decorations: line.composition.decorations.map((row) => ({
-            decorationMethodId: row.decorationMethodId,
-            setupCost: row.setupCost,
-            unitRate: row.unitRate,
-          })),
+          decorations: [],
         },
       })),
     );
@@ -459,6 +504,8 @@ export function OrderCreateForm({
                 quantities={stagingQty}
                 comment={stagingComment}
                 editing={Boolean(editingKey)}
+                inList={Boolean(editingKey) && !stagingDirty}
+                confirmLabel={confirmLabel}
                 materialOptions={materialCatalog}
                 operationOptions={operationCatalog}
                 decorationOptions={decorationCatalog}
@@ -496,7 +543,7 @@ export function OrderCreateForm({
                 onCompositionChange={setStagingComposition}
                 onCancel={cancelStaging}
                 onConfirm={addOrSaveStaging}
-                confirmDisabled={!stagingReady}
+                confirmDisabled={confirmDisabled}
               />
             ) : (
               <div className="rounded-[var(--radius-surface)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)]">
