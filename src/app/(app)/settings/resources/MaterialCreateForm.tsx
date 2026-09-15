@@ -4,7 +4,6 @@ import { useId, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/Input";
 import { Select, FormGroup } from "@/components/ui/Field";
-import { CreatePanel } from "@/components/ui/CreatePanel";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/ui/Banner";
 import { SidePanel } from "@/components/ui/Overlay";
@@ -63,20 +62,31 @@ function resolveUnitCode(unit: UnitOption | undefined): string {
   return "m";
 }
 
-function fabricUnitHint(mode: FabricUnitMode): string {
+function fabricUnitTip(mode: FabricUnitMode): string {
   switch (mode) {
     case "kg":
-      return "Купівля в кг → обовʼязкові щільність і ширина; м.п./кг рахується автоматично. У складі виробу витрата все одно в м.п.";
+      return "Щільність і ширина обовʼязкові · м.п./кг рахується сам";
     case "m2":
-      return "Купівля в м² → ₴/м.п. = ₴/м² × ширина(м). У складі виробу норма лишається в метрах погонних.";
+      return "Потрібна ширина · ₴/м.п. з ₴/м²";
     case "pcs":
-      return "Од. виміру «шт»: собівартість і норма в складі — у штуках. Доставка/м.п. для тканин не застосовуються.";
+      return "Норма і ціна в штуках";
     case "cone":
-      return "Од. виміру «бобіна»: собівартість і норма в складі — за бобіну. Для рулонної тканини краще м.п. або кг.";
+      return "Норма і ціна за бобіну";
     default:
-      return "Купівля в м.п. · собівартість з ₴/м. м.п./кг потрібне лише для логістики (кг) і авто метражу рулону.";
+      return "Ціна в ₴/м · м.п./кг лише для логістики";
   }
 }
+
+export type MaterialWizardMeta = {
+  step: number;
+  stepCount: number;
+  stepTitle: string;
+  isFirst: boolean;
+  isLast: boolean;
+  canNext: boolean;
+  goNext: () => void;
+  goBack: () => void;
+};
 
 export type MaterialFormDefaults = {
   id: string;
@@ -147,6 +157,8 @@ function MaterialFields({
   fabricGlobals,
   suppliers = [],
   managePricingSeparately = false,
+  wizard = false,
+  onWizardMeta,
 }: {
   units: UnitOption[];
   defaults?: MaterialFormDefaults;
@@ -154,6 +166,8 @@ function MaterialFields({
   suppliers?: string[];
   /** Edit fabric: prices live in MaterialSuppliersEditor, not in this form. */
   managePricingSeparately?: boolean;
+  wizard?: boolean;
+  onWizardMeta?: (meta: MaterialWizardMeta) => void;
 }) {
   const initialKind = resolveFabricKindSelect(defaults?.fabricKindUk);
   const [catalogCompositions, setCatalogCompositions] = useState<string[]>([
@@ -207,6 +221,8 @@ function MaterialFields({
 
   const initialSupplier = resolveSupplierSelect(defaults?.supplierCode, knownSuppliers);
   const [type, setType] = useState(defaults?.type ?? "FABRIC");
+  const [nameUk, setNameUk] = useState(defaults?.nameUk ?? "");
+  const [wizardStep, setWizardStep] = useState(0);
   const [unitOfMeasureId, setUnitOfMeasureId] = useState(
     defaults?.unitOfMeasureId ?? units[0]?.id ?? "",
   );
@@ -460,6 +476,87 @@ function MaterialFields({
     liveGlobals.materialCostVatMode === "GROSS" ? "GROSS" : "NET";
   const purchaseReadOnly = type === "FABRIC" && !fabricEachPricing;
 
+  const wizardSteps = useMemo(() => {
+    if (type !== "FABRIC") return ["Основне", "Ціна", "Готово"];
+    if (managePricingSeparately) {
+      return ["Основне", "Тканина", "Параметри", "Доставка", "Готово"];
+    }
+    if (fabricEachPricing) {
+      return ["Основне", "Тканина", "Постачальник", "Ціна", "Готово"];
+    }
+    return ["Основне", "Тканина", "Параметри", "Постачальник", "Ціни", "Готово"];
+  }, [type, managePricingSeparately, fabricEachPricing]);
+
+  useEffect(() => {
+    if (wizardStep >= wizardSteps.length) setWizardStep(Math.max(0, wizardSteps.length - 1));
+  }, [wizardStep, wizardSteps.length]);
+
+  const stepKey = wizardSteps[wizardStep] ?? "Основне";
+
+  function stepCanNext(): boolean {
+    if (stepKey === "Основне") return Boolean(nameUk.trim() && unitOfMeasureId);
+    if (stepKey === "Параметри" && densityWidthRequired) {
+      return Boolean(densityGsm.trim() && widthCm.trim() && metersPerKg);
+    }
+    if (stepKey === "Параметри" && widthRequiredForM2) {
+      return Boolean(widthCm.trim());
+    }
+    if (stepKey === "Постачальник" || stepKey === "Доставка") {
+      return Boolean(supplierValue || managePricingSeparately);
+    }
+    if (stepKey === "Ціни" || stepKey === "Ціна") {
+      if (fabricUnitMode === "kg") return Boolean(priceKgUsd);
+      if (fabricUnitMode === "m" || fabricUnitMode === "m2") {
+        return Boolean(priceMeterNoVat || (fabricUnitMode === "m2" && priceM2NoVat));
+      }
+      if (fabricEachPricing) return Boolean(Number(purchasePrice) >= 0);
+    }
+    return true;
+  }
+
+  useEffect(() => {
+    if (!wizard || !onWizardMeta) return;
+    onWizardMeta({
+      step: wizardStep,
+      stepCount: wizardSteps.length,
+      stepTitle: stepKey,
+      isFirst: wizardStep <= 0,
+      isLast: wizardStep >= wizardSteps.length - 1,
+      canNext: stepCanNext(),
+      goNext: () => {
+        if (!stepCanNext()) return;
+        setWizardStep((s) => Math.min(s + 1, wizardSteps.length - 1));
+      },
+      goBack: () => setWizardStep((s) => Math.max(s - 1, 0)),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stepCanNext reads latest state via closure on each render
+  }, [
+    wizard,
+    onWizardMeta,
+    wizardStep,
+    wizardSteps,
+    stepKey,
+    nameUk,
+    unitOfMeasureId,
+    densityGsm,
+    widthCm,
+    metersPerKg,
+    supplierValue,
+    priceKgUsd,
+    priceMeterNoVat,
+    priceM2NoVat,
+    purchasePrice,
+    densityWidthRequired,
+    widthRequiredForM2,
+    fabricUnitMode,
+    fabricEachPricing,
+    managePricingSeparately,
+  ]);
+
+  function showStep(title: string) {
+    return !wizard || stepKey === title;
+  }
+
   return (
     <div className="space-y-4">
       {defaults ? <input type="hidden" name="id" value={defaults.id} /> : null}
@@ -467,21 +564,57 @@ function MaterialFields({
         <input type="hidden" name="pricingManagedSeparately" value="1" />
       ) : null}
 
-      <FormGroup label="Основне" icon={<IconFormTitle size={14} />} columns={2} compact>
+      {wizard ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[13px] font-medium text-[var(--color-text-primary)]">
+              {stepKey}
+            </p>
+            <p className="type-caption tabular">
+              {wizardStep + 1} / {wizardSteps.length}
+            </p>
+          </div>
+          <div className="flex gap-1">
+            {wizardSteps.map((title, index) => (
+              <button
+                key={title}
+                type="button"
+                title={title}
+                onClick={() => {
+                  if (index <= wizardStep) setWizardStep(index);
+                }}
+                className={`h-1.5 flex-1 rounded-full transition-colors ${
+                  index <= wizardStep
+                    ? "bg-[var(--color-primary-600)]"
+                    : "bg-[var(--color-border)]"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className={showStep("Основне") ? "space-y-4" : "hidden"}>
+      <FormGroup label={wizard ? undefined : "Основне"} icon={wizard ? undefined : <IconFormTitle size={14} />} columns={2} compact>
         <Input
           className="sm:col-span-2"
           name="nameUk"
           label="Назва"
           required
-          autoFocus={!defaults}
+          autoFocus={!defaults && (!wizard || wizardStep === 0)}
           placeholder="Кулір 30/1"
-          defaultValue={defaults?.nameUk}
+          value={nameUk}
+          onChange={(event) => setNameUk(event.target.value)}
         />
         <Select
           name="type"
           label="Тип"
+          required
           value={type}
-          onChange={(event) => setType(event.target.value)}
+          onChange={(event) => {
+            setType(event.target.value);
+            setWizardStep(0);
+          }}
         >
           <option value="FABRIC">Тканина</option>
           <option value="OTHER_MATERIAL">Інший матеріал</option>
@@ -493,7 +626,7 @@ function MaterialFields({
           required
           value={unitOfMeasureId}
           onChange={(event) => setUnitOfMeasureId(event.target.value)}
-          hint={type === "FABRIC" ? fabricUnitHint(fabricUnitMode) : undefined}
+          hint={type === "FABRIC" ? fabricUnitTip(fabricUnitMode) : undefined}
         >
           {units.map((unit) => (
             <option key={unit.id} value={unit.id}>
@@ -502,57 +635,72 @@ function MaterialFields({
           ))}
         </Select>
       </FormGroup>
+      </div>
 
-      <FormGroup label="У розрахунку" icon={<IconCalc size={14} />} columns={2} compact>
+      {/* Calc fields stay mounted for submit; visible on price/ready steps. */}
+      <div
+        className={
+          !wizard || showStep("Ціна") || showStep("Готово") ? "space-y-4" : "hidden"
+        }
+      >
+      <FormGroup
+        label={wizard ? undefined : "У розрахунку"}
+        icon={wizard ? undefined : <IconCalc size={14} />}
+        columns={2}
+        compact
+      >
         <Input
           name="purchasePrice"
           label={
             fabricEachPricing
               ? fabricUnitMode === "cone"
-                ? "Собівартість, ₴/бобіна"
-                : "Собівартість, ₴/шт"
+                ? "Собівартість"
+                : "Собівартість"
               : type === "FABRIC"
-                ? "Собівартість, ₴/м.п. (авто)"
-                : "Собівартість, ₴"
+                ? "Собівартість"
+                : "Собівартість"
           }
           type="number"
           step="0.01"
           min="0"
           required
+          suffix={
+            fabricEachPricing
+              ? fabricUnitMode === "cone"
+                ? "₴/боб"
+                : "₴/шт"
+              : type === "FABRIC"
+                ? "₴/м"
+                : "₴"
+          }
           value={purchaseDisplay}
           readOnly={purchaseReadOnly}
           tabIndex={purchaseReadOnly ? -1 : undefined}
           onChange={
             purchaseReadOnly ? undefined : (event) => setPurchasePrice(event.target.value)
           }
-          hint={
-            type === "FABRIC"
-              ? fabricEachPricing
-                ? "Норма в складі виробу — в цій же одиниці"
-                : managePricingSeparately
-                  ? "З умов основного постачальника нижче"
-                  : derived.costMode === "NET"
-                    ? "Без ПДВ · для калькуляції завжди ₴/м.п."
-                    : "З ПДВ · для калькуляції завжди ₴/м.п."
-              : undefined
-          }
         />
         <Input
           name="defaultWastePercent"
-          label="Відходи, %"
+          label="Відходи"
           type="number"
           step="0.01"
           min="0"
+          suffix="%"
+          optional
           defaultValue={defaults?.defaultWastePercent ?? 0}
         />
       </FormGroup>
+      </div>
 
       {type === "FABRIC" ? (
         <>
-          <FormGroup label="Тканина" icon={<IconFabricKind size={14} />} columns={2} compact>
+          <div className={showStep("Тканина") ? "space-y-4" : "hidden"}>
+          <FormGroup label={wizard ? undefined : "Тканина"} icon={wizard ? undefined : <IconFabricKind size={14} />} columns={2} compact>
             <div className="space-y-2">
               <Select
                 label="Тип тканини"
+                optional
                 value={fabricKindSelect}
                 onChange={(event) => setFabricKindSelect(event.target.value)}
               >
@@ -577,6 +725,7 @@ function MaterialFields({
             <div className="space-y-2">
               <Select
                 label="Склад"
+                optional
                 value={compositionSelect}
                 onChange={(event) => setCompositionSelect(event.target.value)}
               >
@@ -599,13 +748,16 @@ function MaterialFields({
               ) : null}
             </div>
           </FormGroup>
+          </div>
 
-          <FormGroup label="Параметри" icon={<IconParams size={14} />} columns={3} compact>
+          <div className={showStep("Параметри") || !wizard ? "space-y-4" : "hidden"}>
+          <FormGroup label={wizard ? undefined : "Параметри"} icon={wizard ? undefined : <IconParams size={14} />} columns={3} compact>
             {showDensityField ? (
               <Input
                 name="densityGsm"
-                label="Щільність, г/м²"
+                label="Щільність"
                 placeholder="170"
+                suffix="г/м²"
                 value={densityGsm}
                 required={densityWidthRequired}
                 onChange={(event) => {
@@ -613,13 +765,6 @@ function MaterialFields({
                   setDensityGsm(value);
                   syncMetersPerKgFromDensity(value, widthCm, densityWidthRequired);
                 }}
-                hint={
-                  densityWidthRequired
-                    ? "Обовʼязково · разом із шириною дає м.п./кг"
-                    : autoMetersPerKg != null
-                      ? `→ ${autoMetersPerKg} м.п./кг`
-                      : undefined
-                }
               />
             ) : (
               <input type="hidden" name="densityGsm" value={densityGsm} />
@@ -627,7 +772,8 @@ function MaterialFields({
             {showWidthField ? (
               <Input
                 name="widthCm"
-                label="Ширина, см"
+                label="Ширина"
+                suffix="см"
                 value={widthCm}
                 required={densityWidthRequired || widthRequiredForM2}
                 onChange={(event) => {
@@ -636,13 +782,6 @@ function MaterialFields({
                   syncMetersPerKgFromDensity(densityGsm, value, densityWidthRequired);
                   if (fabricUnitMode === "m2") applyM2Prices({ widthCm: value });
                 }}
-                hint={
-                  densityWidthRequired
-                    ? "Обовʼязково для авто м.п./кг"
-                    : widthRequiredForM2
-                      ? "Потрібна для переводу м² → м.п."
-                      : "Довідково"
-                }
               />
             ) : (
               <input type="hidden" name="widthCm" value={widthCm} />
@@ -656,19 +795,13 @@ function MaterialFields({
                 min="0"
                 value={metersPerKg}
                 required={metersPerKgRequired}
+                optional={!metersPerKgRequired}
                 readOnly={metersPerKgAutoOnly}
                 tabIndex={metersPerKgAutoOnly ? -1 : undefined}
                 onChange={
                   metersPerKgAutoOnly
                     ? undefined
                     : (event) => applyMetersPerKg(event.target.value)
-                }
-                hint={
-                  metersPerKgAutoOnly
-                    ? autoMetersPerKg != null
-                      ? "Авто: 100 000 ÷ (щільність × ширина)"
-                      : "Заповніть щільність і ширину"
-                    : "Опційно · для доставки (кг) і авто метражу рулону"
                 }
               />
             ) : (
@@ -678,6 +811,7 @@ function MaterialFields({
               <>
                 <Select
                   label="Метраж рулону"
+                  optional
                   value={rollLengthFixed ? "fixed" : "auto"}
                   onChange={(event) => {
                     const fixed = event.target.value === "fixed";
@@ -690,11 +824,6 @@ function MaterialFields({
                       setMetersPerRollManual(current);
                     }
                   }}
-                  hint={
-                    rollLengthFixed
-                      ? "Фіксована довжина (напр. 50 м) — без ваги/GSM"
-                      : "Авто з ваги рулону × м.п./кг"
-                  }
                 >
                   <option value="auto">З ваги (авто)</option>
                   <option value="fixed">Фіксована довжина</option>
@@ -759,23 +888,55 @@ function MaterialFields({
               </>
             )}
           </FormGroup>
+          </div>
 
-          {/* Delivery + purchase live together so tariff is not orphaned in «Параметри». */}
-          {pricingInline || managePricingSeparately ? (
+          <div
+            className={
+              showStep("Постачальник") || showStep("Доставка") || !wizard
+                ? "space-y-4"
+                : "hidden"
+            }
+          >
             <FormGroup
-              label={managePricingSeparately ? "Доставка" : "Постачальники та закупівля"}
-              icon={<IconPurchaseKg size={14} />}
-              columns={3}
+              label={wizard ? undefined : "Постачальник і доставка"}
+              icon={wizard ? undefined : <IconPurchaseKg size={14} />}
+              columns={2}
               compact
             >
-              <p className="type-caption sm:col-span-3">
-                {managePricingSeparately
-                  ? "Тип доставки матеріалу. Тариф $/кг можна змінити — збережеться в «Ціноутворення». Override на постачальника — у блоці нижче."
-                  : "Тип доставки задає тариф $/кг для логістики. Ціни можна змінити тут — збережуться в «Ціноутворення» для цього типу."}
-              </p>
+              {!managePricingSeparately ? (
+                <div className="space-y-2 sm:col-span-2">
+                  <Select
+                    label="Постачальник"
+                    required={pricingInline}
+                    value={supplierSelect}
+                    onChange={(event) => setSupplierSelect(event.target.value)}
+                  >
+                    <option value="">Оберіть…</option>
+                    {knownSuppliers.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                    <option value={SUPPLIER_OTHER}>Додати нового…</option>
+                  </Select>
+                  <input type="hidden" name="supplierCode" value={supplierValue} />
+                  {supplierSelect === SUPPLIER_OTHER ? (
+                    <Input
+                      label="Назва постачальника"
+                      required
+                      value={supplierOther}
+                      onChange={(event) => setSupplierOther(event.target.value)}
+                      placeholder="Наприклад Зейджан"
+                    />
+                  ) : null}
+                </div>
+              ) : (
+                <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
+              )}
               <Select
                 name="deliveryType"
                 label="Тип доставки"
+                required
                 value={deliveryType}
                 onChange={(event) =>
                   applyDeliveryType(normalizeFabricDeliveryType(event.target.value))
@@ -783,14 +944,13 @@ function MaterialFields({
               >
                 {FABRIC_DELIVERY_TYPES.map((code) => (
                   <option key={code} value={code}>
-                    {fabricDeliveryTypeLabel(code)} —{" "}
-                    {deliveryRateUsdPerKg(code, fabricGlobals)} $/кг
+                    {fabricDeliveryTypeLabel(code)}
                   </option>
                 ))}
               </Select>
               <Input
                 name="fabricCargoUsdPerKg"
-                label="Доставка"
+                label="Тариф"
                 type="number"
                 step="0.01"
                 min="0"
@@ -801,54 +961,25 @@ function MaterialFields({
                   setFabricCargoUsdPerKg(value);
                   if (pricingInline) recalcMeterPrices({ fabricCargoUsdPerKg: value });
                 }}
-                hint={`Тариф «${fabricDeliveryTypeLabel(deliveryType)}» · можна змінити`}
               />
               <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
             </FormGroup>
-          ) : null}
+          </div>
 
+          <div className={showStep("Ціни") || (!wizard && pricingInline) ? "space-y-4" : "hidden"}>
           {pricingInline ? (
             <>
               {fabricUnitMode === "kg" || fabricUnitMode === "m" ? (
                 <FormGroup
                   label={
                     fabricUnitMode === "kg"
-                      ? "Ціни закупки в кг"
-                      : "Ціни $/кг (опційно)"
+                      ? "Ціни в кг"
+                      : "Ціни в $/кг"
                   }
                   icon={<IconPurchaseKg size={14} />}
                   columns={3}
                   compact
                 >
-                  <p className="type-caption sm:col-span-3">
-                    {fabricUnitMode === "kg"
-                      ? `Ціна за кг + м.п./кг → ₴/м.п. Курс ₴/$: ${fabricGlobals.usdUahRate}.`
-                      : `Якщо постачальник дає $/кг — заповніть тут. Інакше достатньо ₴/м нижче. Курс: ${fabricGlobals.usdUahRate}.`}
-                  </p>
-                  <div className="space-y-2 sm:col-span-3 lg:col-span-2">
-                    <Select
-                      label="Постачальник"
-                      value={supplierSelect}
-                      onChange={(event) => setSupplierSelect(event.target.value)}
-                    >
-                      <option value="">Оберіть…</option>
-                      {knownSuppliers.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                      <option value={SUPPLIER_OTHER}>Додати нового…</option>
-                    </Select>
-                    <input type="hidden" name="supplierCode" value={supplierValue} />
-                    {supplierSelect === SUPPLIER_OTHER ? (
-                      <Input
-                        label="Назва постачальника"
-                        value={supplierOther}
-                        onChange={(event) => setSupplierOther(event.target.value)}
-                        placeholder="Наприклад Зейджан"
-                      />
-                    ) : null}
-                  </div>
                   <Input
                     name="priceKgUsd"
                     label="Ціна"
@@ -857,6 +988,7 @@ function MaterialFields({
                     min="0"
                     suffix="$/кг"
                     required={fabricUnitMode === "kg"}
+                    optional={fabricUnitMode === "m"}
                     value={priceKgUsd}
                     onChange={(event) => {
                       const value = event.target.value;
@@ -879,6 +1011,7 @@ function MaterialFields({
                     step="0.01"
                     min="0"
                     suffix="$/кг"
+                    optional
                     value={priceKgUsdVat}
                     onChange={(event) => {
                       const value = event.target.value;
@@ -891,38 +1024,11 @@ function MaterialFields({
 
               {fabricUnitMode === "m2" ? (
                 <FormGroup
-                  label="Ціни закупки в м²"
+                  label="Ціни в м²"
                   icon={<IconPurchaseKg size={14} />}
                   columns={3}
                   compact
                 >
-                  <p className="type-caption sm:col-span-3">
-                    ₴/м.п. = ₴/м² × (ширина см ÷ 100). Курс ₴/$: {fabricGlobals.usdUahRate}.
-                  </p>
-                  <div className="space-y-2 sm:col-span-3 lg:col-span-2">
-                    <Select
-                      label="Постачальник"
-                      value={supplierSelect}
-                      onChange={(event) => setSupplierSelect(event.target.value)}
-                    >
-                      <option value="">Оберіть…</option>
-                      {knownSuppliers.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                      <option value={SUPPLIER_OTHER}>Додати нового…</option>
-                    </Select>
-                    <input type="hidden" name="supplierCode" value={supplierValue} />
-                    {supplierSelect === SUPPLIER_OTHER ? (
-                      <Input
-                        label="Назва постачальника"
-                        value={supplierOther}
-                        onChange={(event) => setSupplierOther(event.target.value)}
-                        placeholder="Наприклад Зейджан"
-                      />
-                    ) : null}
-                  </div>
                   <Input
                     label="Без ПДВ"
                     type="number"
@@ -939,6 +1045,7 @@ function MaterialFields({
                     step="0.1"
                     min="0"
                     suffix="₴/м²"
+                    optional
                     value={priceM2Vat}
                     onChange={(event) => applyM2Prices({ priceM2Vat: event.target.value })}
                   />
@@ -949,14 +1056,8 @@ function MaterialFields({
               ) : null}
 
               <FormGroup
-                label={
-                  fabricUnitMode === "m2"
-                    ? "Ціна за м.п. (з м²) і гурт"
-                    : fabricUnitMode === "kg"
-                      ? "Ціна за м.п. (з кг) і гурт"
-                      : "Ціна за м.п. і гурт"
-                }
-                icon={<IconMeterPrice size={14} />}
+                label={wizard ? undefined : "Ціна за м.п. і гурт"}
+                icon={wizard ? undefined : <IconMeterPrice size={14} />}
                 columns={3}
                 compact
               >
@@ -1043,43 +1144,34 @@ function MaterialFields({
                 ) : null}
               </FormGroup>
             </>
-          ) : (
-            <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
-          )}
+          ) : null}
+          </div>
 
-          {fabricEachPricing && !managePricingSeparately ? (
-            <FormGroup label="Постачальник" icon={<IconPurchaseKg size={14} />} columns={2} compact>
-              <div className="space-y-2 sm:col-span-2">
-                <Select
-                  label="Постачальник"
-                  value={supplierSelect}
-                  onChange={(event) => setSupplierSelect(event.target.value)}
-                >
-                  <option value="">Оберіть…</option>
-                  {knownSuppliers.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                  <option value={SUPPLIER_OTHER}>Додати нового…</option>
-                </Select>
-                <input type="hidden" name="supplierCode" value={supplierValue} />
-                {supplierSelect === SUPPLIER_OTHER ? (
-                  <Input
-                    label="Назва постачальника"
-                    value={supplierOther}
-                    onChange={(event) => setSupplierOther(event.target.value)}
-                    placeholder="Наприклад Зейджан"
-                  />
-                ) : null}
-              </div>
-            </FormGroup>
+          <div className={showStep("Готово") || !wizard ? "space-y-4" : "hidden"}>
+          {wizard ? (
+            <div className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2.5 text-[13px]">
+              <p className="font-medium text-[var(--color-text-primary)]">{nameUk || "Без назви"}</p>
+              <p className="type-caption mt-0.5">
+                {selectedUnit?.label ?? "—"}
+                {supplierValue ? ` · ${supplierValue}` : ""}
+                {` · ${fabricDeliveryTypeLabel(deliveryType)}`}
+                {derived.purchasePrice > 0
+                  ? ` · ${formatMoneyUah(derived.purchasePrice)}/м`
+                  : ""}
+              </p>
+            </div>
           ) : null}
 
-          <FormGroup label="ПДВ" icon={<IconCalc size={14} />} columns={1} compact>
+          <FormGroup
+            label={wizard ? undefined : "ПДВ"}
+            icon={wizard ? undefined : <IconCalc size={14} />}
+            columns={1}
+            compact
+          >
             <Select
               name="costVatOverride"
               label="ПДВ у собівартості"
+              optional
               value={costOverride}
               onChange={(event) => setCostOverride(event.target.value)}
             >
@@ -1089,33 +1181,49 @@ function MaterialFields({
             </Select>
           </FormGroup>
           <input type="hidden" name="colorOrAttribute" value={defaults?.colorOrAttribute ?? ""} />
+          </div>
         </>
       ) : (
-        <FormGroup label="Ідентифікація" icon={<IconSpec size={14} />} columns={2} compact>
+        <div className={!wizard || showStep("Готово") || showStep("Ціна") ? "space-y-4" : "hidden"}>
+        <FormGroup
+          label={wizard ? undefined : "Ідентифікація"}
+          icon={wizard ? undefined : <IconSpec size={14} />}
+          columns={2}
+          compact
+        >
           <Input
             name="supplierCode"
             label="Код / артикул"
-            placeholder="Необовʼязково"
+            optional
             defaultValue={defaults?.supplierCode}
           />
           <Input
             name="colorOrAttribute"
             label="Колір / характеристика"
-            placeholder="Необовʼязково"
+            optional
             defaultValue={defaults?.colorOrAttribute}
           />
         </FormGroup>
+        </div>
       )}
 
-      <FormGroup label="Примітка" icon={<IconNote size={14} />} columns={1} compact>
+      <div className={showStep("Готово") || !wizard ? "space-y-4" : "hidden"}>
+      <FormGroup
+        label={wizard ? undefined : "Примітка"}
+        icon={wizard ? undefined : <IconNote size={14} />}
+        columns={1}
+        compact
+      >
         <Input
           name="note"
           label="Коментар"
-          placeholder="Умови постачання, обмеження"
+          optional
+          placeholder="Умови постачання"
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />
       </FormGroup>
+      </div>
     </div>
   );
 }
@@ -1137,20 +1245,106 @@ export function MaterialCreatePanel({
   fabricGlobals?: FabricPricingGlobals;
   onCreated?: (result: Record<string, unknown>) => void;
 }) {
+  const router = useRouter();
+  const formId = useId();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [wizardMeta, setWizardMeta] = useState<MaterialWizardMeta | null>(null);
+
+  function submit(formData: FormData) {
+    setError(null);
+    startTransition(async () => {
+      const result = await createMaterialAction(formData);
+      if (!result.ok) {
+        setError("Заповніть обовʼязкові поля (*) і спробуйте ще.");
+        return;
+      }
+      setOpen(false);
+      setWizardMeta(null);
+      onCreated?.(result);
+      router.refresh();
+    });
+  }
+
   return (
-    <CreatePanel
-      title="Новий матеріал"
-      description="Одиниця виміру задає шлях закупівлі (м.п. / кг / м² / шт / бобіна). Для тканини калькуляція в складі йде в м.п., крім шт і бобіни."
-      triggerLabel={triggerLabel}
-      submitLabel="Створити"
-      action={createMaterialAction}
-      variant={variant}
-      size={size}
-      width="lg"
-      onCreated={onCreated}
-    >
-      <MaterialFields units={units} fabricGlobals={fabricGlobals} suppliers={suppliers} />
-    </CreatePanel>
+    <>
+      <Button variant={variant} size={size} onClick={() => setOpen(true)}>
+        {triggerLabel}
+      </Button>
+      <SidePanel
+        open={open}
+        onClose={() => {
+          if (pending) return;
+          setOpen(false);
+          setWizardMeta(null);
+        }}
+        title="Новий матеріал"
+        description="Крок за кроком · * обовʼязкові поля"
+        width="lg"
+        footer={
+          <>
+            {wizardMeta && !wizardMeta.isFirst ? (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => wizardMeta.goBack()}
+              >
+                ← Назад
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => {
+                  setOpen(false);
+                  setWizardMeta(null);
+                }}
+              >
+                Скасувати
+              </Button>
+            )}
+            {wizardMeta && !wizardMeta.isLast ? (
+              <Button
+                type="button"
+                disabled={pending || !wizardMeta.canNext}
+                onClick={() => wizardMeta.goNext()}
+              >
+                Далі →
+              </Button>
+            ) : (
+              <Button type="submit" form={formId} loading={pending} disabled={pending}>
+                {pending ? "Збереження…" : "Додати матеріал"}
+              </Button>
+            )}
+          </>
+        }
+      >
+        <form
+          key={open ? "open" : "closed"}
+          id={formId}
+          action={submit}
+          className="space-y-4"
+          onSubmit={(event) => {
+            if (wizardMeta && !wizardMeta.isLast) {
+              event.preventDefault();
+              wizardMeta.goNext();
+            }
+          }}
+        >
+          {error ? <Banner tone="danger">{error}</Banner> : null}
+          <MaterialFields
+            units={units}
+            fabricGlobals={fabricGlobals}
+            suppliers={suppliers}
+            wizard
+            onWizardMeta={setWizardMeta}
+          />
+        </form>
+      </SidePanel>
+    </>
   );
 }
 

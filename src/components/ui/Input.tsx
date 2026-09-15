@@ -9,6 +9,8 @@ type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   inputClassName?: string;
   /** Fixed trailing adornment (e.g. ₴, $) on the right inside the control. */
   suffix?: React.ReactNode;
+  /** Show quiet «необовʼязково» when not required. */
+  optional?: boolean;
 };
 
 export function Input({
@@ -18,6 +20,7 @@ export function Input({
   error,
   hint,
   required,
+  optional,
   id,
   readOnly,
   suffix,
@@ -41,7 +44,14 @@ export function Input({
   );
 
   return (
-    <FieldShell label={label} hint={hint} error={error} required={required} className={className}>
+    <FieldShell
+      label={label}
+      hint={hint}
+      error={error}
+      required={required}
+      optional={optional}
+      className={className}
+    >
       {suffix ? (
         <div className="relative">
           {control}

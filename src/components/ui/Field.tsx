@@ -9,13 +9,28 @@ type FieldShellProps = {
   children: React.ReactNode;
 };
 
-export function FieldShell({ label, hint, error, required, className, children }: FieldShellProps) {
+export function FieldShell({
+  label,
+  hint,
+  error,
+  required,
+  optional,
+  className,
+  children,
+}: FieldShellProps & { optional?: boolean }) {
   return (
     <label className={cn("flex w-full flex-col gap-1", className)}>
       {label ? (
-        <span className="type-label">
-          {label}
-          {required ? <span className="ml-0.5 text-[var(--color-danger-text)]">*</span> : null}
+        <span className="type-label inline-flex flex-wrap items-baseline gap-1.5">
+          <span>
+            {label}
+            {required ? <span className="ml-0.5 text-[var(--color-danger-text)]">*</span> : null}
+          </span>
+          {optional && !required ? (
+            <span className="text-[10.5px] font-normal normal-case tracking-normal text-[var(--color-text-quiet)]">
+              необовʼязково
+            </span>
+          ) : null}
         </span>
       ) : null}
       {children}
