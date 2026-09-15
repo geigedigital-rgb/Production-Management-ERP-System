@@ -163,20 +163,37 @@ export function AppSidebar({ permissions = [] }: { permissions?: Permission[] })
   const t = useTranslations("nav");
   const {
     collapsed,
+    railCollapsed,
     overlayOpen,
     toggle,
     setPreferredCollapsed,
     expandDespiteOverlay,
     collapseDuringOverlay,
+    beginHoverPeek,
+    endHoverPeek,
   } = useSidebar();
 
+  const peeking = railCollapsed && !collapsed;
+
   return (
-    <aside
-      className={cn(
-        "sticky top-0 z-40 flex h-screen shrink-0 flex-col bg-[var(--color-sidebar-bg)] text-[var(--color-sidebar-text)] transition-[width] duration-200 ease-out",
-        "w-[var(--sidebar-width)]",
-      )}
-    >
+    <>
+      {railCollapsed ? (
+        <div className="w-[var(--sidebar-width)] shrink-0" aria-hidden />
+      ) : null}
+      <aside
+        onMouseEnter={() => {
+          if (railCollapsed) beginHoverPeek();
+        }}
+        onMouseLeave={() => endHoverPeek()}
+        className={cn(
+          "flex h-screen shrink-0 flex-col bg-[var(--color-sidebar-bg)] text-[var(--color-sidebar-text)] transition-[width,box-shadow] duration-200 ease-out",
+          peeking
+            ? "fixed top-0 left-0 z-[55] w-[232px] shadow-[var(--shadow-panel)]"
+            : railCollapsed
+              ? "fixed top-0 left-0 z-40 w-[var(--sidebar-width)]"
+              : "sticky top-0 z-40 w-[var(--sidebar-width)]",
+        )}
+      >
       <div
         className={cn(
           "flex h-14 items-center border-b border-[var(--color-sidebar-border)]",
@@ -294,5 +311,6 @@ export function AppSidebar({ permissions = [] }: { permissions?: Permission[] })
         ) : null}
       </div>
     </aside>
+    </>
   );
 }
