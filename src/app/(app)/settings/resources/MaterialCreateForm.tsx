@@ -790,10 +790,11 @@ function MaterialFields({
               </Select>
               <Input
                 name="fabricCargoUsdPerKg"
-                label="Доставка $/кг"
+                label="Доставка"
                 type="number"
                 step="0.01"
                 min="0"
+                suffix="$/кг"
                 value={fabricCargoUsdPerKg}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -850,10 +851,11 @@ function MaterialFields({
                   </div>
                   <Input
                     name="priceKgUsd"
-                    label="$ / кг"
+                    label="Ціна"
                     type="number"
                     step="0.01"
                     min="0"
+                    suffix="$/кг"
                     required={fabricUnitMode === "kg"}
                     value={priceKgUsd}
                     onChange={(event) => {
@@ -863,18 +865,20 @@ function MaterialFields({
                     }}
                   />
                   <Input
-                    label="$ / кг з доставкою (довідково)"
+                    label="З доставкою"
                     value={derived.priceKgUsdCargo ?? ""}
+                    suffix="$/кг"
                     readOnly
                     tabIndex={-1}
                   />
                   <input type="hidden" name="priceKgUsdCargo" value={derived.priceKgUsdCargo ?? ""} />
                   <Input
                     name="priceKgUsdVat"
-                    label="$ / кг з ПДВ"
+                    label="З ПДВ"
                     type="number"
                     step="0.01"
                     min="0"
+                    suffix="$/кг"
                     value={priceKgUsdVat}
                     onChange={(event) => {
                       const value = event.target.value;
@@ -920,19 +924,21 @@ function MaterialFields({
                     ) : null}
                   </div>
                   <Input
-                    label="₴/м² без ПДВ"
+                    label="Без ПДВ"
                     type="number"
                     step="0.1"
                     min="0"
+                    suffix="₴/м²"
                     required
                     value={priceM2NoVat}
                     onChange={(event) => applyM2Prices({ priceM2NoVat: event.target.value })}
                   />
                   <Input
-                    label="₴/м² з ПДВ"
+                    label="З ПДВ"
                     type="number"
                     step="0.1"
                     min="0"
+                    suffix="₴/м²"
                     value={priceM2Vat}
                     onChange={(event) => applyM2Prices({ priceM2Vat: event.target.value })}
                   />
@@ -956,10 +962,11 @@ function MaterialFields({
               >
                 <Input
                   name="priceMeterUahNoVat"
-                  label="₴/м без ПДВ (гурт)"
+                  label="Без ПДВ (гурт)"
                   type="number"
                   step="0.1"
                   min="0"
+                  suffix="₴/м"
                   required={fabricUnitMode === "m" || fabricUnitMode === "m2"}
                   value={priceMeterNoVat}
                   readOnly={fabricUnitMode === "kg" || fabricUnitMode === "m2"}
@@ -979,10 +986,11 @@ function MaterialFields({
                 />
                 <Input
                   name="priceMeterUahVat"
-                  label="₴/м з ПДВ (гурт)"
+                  label="З ПДВ (гурт)"
                   type="number"
                   step="0.1"
                   min="0"
+                  suffix="₴/м"
                   value={priceMeterVat}
                   readOnly={fabricUnitMode === "kg" || fabricUnitMode === "m2"}
                   tabIndex={fabricUnitMode === "kg" || fabricUnitMode === "m2" ? -1 : undefined}
@@ -999,20 +1007,22 @@ function MaterialFields({
                 />
                 <Input
                   name="priceMeterUahCutVat"
-                  label="₴/м відріз"
+                  label="Відріз"
                   type="number"
                   step="0.1"
                   min="0"
+                  suffix="₴/м"
                   value={priceMeterCutVat}
                   onChange={(event) => setPriceMeterCutVat(event.target.value)}
                   hint="До межі гурту / малі тиражі"
                 />
                 <Input
                   name="minWholesaleMeters"
-                  label="Межа витрати, м"
+                  label="Межа витрати"
                   type="number"
                   step="0.1"
                   min="0"
+                  suffix="м"
                   value={minWholesaleMeters}
                   onChange={(event) => setMinWholesaleMeters(event.target.value)}
                   hint="Порожньо = метраж рулону · ≥ межі → гурт"

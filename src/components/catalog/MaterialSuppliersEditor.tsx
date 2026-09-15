@@ -14,7 +14,9 @@ import {
   upsertMaterialSupplierOfferAction,
 } from "@/server/domains/catalog/actions";
 import { deriveFabricPricing, type FabricPricingGlobals } from "@/lib/fabric-pricing";
-import { formatMoneyUah } from "@/lib/utils";
+import { SupplierPaletteEditor } from "@/components/catalog/SupplierPaletteEditor";
+import { formatMoneyUah, cn } from "@/lib/utils";
+import { swatchForColorLabel } from "@/lib/trim-colors";
 
 type OfferRow = {
   id: string;
@@ -284,9 +286,30 @@ export function MaterialSuppliersEditor({
                   </span>
                 ) : null}
                 {(row.availableColors?.length ?? 0) > 0 ? (
-                  <span className="type-caption ml-2 block sm:inline">
-                    кольори: {row.availableColors.slice(0, 4).join(", ")}
-                    {row.availableColors.length > 4 ? "…" : ""}
+                  <span className="type-caption ml-2 inline-flex flex-wrap items-center gap-1">
+                    {row.availableColors.slice(0, 6).map((label) => {
+                      const swatch = swatchForColorLabel(label);
+                      return (
+                        <span
+                          key={label}
+                          className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface)] px-1.5 py-0.5"
+                          title={label}
+                        >
+                          <span
+                            className={cn(
+                              "size-2.5 rounded-full ring-1 ring-black/15",
+                              swatch.bordered && "border border-[var(--color-border-strong)]",
+                            )}
+                            style={{ backgroundColor: swatch.swatch }}
+                            aria-hidden
+                          />
+                          <span className="text-[11px]">{label}</span>
+                        </span>
+                      );
+                    })}
+                    {row.availableColors.length > 6 ? (
+                      <span className="text-[11px]">+{row.availableColors.length - 6}</span>
+                    ) : null}
                   </span>
                 ) : (
                   <span className="type-caption ml-2 text-[var(--color-warning-text)]">
@@ -386,23 +409,19 @@ export function MaterialSuppliersEditor({
           </FormGroup>
 
           <FormGroup label="Палітра кольорів" columns={1} compact>
-            <Input
-              label="Кольори цього постачальника"
+            <SupplierPaletteEditor
               value={draft.availableColors}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, availableColors: event.target.value }))
-              }
-              placeholder="Чорний, Білий, Navy"
-              hint="Через кому. У продукті й замовленні кольори зміняться після вибору цього постачальника."
+              onChange={(next) => setDraft((prev) => ({ ...prev, availableColors: next }))}
             />
           </FormGroup>
 
           <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
             <Input
-              label="Доставка $/кг"
+              label="Доставка"
               type="number"
               min={0}
               step="0.01"
+              suffix="$/кг"
               value={draft.cargoUsdPerKg}
               onChange={(event) => {
                 const value = event.target.value;
@@ -436,10 +455,11 @@ export function MaterialSuppliersEditor({
               hint={`Override для цього постачальника · база компанії: ${defaultCargo}`}
             />
             <Input
-              label="$ / кг"
+              label="Ціна"
               type="number"
               min={0}
               step="0.01"
+              suffix="$/кг"
               value={draft.priceKgUsd}
               onChange={(event) => {
                 const value = event.target.value;
@@ -466,10 +486,11 @@ export function MaterialSuppliersEditor({
               }}
             />
             <Input
-              label="$ / кг з ПДВ"
+              label="Ціна з ПДВ"
               type="number"
               min={0}
               step="0.01"
+              suffix="$/кг"
               value={draft.priceKgUsdVat}
               onChange={(event) => {
                 const value = event.target.value;
@@ -492,10 +513,11 @@ export function MaterialSuppliersEditor({
               }}
             />
             <Input
-              label="₴/м без ПДВ (гурт)"
+              label="Без ПДВ (гурт)"
               type="number"
               min={0}
               step="0.1"
+              suffix="₴/м"
               value={draft.priceMeterUahNoVat}
               onChange={(event) =>
                 setDraft((prev) => ({ ...prev, priceMeterUahNoVat: event.target.value }))
@@ -503,10 +525,11 @@ export function MaterialSuppliersEditor({
               hint="Ціна після межі гурту · авто з $/кг"
             />
             <Input
-              label="₴/м з ПДВ (гурт)"
+              label="З ПДВ (гурт)"
               type="number"
               min={0}
               step="0.1"
+              suffix="₴/м"
               value={draft.priceMeterUahVat}
               onChange={(event) =>
                 setDraft((prev) => ({ ...prev, priceMeterUahVat: event.target.value }))
@@ -514,10 +537,11 @@ export function MaterialSuppliersEditor({
               hint="Ціна після межі гурту · з ПДВ"
             />
             <Input
-              label="₴/м відріз"
+              label="Відріз"
               type="number"
               min={0}
               step="0.1"
+              suffix="₴/м"
               value={draft.priceMeterUahCutVat}
               onChange={(event) =>
                 setDraft((prev) => ({ ...prev, priceMeterUahCutVat: event.target.value }))
@@ -525,10 +549,11 @@ export function MaterialSuppliersEditor({
               hint="До межі гурту / малі тиражі"
             />
             <Input
-              label="Межа витрати, м"
+              label="Межа витрати"
               type="number"
               min={0}
               step="0.1"
+              suffix="м"
               value={draft.minWholesaleMeters}
               onChange={(event) =>
                 setDraft((prev) => ({ ...prev, minWholesaleMeters: event.target.value }))
