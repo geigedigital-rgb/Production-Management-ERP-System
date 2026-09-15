@@ -247,8 +247,9 @@ export function MaterialSuppliersEditor({
           Постачальники та закупівля
         </h4>
         <p className="type-caption mt-0.5">
-          Собівартість у каталозі = умови <strong>основного</strong> постачальника. У кожного
-          постачальника — своя палітра кольорів для продукту та замовлення.
+          Собівартість у каталозі = умови <strong>основного</strong> постачальника. Тип доставки
+          матеріалу (CARGO / НП) задається в блоці вище — тут можна лише override $/кг для
+          конкретного постачальника. У кожного постачальника — своя палітра кольорів.
         </p>
         <p className="type-caption mt-1 tabular">
           Курс ₴/$: {usdUahRate} · з налаштувань ціноутворення (не змінюється тут)
@@ -398,7 +399,7 @@ export function MaterialSuppliersEditor({
 
           <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
             <Input
-              label="Карго $/кг"
+              label="Доставка $/кг"
               type="number"
               min={0}
               step="0.01"
@@ -432,7 +433,7 @@ export function MaterialSuppliersEditor({
                   }
                 }
               }}
-              hint={`База компанії: ${defaultCargo}`}
+              hint={`Override для цього постачальника · база компанії: ${defaultCargo}`}
             />
             <Input
               label="$ / кг"

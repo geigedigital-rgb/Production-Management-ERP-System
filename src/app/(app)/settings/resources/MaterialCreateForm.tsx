@@ -66,15 +66,15 @@ function resolveUnitCode(unit: UnitOption | undefined): string {
 function fabricUnitHint(mode: FabricUnitMode): string {
   switch (mode) {
     case "kg":
-      return "Купівля в кг → система переводить у ₴/м.п. для виробу й замовлення. Обовʼязково м.п./кг (або щільність + ширина).";
+      return "Купівля в кг → обовʼязкові щільність і ширина; м.п./кг рахується автоматично. У складі виробу витрата все одно в м.п.";
     case "m2":
       return "Купівля в м² → ₴/м.п. = ₴/м² × ширина(м). У складі виробу норма лишається в метрах погонних.";
     case "pcs":
-      return "Од. виміру «шт»: собівартість і норма в складі — у штуках. Карго/м.п. для тканин не застосовуються.";
+      return "Од. виміру «шт»: собівартість і норма в складі — у штуках. Доставка/м.п. для тканин не застосовуються.";
     case "cone":
       return "Од. виміру «бобіна»: собівартість і норма в складі — за бобіну. Для рулонної тканини краще м.п. або кг.";
     default:
-      return "Купівля в м.п. · у виробі/замовленні витрата теж у метрах. м.п./кг потрібне для доставки (кг) і авто м.п./рул.";
+      return "Купівля в м.п. · собівартість з ₴/м. м.п./кг потрібне лише для логістики (кг) і авто метражу рулону.";
   }
 }
 
@@ -250,6 +250,16 @@ function MaterialFields({
     numStr(defaults?.minWholesaleMeters),
   );
   const [rollWeightKg, setRollWeightKg] = useState(numStr(defaults?.rollWeightKg));
+  const [metersPerRollManual, setMetersPerRollManual] = useState(
+    numStr(defaults?.metersPerRoll),
+  );
+  /** Fixed roll length (e.g. 50 m) — skips weight × м.п./кг auto. */
+  const [rollLengthFixed, setRollLengthFixed] = useState(() => {
+    const hasManualRoll =
+      defaults?.metersPerRoll != null && Number(defaults.metersPerRoll) > 0;
+    const hasWeight = defaults?.rollWeightKg != null && Number(defaults.rollWeightKg) > 0;
+    return hasManualRoll && !hasWeight;
+  });
   const [wholesaleNote, setWholesaleNote] = useState(defaults?.wholesaleNote ?? "");
   const [note, setNote] = useState(defaults?.note ?? "");
   const [costOverride, setCostOverride] = useState(defaults?.costVatOverride ?? "");
@@ -272,11 +282,26 @@ function MaterialFields({
     type === "FABRIC" && (fabricUnitMode === "pcs" || fabricUnitMode === "cone");
   const pricingInline = fabricMeterPricing && !managePricingSeparately;
   const showRollParams = type === "FABRIC" && fabricMeterPricing;
-  const metersPerKgRequired = type === "FABRIC" && fabricUnitMode === "kg";
+  /** Density + width drive м.п./кг when buying in kg. */
+  const densityWidthRequired = type === "FABRIC" && fabricUnitMode === "kg";
+  /** Show density/width only when they drive a calc (kg → м.п./кг, m2 → ₴/м). */
+  const showDensityField = type === "FABRIC" && fabricUnitMode === "kg";
+  const showWidthField =
+    type === "FABRIC" && (fabricUnitMode === "kg" || fabricUnitMode === "m2");
   const widthRequiredForM2 = type === "FABRIC" && fabricUnitMode === "m2";
+  /** м.п./кг: required+auto for kg; optional logistics for m/m2. */
+  const showMetersPerKg = type === "FABRIC" && fabricMeterPricing;
+  const metersPerKgRequired = type === "FABRIC" && fabricUnitMode === "kg";
+  const metersPerKgAutoOnly = type === "FABRIC" && fabricUnitMode === "kg";
   const autoMetersPerKg = metersPerKgFromDensityWidth(densityGsm, widthCm);
+  const effectiveMetersPerRoll = rollLengthFixed
+    ? metersPerRollManual
+      ? Number(metersPerRollManual)
+      : null
+    : null;
   const metersPerRollReady = Boolean(
-    metersPerKg &&
+    !rollLengthFixed &&
+      metersPerKg &&
       Number(metersPerKg) > 0 &&
       rollWeightKg &&
       Number(rollWeightKg) > 0,
@@ -310,7 +335,8 @@ function MaterialFields({
           priceMeterUahNoVat: priceMeterNoVat ? Number(priceMeterNoVat) : null,
           priceMeterUahVat: priceMeterVat ? Number(priceMeterVat) : null,
           priceMeterUahCutVat: priceMeterCutVat ? Number(priceMeterCutVat) : null,
-          rollWeightKg: rollWeightKg ? Number(rollWeightKg) : null,
+          rollWeightKg: rollLengthFixed ? null : rollWeightKg ? Number(rollWeightKg) : null,
+          metersPerRoll: effectiveMetersPerRoll,
           minWholesaleMeters: minWholesaleMeters ? Number(minWholesaleMeters) : null,
           costVatOverride: costOverride === "NET" || costOverride === "GROSS" ? costOverride : null,
         },
@@ -324,6 +350,8 @@ function MaterialFields({
       priceMeterVat,
       priceMeterCutVat,
       rollWeightKg,
+      rollLengthFixed,
+      effectiveMetersPerRoll,
       minWholesaleMeters,
       costOverride,
       liveGlobals,
@@ -333,7 +361,7 @@ function MaterialFields({
   function applyMetersPerKg(value: string, opts?: { fromAuto?: boolean }) {
     setMetersPerKg(value);
     if (opts?.fromAuto) {
-      // keep manual flag as-is when syncing from density/width only if empty before
+      setMetersPerKgManual(false);
     } else {
       setMetersPerKgManual(Boolean(value.trim()));
     }
@@ -347,9 +375,13 @@ function MaterialFields({
   ) {
     const auto = metersPerKgFromDensityWidth(nextDensity, nextWidth);
     if (auto == null) return;
+    // kg mode: always keep auto in sync; other modes: only if not manually overridden
+    if (metersPerKgAutoOnly) {
+      applyMetersPerKg(String(auto), { fromAuto: true });
+      return;
+    }
     if (!force && metersPerKgManual && metersPerKg.trim()) return;
     applyMetersPerKg(String(auto), { fromAuto: true });
-    setMetersPerKgManual(false);
   }
 
   function applyM2Prices(next: {
@@ -569,56 +601,53 @@ function MaterialFields({
           </FormGroup>
 
           <FormGroup label="Параметри" icon={<IconParams size={14} />} columns={3} compact>
-            <Select
-              name="deliveryType"
-              label="Тип доставки"
-              value={deliveryType}
-              onChange={(event) =>
-                applyDeliveryType(normalizeFabricDeliveryType(event.target.value))
-              }
-              hint="CARGO / НП — тарифи в «Ціноутворення»"
-            >
-              {FABRIC_DELIVERY_TYPES.map((code) => (
-                <option key={code} value={code}>
-                  {fabricDeliveryTypeLabel(code)} —{" "}
-                  {deliveryRateUsdPerKg(code, fabricGlobals)} $/кг
-                </option>
-              ))}
-            </Select>
-            <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
-            {!pricingInline ? (
-              <input type="hidden" name="fabricCargoUsdPerKg" value={fabricCargoUsdPerKg} />
-            ) : null}
-            <Input
-              name="densityGsm"
-              label="Щільність, г/м²"
-              placeholder="170"
-              value={densityGsm}
-              onChange={(event) => {
-                const value = event.target.value;
-                setDensityGsm(value);
-                syncMetersPerKgFromDensity(value, widthCm);
-              }}
-              hint={autoMetersPerKg != null ? `→ ${autoMetersPerKg} м.п./кг` : undefined}
-            />
-            <Input
-              name="widthCm"
-              label="Ширина, см"
-              value={widthCm}
-              required={widthRequiredForM2}
-              onChange={(event) => {
-                const value = event.target.value;
-                setWidthCm(value);
-                syncMetersPerKgFromDensity(densityGsm, value);
-                if (fabricUnitMode === "m2") applyM2Prices({ widthCm: value });
-              }}
-              hint={
-                widthRequiredForM2
-                  ? "Потрібна для переводу м² → м.п."
-                  : "Разом зі щільністю дає м.п./кг"
-              }
-            />
-            {showRollParams || metersPerKgRequired ? (
+            {showDensityField ? (
+              <Input
+                name="densityGsm"
+                label="Щільність, г/м²"
+                placeholder="170"
+                value={densityGsm}
+                required={densityWidthRequired}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setDensityGsm(value);
+                  syncMetersPerKgFromDensity(value, widthCm, densityWidthRequired);
+                }}
+                hint={
+                  densityWidthRequired
+                    ? "Обовʼязково · разом із шириною дає м.п./кг"
+                    : autoMetersPerKg != null
+                      ? `→ ${autoMetersPerKg} м.п./кг`
+                      : undefined
+                }
+              />
+            ) : (
+              <input type="hidden" name="densityGsm" value={densityGsm} />
+            )}
+            {showWidthField ? (
+              <Input
+                name="widthCm"
+                label="Ширина, см"
+                value={widthCm}
+                required={densityWidthRequired || widthRequiredForM2}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setWidthCm(value);
+                  syncMetersPerKgFromDensity(densityGsm, value, densityWidthRequired);
+                  if (fabricUnitMode === "m2") applyM2Prices({ widthCm: value });
+                }}
+                hint={
+                  densityWidthRequired
+                    ? "Обовʼязково для авто м.п./кг"
+                    : widthRequiredForM2
+                      ? "Потрібна для переводу м² → м.п."
+                      : "Довідково"
+                }
+              />
+            ) : (
+              <input type="hidden" name="widthCm" value={widthCm} />
+            )}
+            {showMetersPerKg ? (
               <Input
                 name="metersPerKg"
                 label="м.п. / кг"
@@ -627,13 +656,19 @@ function MaterialFields({
                 min="0"
                 value={metersPerKg}
                 required={metersPerKgRequired}
-                onChange={(event) => applyMetersPerKg(event.target.value)}
+                readOnly={metersPerKgAutoOnly}
+                tabIndex={metersPerKgAutoOnly ? -1 : undefined}
+                onChange={
+                  metersPerKgAutoOnly
+                    ? undefined
+                    : (event) => applyMetersPerKg(event.target.value)
+                }
                 hint={
-                  metersPerKgRequired
-                    ? "Обовʼязково при купівлі в кг (або зі щільності+ширини)"
-                    : autoMetersPerKg != null && !metersPerKgManual
-                      ? "Авто зі щільності × ширини"
-                      : "Для доставки й авто м.п./рул."
+                  metersPerKgAutoOnly
+                    ? autoMetersPerKg != null
+                      ? "Авто: 100 000 ÷ (щільність × ширина)"
+                      : "Заповніть щільність і ширину"
+                    : "Опційно · для доставки (кг) і авто метражу рулону"
                 }
               />
             ) : (
@@ -641,36 +676,135 @@ function MaterialFields({
             )}
             {showRollParams ? (
               <>
-                <Input
-                  name="rollWeightKg"
-                  label="Вага рул., кг"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={rollWeightKg}
-                  onChange={(event) => setRollWeightKg(event.target.value)}
-                  hint="Разом з м.п./кг заповнює м.п./рул."
-                />
-                <Input
-                  label="м.п. / рул. (авто)"
-                  value={derived.metersPerRoll ?? ""}
-                  readOnly
-                  tabIndex={-1}
+                <Select
+                  label="Метраж рулону"
+                  value={rollLengthFixed ? "fixed" : "auto"}
+                  onChange={(event) => {
+                    const fixed = event.target.value === "fixed";
+                    setRollLengthFixed(fixed);
+                    if (fixed) {
+                      const current =
+                        derived.metersPerRoll != null
+                          ? String(derived.metersPerRoll)
+                          : metersPerRollManual;
+                      setMetersPerRollManual(current);
+                    }
+                  }}
                   hint={
-                    metersPerRollReady
-                      ? "вага рул. × м.п./кг"
-                      : "Заповніть вагу рулона і м.п./кг"
+                    rollLengthFixed
+                      ? "Фіксована довжина (напр. 50 м) — без ваги/GSM"
+                      : "Авто з ваги рулону × м.п./кг"
                   }
-                />
-                <input type="hidden" name="metersPerRoll" value={derived.metersPerRoll ?? ""} />
+                >
+                  <option value="auto">З ваги (авто)</option>
+                  <option value="fixed">Фіксована довжина</option>
+                </Select>
+                {rollLengthFixed ? (
+                  <>
+                    <Input
+                      name="metersPerRoll"
+                      label="м.п. / рул."
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={metersPerRollManual}
+                      onChange={(event) => setMetersPerRollManual(event.target.value)}
+                      hint="Вручну, наприклад 50"
+                    />
+                    <input type="hidden" name="rollWeightKg" value="" />
+                  </>
+                ) : (
+                  <>
+                    <Input
+                      name="rollWeightKg"
+                      label="Вага рул., кг"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={rollWeightKg}
+                      onChange={(event) => setRollWeightKg(event.target.value)}
+                      hint="Разом з м.п./кг → м.п./рул."
+                    />
+                    <Input
+                      label="м.п. / рул. (авто)"
+                      value={derived.metersPerRoll ?? ""}
+                      readOnly
+                      tabIndex={-1}
+                      hint={
+                        metersPerRollReady
+                          ? "вага рул. × м.п./кг"
+                          : "Потрібні вага рулона і м.п./кг"
+                      }
+                    />
+                    <input
+                      type="hidden"
+                      name="metersPerRoll"
+                      value={derived.metersPerRoll ?? ""}
+                    />
+                  </>
+                )}
               </>
             ) : (
               <>
                 <input type="hidden" name="rollWeightKg" value={rollWeightKg} />
-                <input type="hidden" name="metersPerRoll" value={derived.metersPerRoll ?? ""} />
+                <input
+                  type="hidden"
+                  name="metersPerRoll"
+                  value={
+                    rollLengthFixed
+                      ? metersPerRollManual
+                      : (derived.metersPerRoll ?? "")
+                  }
+                />
               </>
             )}
           </FormGroup>
+
+          {/* Delivery + purchase live together so tariff is not orphaned in «Параметри». */}
+          {pricingInline || managePricingSeparately ? (
+            <FormGroup
+              label={managePricingSeparately ? "Доставка" : "Постачальники та закупівля"}
+              icon={<IconPurchaseKg size={14} />}
+              columns={3}
+              compact
+            >
+              <p className="type-caption sm:col-span-3">
+                {managePricingSeparately
+                  ? "Тип доставки матеріалу. Тариф $/кг можна змінити — збережеться в «Ціноутворення». Override на постачальника — у блоці нижче."
+                  : "Тип доставки задає тариф $/кг для логістики. Ціни можна змінити тут — збережуться в «Ціноутворення» для цього типу."}
+              </p>
+              <Select
+                name="deliveryType"
+                label="Тип доставки"
+                value={deliveryType}
+                onChange={(event) =>
+                  applyDeliveryType(normalizeFabricDeliveryType(event.target.value))
+                }
+              >
+                {FABRIC_DELIVERY_TYPES.map((code) => (
+                  <option key={code} value={code}>
+                    {fabricDeliveryTypeLabel(code)} —{" "}
+                    {deliveryRateUsdPerKg(code, fabricGlobals)} $/кг
+                  </option>
+                ))}
+              </Select>
+              <Input
+                name="fabricCargoUsdPerKg"
+                label="Доставка $/кг"
+                type="number"
+                step="0.01"
+                min="0"
+                value={fabricCargoUsdPerKg}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFabricCargoUsdPerKg(value);
+                  if (pricingInline) recalcMeterPrices({ fabricCargoUsdPerKg: value });
+                }}
+                hint={`Тариф «${fabricDeliveryTypeLabel(deliveryType)}» · можна змінити`}
+              />
+              <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
+            </FormGroup>
+          ) : null}
 
           {pricingInline ? (
             <>
@@ -678,8 +812,8 @@ function MaterialFields({
                 <FormGroup
                   label={
                     fabricUnitMode === "kg"
-                      ? "Закупівля в кг"
-                      : "Закупівля в $/кг (опційно)"
+                      ? "Ціни закупки в кг"
+                      : "Ціни $/кг (опційно)"
                   }
                   icon={<IconPurchaseKg size={14} />}
                   columns={3}
@@ -688,7 +822,7 @@ function MaterialFields({
                   <p className="type-caption sm:col-span-3">
                     {fabricUnitMode === "kg"
                       ? `Ціна за кг + м.п./кг → ₴/м.п. Курс ₴/$: ${fabricGlobals.usdUahRate}.`
-                      : `Якщо постачальник дає $/кг — заповніть тут, ₴/м порахується автоматично. Курс: ${fabricGlobals.usdUahRate}.`}
+                      : `Якщо постачальник дає $/кг — заповніть тут. Інакше достатньо ₴/м нижче. Курс: ${fabricGlobals.usdUahRate}.`}
                   </p>
                   <div className="space-y-2 sm:col-span-3 lg:col-span-2">
                     <Select
@@ -714,20 +848,6 @@ function MaterialFields({
                       />
                     ) : null}
                   </div>
-                  <Input
-                    name="fabricCargoUsdPerKg"
-                    label="Доставка $/кг"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={fabricCargoUsdPerKg}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setFabricCargoUsdPerKg(value);
-                      recalcMeterPrices({ fabricCargoUsdPerKg: value });
-                    }}
-                    hint={`Тариф «${fabricDeliveryTypeLabel(deliveryType)}» (можна змінити)`}
-                  />
                   <Input
                     name="priceKgUsd"
                     label="$ / кг"
@@ -767,7 +887,7 @@ function MaterialFields({
 
               {fabricUnitMode === "m2" ? (
                 <FormGroup
-                  label="Закупівля в м²"
+                  label="Ціни закупки в м²"
                   icon={<IconPurchaseKg size={14} />}
                   columns={3}
                   compact
@@ -799,16 +919,6 @@ function MaterialFields({
                       />
                     ) : null}
                   </div>
-                  <Input
-                    name="fabricCargoUsdPerKg"
-                    label="Доставка $/кг"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={fabricCargoUsdPerKg}
-                    onChange={(event) => setFabricCargoUsdPerKg(event.target.value)}
-                    hint={`Тариф «${fabricDeliveryTypeLabel(deliveryType)}»`}
-                  />
                   <Input
                     label="₴/м² без ПДВ"
                     type="number"
