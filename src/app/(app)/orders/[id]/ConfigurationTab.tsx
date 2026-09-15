@@ -89,6 +89,8 @@ export type MaterialRow = {
   }>;
   materialAvailableColors?: string[];
   isFabric?: boolean;
+  /** Density · composition from catalog (same as add-material dropdown). */
+  specHint?: string | null;
 };
 
 export type FabricDeliveryRow = {
@@ -454,6 +456,14 @@ export function ConfigurationTab({
                               }
                               wrap
                             />
+                            {row.specHint ? (
+                              <p
+                                className="mt-0.5 truncate text-[11.5px] leading-snug text-[var(--color-text-quiet)]"
+                                title={row.specHint}
+                              >
+                                {row.specHint}
+                              </p>
+                            ) : null}
                           </div>
                           <RowBusyMark busy={rowBusy} />
                         </div>

@@ -382,6 +382,8 @@ export async function getOrder(id: string) {
                   type: true,
                   supplierCode: true,
                   availableColors: true,
+                  densityGsm: true,
+                  composition: true,
                   metersPerKg: true,
                   priceKgUsd: true,
                   priceKgUsdCargo: true,

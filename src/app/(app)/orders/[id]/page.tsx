@@ -34,6 +34,7 @@ import {
   IconVersions,
 } from "@/components/ui/Icons";
 import { formatDateUk, formatMoneyUah, formatUnit } from "@/lib/utils";
+import { materialOptionDescription } from "@/lib/material-catalog-options";
 import { formatSizeRun, lineCostOnSizes, uniqueBomCount } from "@/lib/size-bom";
 import { fabricMetersNeeded } from "@/lib/fabric-pricing";
 import {
@@ -218,6 +219,10 @@ export default async function OrderDetailPage({
         })) ?? [],
       materialAvailableColors: row.material?.availableColors ?? [],
       isFabric: row.material?.type === "FABRIC",
+      specHint: materialOptionDescription(
+        row.material?.densityGsm,
+        row.material?.composition,
+      ),
     };
   });
 
