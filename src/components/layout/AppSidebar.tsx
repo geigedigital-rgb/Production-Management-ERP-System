@@ -161,12 +161,19 @@ function NavGroup({
 
 export function AppSidebar({ permissions = [] }: { permissions?: Permission[] }) {
   const t = useTranslations("nav");
-  const { collapsed, overlayOpen, toggle, setPreferredCollapsed } = useSidebar();
+  const {
+    collapsed,
+    overlayOpen,
+    toggle,
+    setPreferredCollapsed,
+    expandDespiteOverlay,
+    collapseDuringOverlay,
+  } = useSidebar();
 
   return (
     <aside
       className={cn(
-        "sticky top-0 z-20 flex h-screen shrink-0 flex-col bg-[var(--color-sidebar-bg)] text-[var(--color-sidebar-text)] transition-[width] duration-200 ease-out",
+        "sticky top-0 z-40 flex h-screen shrink-0 flex-col bg-[var(--color-sidebar-bg)] text-[var(--color-sidebar-text)] transition-[width] duration-200 ease-out",
         "w-[var(--sidebar-width)]",
       )}
     >
@@ -178,7 +185,12 @@ export function AppSidebar({ permissions = [] }: { permissions?: Permission[] })
       >
         <button
           type="button"
-          onClick={() => (collapsed ? setPreferredCollapsed(false) : undefined)}
+          onClick={() => {
+            if (collapsed) {
+              if (overlayOpen) expandDespiteOverlay();
+              else setPreferredCollapsed(false);
+            }
+          }}
           className={cn(
             "flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-sidebar-accent)] text-[13px] font-semibold text-[var(--color-on-primary)]",
             collapsed && "cursor-pointer hover:brightness-110",
@@ -251,27 +263,35 @@ export function AppSidebar({ permissions = [] }: { permissions?: Permission[] })
         <button
           type="button"
           onClick={() => {
-            if (overlayOpen) return;
+            if (overlayOpen && collapsed) {
+              expandDespiteOverlay();
+              return;
+            }
+            if (overlayOpen && !collapsed) {
+              collapseDuringOverlay();
+              return;
+            }
             toggle();
           }}
-          disabled={overlayOpen}
-          title={
-            overlayOpen
-              ? "Меню згорнуто, поки відкрита панель"
-              : collapsed
-                ? "Розгорнути меню"
-                : "Згорнути меню"
-          }
+          title={collapsed ? "Розгорнути меню" : "Згорнути меню"}
           aria-label={collapsed ? "Розгорнути меню" : "Згорнути меню"}
           aria-expanded={!collapsed}
           className={cn(
-            "flex w-full items-center rounded-[8px] py-2 text-[12.5px] font-medium text-[var(--color-sidebar-text-muted)] transition-colors hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-sidebar-active-text)] disabled:cursor-default disabled:opacity-60",
+            "flex w-full items-center rounded-[8px] py-2 text-[12.5px] font-medium transition-colors hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-sidebar-active-text)]",
             collapsed ? "justify-center" : "gap-2 px-3",
+            overlayOpen && collapsed
+              ? "bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-active-text)] ring-1 ring-[var(--color-sidebar-accent)]/40"
+              : "text-[var(--color-sidebar-text-muted)]",
           )}
         >
           {collapsed ? <IconChevronRight size={18} /> : <IconChevronLeft size={18} />}
           {!collapsed ? <span>Згорнути</span> : null}
         </button>
+        {overlayOpen && collapsed ? (
+          <p className="mt-1 text-center text-[10px] font-medium tracking-wide text-[var(--color-sidebar-text-muted)] uppercase">
+            Меню
+          </p>
+        ) : null}
       </div>
     </aside>
   );

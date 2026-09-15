@@ -88,7 +88,12 @@ export function SidePanel({
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className={cn("fixed inset-0 flex justify-end", elevated ? "z-[60]" : "z-50")}>
+    <div
+      className={cn(
+        "fixed inset-y-0 right-0 left-[var(--sidebar-width)] flex justify-end transition-[left] duration-200 ease-out",
+        elevated ? "z-[60]" : "z-50",
+      )}
+    >
       <div
         className="anim-overlay absolute inset-0 bg-[rgba(15,23,32,0.4)] backdrop-blur-[1px]"
         onClick={onClose}

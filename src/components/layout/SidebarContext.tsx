@@ -17,12 +17,16 @@ const COLLAPSED = "56px";
 type SidebarContextValue = {
   /** User preference (persisted). */
   preferredCollapsed: boolean;
-  /** Effective: preference or forced by overlay. */
+  /** Effective: preference or forced by overlay (unless pinned open). */
   collapsed: boolean;
   /** Side panel / modal currently open. */
   overlayOpen: boolean;
   setPreferredCollapsed: (value: boolean) => void;
   toggle: () => void;
+  /** Expand rail even while a side panel is open. */
+  expandDespiteOverlay: () => void;
+  /** Collapse again while a side panel stays open. */
+  collapseDuringOverlay: () => void;
   beginOverlay: () => void;
   endOverlay: () => void;
 };
@@ -32,6 +36,7 @@ const SidebarContext = createContext<SidebarContextValue | null>(null);
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [preferredCollapsed, setPreferredCollapsedState] = useState(false);
   const [overlayCount, setOverlayCount] = useState(0);
+  const [pinExpandedOverOverlay, setPinExpandedOverOverlay] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -46,7 +51,14 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const overlayOpen = overlayCount > 0;
-  const collapsed = preferredCollapsed || overlayOpen;
+
+  useEffect(() => {
+    if (!overlayOpen) setPinExpandedOverOverlay(false);
+  }, [overlayOpen]);
+
+  const collapsed = pinExpandedOverOverlay
+    ? false
+    : preferredCollapsed || overlayOpen;
 
   useEffect(() => {
     if (!ready) return;
@@ -78,6 +90,20 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const expandDespiteOverlay = useCallback(() => {
+    setPinExpandedOverOverlay(true);
+    setPreferredCollapsedState(false);
+    try {
+      localStorage.setItem(STORAGE_KEY, "0");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const collapseDuringOverlay = useCallback(() => {
+    setPinExpandedOverOverlay(false);
+  }, []);
+
   const beginOverlay = useCallback(() => {
     setOverlayCount((n) => n + 1);
   }, []);
@@ -93,6 +119,8 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
       overlayOpen,
       setPreferredCollapsed,
       toggle,
+      expandDespiteOverlay,
+      collapseDuringOverlay,
       beginOverlay,
       endOverlay,
     }),
@@ -102,6 +130,8 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
       overlayOpen,
       setPreferredCollapsed,
       toggle,
+      expandDespiteOverlay,
+      collapseDuringOverlay,
       beginOverlay,
       endOverlay,
     ],

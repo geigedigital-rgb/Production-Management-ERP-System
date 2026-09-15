@@ -11,7 +11,7 @@ import {
 import { resolveCutRatePerUnit, resolveOptimalCutQty } from "@/lib/cut-rate";
 import { resolveCommercialPricePerUnit } from "@/lib/commercial-price";
 import { defaultSewingMultiplierForQty } from "@/lib/sewing-markup";
-import { formatMoneyUah } from "@/lib/utils";
+import { formatAmount, formatMoneyUah } from "@/lib/utils";
 
 type Row = {
   minQuantity: number;
@@ -31,6 +31,7 @@ function CompactInput({ className, ...props }: ComponentProps<"input">) {
   return <input {...props} className={[DIGIT_INPUT, className ?? ""].join(" ")} />;
 }
 
+/** Dense table cell — no ₴ (unit shown once in the table caption). */
 function MoneyCell({ value, tone }: { value: number; tone?: "quiet" | "strong" }) {
   const color =
     tone === "strong"
@@ -38,7 +39,7 @@ function MoneyCell({ value, tone }: { value: number; tone?: "quiet" | "strong" }
       : "text-[var(--color-text-secondary)]";
   return (
     <span className={`type-mono text-[12px] tabular-nums ${color}`}>
-      {Number.isFinite(value) ? formatMoneyUah(value) : "—"}
+      {Number.isFinite(value) ? formatAmount(value) : "—"}
     </span>
   );
 }
@@ -300,23 +301,25 @@ export function ProductPriceCutPanel({
       {message ? <p className="type-caption text-[var(--color-text-muted)]">{message}</p> : null}
 
       <div className="w-full overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
-        <table className="w-full min-w-[56rem] table-fixed border-collapse text-left">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/40 px-2.5 py-1.5">
+          <p className="type-caption text-[var(--color-text-quiet)]">Тиражі · суми в ₴</p>
+        </div>
+        <table className="w-full min-w-[48rem] table-fixed border-collapse text-left">
           <colgroup>
-            <col className="w-[3.5rem]" />
-            <col className="w-[5.75rem]" />
-            <col className="w-[6rem]" />
+            <col className="w-[3.25rem]" />
+            <col className="w-[5.5rem]" />
+            <col className="w-[5.5rem]" />
             <col />
             <col />
             <col />
             <col />
+            <col className="w-[8.5rem]" />
             <col />
-            <col className="w-[4.5rem]" />
-            <col />
-            <col className="w-[4rem]" />
+            <col className="w-[3.75rem]" />
             <col />
             <col />
-            <col className="w-[7.25rem]" />
-            <col className="w-[2.5rem]" />
+            <col className="w-[6.75rem]" />
+            <col className="w-[2.25rem]" />
           </colgroup>
           <thead>
             <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg)]/50">
@@ -335,8 +338,9 @@ export function ProductPriceCutPanel({
                 Інші
               </th>
               <th className={`${thClass} text-right`}>Собів.</th>
-              <th className={`${thClass} text-right`}>Пошив</th>
-              <th className={`${thClass} text-center`}>×</th>
+              <th className={`${thClass} text-right`} title="Пошив × множник націнки">
+                Пошив ×
+              </th>
               <th className={`${thClass} text-right`}>Націнка</th>
               <th className={`${thClass} text-right`}>Маржа</th>
               <th className={`${thClass} text-right`} title="Прибуток / шт">
@@ -450,30 +454,37 @@ export function ProductPriceCutPanel({
                   <td className={tdNum}>
                     <MoneyCell value={cost} tone="strong" />
                   </td>
-                  <td className={tdNum}>
-                    <MoneyCell value={sewing} />
-                  </td>
                   <td className={tdClass}>
-                    <CompactInput
-                      type="number"
-                      min={1}
-                      step="0.01"
-                      inputMode="decimal"
-                      className="w-full text-center"
-                      value={row.sewingMultiplier}
-                      onChange={(event) => {
-                        const sewingMultiplier = Number(event.target.value);
-                        const pricePerUnit =
-                          sewing > 0 && Number.isFinite(sewingMultiplier)
-                            ? Math.round(sewing * sewingMultiplier * 100) / 100
-                            : row.pricePerUnit;
-                        setRows((prev) => {
-                          const next = [...prev];
-                          next[index] = { ...row, sewingMultiplier, pricePerUnit };
-                          return next;
-                        });
-                      }}
-                    />
+                    <div className="flex items-center justify-end gap-1">
+                      <span
+                        className="type-mono min-w-0 shrink text-[12px] tabular-nums text-[var(--color-text-secondary)]"
+                        title="Пошив ₴/шт"
+                      >
+                        {Number.isFinite(sewing) ? formatAmount(sewing) : "—"}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-[var(--color-text-quiet)]">×</span>
+                      <CompactInput
+                        type="number"
+                        min={1}
+                        step="0.01"
+                        inputMode="decimal"
+                        className="w-[3.4rem] shrink-0 text-center"
+                        value={row.sewingMultiplier}
+                        title="Множник націнки на пошив"
+                        onChange={(event) => {
+                          const sewingMultiplier = Number(event.target.value);
+                          const pricePerUnit =
+                            sewing > 0 && Number.isFinite(sewingMultiplier)
+                              ? Math.round(sewing * sewingMultiplier * 100) / 100
+                              : row.pricePerUnit;
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[index] = { ...row, sewingMultiplier, pricePerUnit };
+                            return next;
+                          });
+                        }}
+                      />
+                    </div>
                   </td>
                   <td className={tdNum}>
                     <MoneyCell value={markup} />
