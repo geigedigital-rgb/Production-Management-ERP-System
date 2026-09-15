@@ -382,25 +382,7 @@ export async function getOrder(id: string) {
             orderBy: { sortOrder: "asc" },
             include: {
               material: {
-                select: {
-                  id: true,
-                  nameUk: true,
-                  type: true,
-                  supplierCode: true,
-                  availableColors: true,
-                  densityGsm: true,
-                  composition: true,
-                  metersPerKg: true,
-                  priceKgUsd: true,
-                  priceKgUsdCargo: true,
-                  priceMeterUahNoVat: true,
-                  priceMeterUahVat: true,
-                  priceMeterUahCutVat: true,
-                  metersPerRoll: true,
-                  minWholesaleMeters: true,
-                  costVatOverride: true,
-                  deliveryType: true,
-                  wholesaleNote: true,
+                include: {
                   supplierOffers: {
                     include: {
                       supplier: { select: { id: true, nameUk: true } },

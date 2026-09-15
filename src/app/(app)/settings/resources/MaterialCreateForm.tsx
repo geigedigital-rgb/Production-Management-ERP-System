@@ -1237,24 +1237,36 @@ function MaterialFields({
                   step="0.1"
                   min="0"
                   suffix="₴/м"
+                  optional
                   value={priceMeterCutVat}
-                  onChange={(event) => setPriceMeterCutVat(event.target.value)}
-                  hint="До межі гурту / малі тиражі"
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    const hasCut = value.trim() !== "" && Number(value) > 0;
+                    setPriceMeterCutVat(value);
+                    if (!hasCut) setMinWholesaleMeters("");
+                  }}
+                  hint="Порожньо = лише гурт"
                 />
-                <Input
-                  name="minWholesaleMeters"
-                  label="Межа витрати"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  suffix="м"
-                  value={minWholesaleMeters}
-                  onChange={(event) => setMinWholesaleMeters(event.target.value)}
-                  hint="Порожньо = метраж рулону · ≥ межі → гурт"
-                />
+                {priceMeterCutVat.trim() !== "" && Number(priceMeterCutVat) > 0 ? (
+                  <Input
+                    name="minWholesaleMeters"
+                    label="Межа гурту"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    suffix="м"
+                    required
+                    value={minWholesaleMeters}
+                    onChange={(event) => setMinWholesaleMeters(event.target.value)}
+                    hint="≥ м у замовленні → гурт"
+                  />
+                ) : (
+                  <input type="hidden" name="minWholesaleMeters" value="" />
+                )}
                 <Input
                   name="wholesaleNote"
-                  label="Примітка гурту"
+                  label="Примітка"
+                  optional
                   value={wholesaleNote}
                   onChange={(event) => setWholesaleNote(event.target.value)}
                   className="sm:col-span-2"
@@ -1263,7 +1275,9 @@ function MaterialFields({
                   <p className="type-caption sm:col-span-3 tabular">
                     Активна собівартість з цих умов: {formatMoneyUah(derived.purchasePrice)}/м
                     {derived.pricingMode === "cut" ? " (відріз)" : ""}
-                    {minWholesaleMeters ? ` · ≥ ${minWholesaleMeters} м → гурт` : ""}
+                    {priceMeterCutVat && minWholesaleMeters
+                      ? ` · ≥ ${minWholesaleMeters} м → гурт`
+                      : " · лише гурт"}
                   </p>
                 ) : null}
               </FormGroup>

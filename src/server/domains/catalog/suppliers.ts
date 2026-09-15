@@ -230,6 +230,20 @@ export async function upsertMaterialSupplierOffer(
     });
   }
 
+  const cutPrice =
+    offer.priceMeterUahCutVat != null &&
+    Number.isFinite(offer.priceMeterUahCutVat) &&
+    offer.priceMeterUahCutVat > 0
+      ? offer.priceMeterUahCutVat
+      : null;
+  const minWholesale =
+    cutPrice != null &&
+    offer.minWholesaleMeters != null &&
+    Number.isFinite(offer.minWholesaleMeters) &&
+    offer.minWholesaleMeters > 0
+      ? offer.minWholesaleMeters
+      : null;
+
   const row = await prisma.materialSupplier.upsert({
     where: {
       materialId_supplierId: { materialId, supplierId: supplier.id },
@@ -245,10 +259,10 @@ export async function upsertMaterialSupplierOffer(
       priceKgUsdVat: offer.priceKgUsdVat ?? null,
       priceMeterUahNoVat: derived.priceMeterUahNoVat,
       priceMeterUahVat: derived.priceMeterUahVat,
-      priceMeterUahCutVat: offer.priceMeterUahCutVat ?? null,
+      priceMeterUahCutVat: cutPrice,
       rollWeightKg: offer.rollWeightKg ?? null,
       metersPerRoll: derived.metersPerRoll,
-      minWholesaleMeters: offer.minWholesaleMeters ?? derived.minWholesaleMeters,
+      minWholesaleMeters: minWholesale,
       wholesaleNote: offer.wholesaleNote ?? null,
       availableColors: offer.availableColors ?? [],
     },
@@ -261,10 +275,10 @@ export async function upsertMaterialSupplierOffer(
       priceKgUsdVat: offer.priceKgUsdVat ?? null,
       priceMeterUahNoVat: derived.priceMeterUahNoVat,
       priceMeterUahVat: derived.priceMeterUahVat,
-      priceMeterUahCutVat: offer.priceMeterUahCutVat ?? null,
+      priceMeterUahCutVat: cutPrice,
       rollWeightKg: offer.rollWeightKg ?? null,
       metersPerRoll: derived.metersPerRoll,
-      minWholesaleMeters: offer.minWholesaleMeters ?? derived.minWholesaleMeters,
+      minWholesaleMeters: minWholesale,
       wholesaleNote: offer.wholesaleNote ?? null,
       ...(offer.availableColors !== undefined
         ? { availableColors: offer.availableColors ?? [] }
@@ -285,9 +299,9 @@ export async function upsertMaterialSupplierOffer(
         priceKgUsdVat: offer.priceKgUsdVat ?? undefined,
         priceMeterUahNoVat: derived.priceMeterUahNoVat,
         priceMeterUahVat: derived.priceMeterUahVat,
-        priceMeterUahCutVat: offer.priceMeterUahCutVat ?? undefined,
+        priceMeterUahCutVat: cutPrice,
         metersPerRoll: derived.metersPerRoll,
-        minWholesaleMeters: offer.minWholesaleMeters ?? derived.minWholesaleMeters,
+        minWholesaleMeters: minWholesale,
         wholesaleNote: offer.wholesaleNote ?? undefined,
         ...(offer.availableColors !== undefined
           ? { availableColors: mergeColorLists(offer.availableColors ?? []) }
@@ -296,7 +310,43 @@ export async function upsertMaterialSupplierOffer(
     });
   }
 
+  if (offer.availableColors !== undefined) {
+    await rememberSupplierPalette(supplier.id, offer.availableColors ?? []);
+  }
+
   return row;
+}
+
+/** Palette remembered for a supplier (default, else union from past material offers). */
+export async function getSupplierRememberedPalette(supplierNameUk: string) {
+  const nameUk = supplierNameUk.replace(/\s+/g, " ").trim();
+  if (!nameUk) return [] as string[];
+
+  const supplier = await prisma.supplier.findFirst({
+    where: { nameUk: { equals: nameUk, mode: "insensitive" } },
+    select: { id: true, defaultAvailableColors: true },
+  });
+  if (!supplier) return [] as string[];
+
+  if ((supplier.defaultAvailableColors?.length ?? 0) > 0) {
+    return mergeColorLists(supplier.defaultAvailableColors);
+  }
+
+  const offers = await prisma.materialSupplier.findMany({
+    where: { supplierId: supplier.id },
+    orderBy: { updatedAt: "desc" },
+    take: 30,
+    select: { availableColors: true },
+  });
+  return mergeColorLists(...offers.map((row) => row.availableColors ?? []));
+}
+
+async function rememberSupplierPalette(supplierId: string, colors: string[]) {
+  const next = mergeColorLists(colors);
+  await prisma.supplier.update({
+    where: { id: supplierId },
+    data: { defaultAvailableColors: next },
+  });
 }
 
 export async function deleteMaterialSupplierOffer(id: string) {

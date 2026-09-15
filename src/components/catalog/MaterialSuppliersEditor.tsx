@@ -8,6 +8,7 @@ import { Banner } from "@/components/ui/Banner";
 import { IconClients, IconPurchaseKg } from "@/components/ui/Icons";
 import {
   deleteMaterialSupplierOfferAction,
+  getSupplierPaletteAction,
   listMaterialSupplierOffersAction,
   listSupplierNamesAction,
   setPrimaryMaterialSupplierOfferAction,
@@ -176,6 +177,17 @@ export function MaterialSuppliersEditor({
       setError("Вкажіть постачальника.");
       return;
     }
+    const cut = draft.priceMeterUahCutVat.trim();
+    const threshold = draft.minWholesaleMeters.trim();
+    const hasCut = cut !== "" && Number(cut) > 0;
+    if (threshold && !hasCut) {
+      setError("Межу гурту можна задати лише разом із ціною відрізу.");
+      return;
+    }
+    if (hasCut && (!threshold || Number(threshold) <= 0)) {
+      setError("Якщо є відріз — вкажіть межу гурту (м).");
+      return;
+    }
     const data = new FormData();
     data.set("materialId", materialId);
     data.set("supplierNameUk", draft.supplierName.trim());
@@ -191,8 +203,13 @@ export function MaterialSuppliersEditor({
     else if (derived.priceMeterUahVat != null) {
       data.set("priceMeterUahVat", String(derived.priceMeterUahVat));
     }
-    if (draft.priceMeterUahCutVat) data.set("priceMeterUahCutVat", draft.priceMeterUahCutVat);
-    if (draft.minWholesaleMeters) data.set("minWholesaleMeters", draft.minWholesaleMeters);
+    if (hasCut) {
+      data.set("priceMeterUahCutVat", cut);
+      data.set("minWholesaleMeters", threshold);
+    } else {
+      data.set("priceMeterUahCutVat", "");
+      data.set("minWholesaleMeters", "");
+    }
     if (draft.wholesaleNote) data.set("wholesaleNote", draft.wholesaleNote);
     data.set("availableColors", draft.availableColors);
     if (metersPerKg != null) data.set("metersPerKg", String(metersPerKg));
@@ -369,6 +386,7 @@ export function MaterialSuppliersEditor({
 
           <FormGroup label="Постачальник" icon={<IconClients size={14} />} columns={2} compact>
             <Select
+              className="sm:col-span-2"
               label="Назва"
               value={
                 knownSuppliers.some(
@@ -384,10 +402,30 @@ export function MaterialSuppliersEditor({
               onChange={(event) => {
                 const value = event.target.value;
                 if (value === "__custom__") {
-                  setDraft((prev) => ({ ...prev, supplierName: prev.supplierName || "" }));
+                  setDraft((prev) => ({
+                    ...prev,
+                    supplierName: "",
+                    availableColors: "",
+                  }));
+                  return;
+                }
+                if (!value) {
+                  setDraft((prev) => ({ ...prev, supplierName: "", availableColors: "" }));
                   return;
                 }
                 setDraft((prev) => ({ ...prev, supplierName: value }));
+                if (editingId === "new") {
+                  void getSupplierPaletteAction(value).then((result) => {
+                    if (!result.ok || result.colors.length === 0) return;
+                    setDraft((prev) => {
+                      if (prev.supplierName.toLowerCase() !== value.toLowerCase()) return prev;
+                      return {
+                        ...prev,
+                        availableColors: result.colors.join(", "),
+                      };
+                    });
+                  });
+                }
               }}
             >
               <option value="">Оберіть…</option>
@@ -396,16 +434,22 @@ export function MaterialSuppliersEditor({
                   {name}
                 </option>
               ))}
-              <option value="__custom__">Інший / новий…</option>
+              <option value="__custom__">Новий постачальник…</option>
             </Select>
-            <Input
-              label="Або введіть назву"
-              value={draft.supplierName}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, supplierName: event.target.value }))
-              }
-              placeholder="Зейджан"
-            />
+            {!knownSuppliers.some(
+              (name) => name.toLowerCase() === draft.supplierName.toLowerCase(),
+            ) ? (
+              <Input
+                className="sm:col-span-2"
+                label="Назва нового"
+                value={draft.supplierName}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, supplierName: event.target.value }))
+                }
+                placeholder="Зейджан"
+                autoFocus
+              />
+            ) : null}
           </FormGroup>
 
           <FormGroup label="Палітра кольорів" columns={1} compact>
@@ -542,31 +586,39 @@ export function MaterialSuppliersEditor({
               min={0}
               step="0.1"
               suffix="₴/м"
+              optional
               value={draft.priceMeterUahCutVat}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, priceMeterUahCutVat: event.target.value }))
-              }
-              hint="До межі гурту / малі тиражі"
+              onChange={(event) => {
+                const value = event.target.value;
+                const hasCut = value.trim() !== "" && Number(value) > 0;
+                setDraft((prev) => ({
+                  ...prev,
+                  priceMeterUahCutVat: value,
+                  minWholesaleMeters: hasCut ? prev.minWholesaleMeters : "",
+                }));
+              }}
+              hint="Порожньо = лише гурт"
             />
-            <Input
-              label="Межа витрати"
-              type="number"
-              min={0}
-              step="0.1"
-              suffix="м"
-              value={draft.minWholesaleMeters}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, minWholesaleMeters: event.target.value }))
-              }
-              hint={
-                draft.priceMeterUahCutVat
-                  ? "≥ цієї витрати в замовленні → гурт"
-                  : "Працює лише якщо задана ціна відрізу"
-              }
-            />
+            {draft.priceMeterUahCutVat.trim() !== "" &&
+            Number(draft.priceMeterUahCutVat) > 0 ? (
+              <Input
+                label="Межа гурту"
+                type="number"
+                min={0}
+                step="0.1"
+                suffix="м"
+                required
+                value={draft.minWholesaleMeters}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, minWholesaleMeters: event.target.value }))
+                }
+                hint="≥ м у замовленні → гурт"
+              />
+            ) : null}
             <Input
               className="sm:col-span-2"
-              label="Примітка гурту"
+              label="Примітка"
+              optional
               value={draft.wholesaleNote}
               onChange={(event) =>
                 setDraft((prev) => ({ ...prev, wholesaleNote: event.target.value }))
@@ -579,7 +631,7 @@ export function MaterialSuppliersEditor({
                 {draft.priceMeterUahCutVat && draft.minWholesaleMeters
                   ? ` · ≥ ${draft.minWholesaleMeters} м → гурт`
                   : !draft.priceMeterUahCutVat
-                    ? " · лише гурт (межа не застосовується)"
+                    ? " · лише гурт"
                     : ""}
               </p>
             ) : null}

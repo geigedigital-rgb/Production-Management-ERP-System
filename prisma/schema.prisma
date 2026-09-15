@@ -181,13 +181,15 @@ model Material {
 }
 
 model Supplier {
-  id                   String       @id @default(cuid())
-  nameUk               String
-  defaultCargoUsdPerKg Decimal?     @db.Decimal(14, 4)
-  note                 String?
-  status               RecordStatus @default(ACTIVE)
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  id                     String       @id @default(cuid())
+  nameUk                 String
+  defaultCargoUsdPerKg   Decimal?     @db.Decimal(14, 4)
+  /// Last saved color palette — reused when this supplier is picked on a new material.
+  defaultAvailableColors String[]     @default([]) @map("default_available_colors")
+  note                   String?
+  status                 RecordStatus @default(ACTIVE)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
   materialOffers MaterialSupplier[]
   orderItemMaterials OrderItemMaterial[]

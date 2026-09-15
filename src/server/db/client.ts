@@ -12,7 +12,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump when Prisma schema changes so dev HMR does not keep a stale client.
  * Also bump after `prisma generate` if a previous bump raced ahead of generation.
  */
-const PRISMA_CLIENT_VERSION = "20260915150000_product_bom_sort_order";
+const PRISMA_CLIENT_VERSION = "20260915201300_material_delivery_type";
 
 function clientHasCurrentDelegates(client: PrismaClient | undefined): boolean {
   if (!client) return false;

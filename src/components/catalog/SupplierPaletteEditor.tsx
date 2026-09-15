@@ -76,7 +76,6 @@ export function SupplierPaletteEditor({
               <tr>
                 <th className="w-12 px-2.5 py-1.5 font-medium">Колір</th>
                 <th className="px-2.5 py-1.5 font-medium">Назва</th>
-                <th className="w-10 px-2 py-1.5" />
               </tr>
             </thead>
             <tbody>
@@ -85,7 +84,7 @@ export function SupplierPaletteEditor({
                 return (
                   <tr
                     key={`${label}-${index}`}
-                    className="border-t border-[var(--color-divider)]"
+                    className="group/color border-t border-[var(--color-divider)]"
                   >
                     <td className="px-2.5 py-1.5 align-middle">
                       <span
@@ -99,27 +98,28 @@ export function SupplierPaletteEditor({
                       />
                     </td>
                     <td className="px-2.5 py-1.5 align-middle">
-                      <input
-                        className="h-8 w-full rounded-[6px] border border-transparent bg-transparent px-1.5 text-[13px] outline-none hover:border-[var(--color-border)] focus:border-[var(--color-primary-500)] focus:ring-1 focus:ring-[var(--color-focus-ring)]"
-                        value={label}
-                        onChange={(event) => {
-                          const next = [...colors];
-                          next[index] = event.target.value;
-                          commit(next);
-                        }}
-                        onBlur={(event) => renameAt(index, event.target.value)}
-                        aria-label={`Назва кольору ${index + 1}`}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5 align-middle text-right">
-                      <button
-                        type="button"
-                        className="text-[12px] text-[var(--color-text-tertiary)] hover:text-[var(--color-danger-text)]"
-                        onClick={() => removeAt(index)}
-                        aria-label={`Прибрати ${label}`}
-                      >
-                        ×
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          className="h-8 min-w-0 flex-1 rounded-[6px] border border-transparent bg-transparent px-1.5 text-[13px] outline-none hover:border-[var(--color-border)] focus:border-[var(--color-primary-500)] focus:ring-1 focus:ring-[var(--color-focus-ring)]"
+                          value={label}
+                          onChange={(event) => {
+                            const next = [...colors];
+                            next[index] = event.target.value;
+                            commit(next);
+                          }}
+                          onBlur={(event) => renameAt(index, event.target.value)}
+                          aria-label={`Назва кольору ${index + 1}`}
+                        />
+                        <button
+                          type="button"
+                          className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-[14px] text-[var(--color-text-tertiary)] opacity-0 transition-opacity hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] focus-visible:opacity-100 group-hover/color:opacity-100"
+                          onClick={() => removeAt(index)}
+                          aria-label={`Прибрати ${label}`}
+                          title="Прибрати колір"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

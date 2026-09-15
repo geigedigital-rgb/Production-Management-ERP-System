@@ -55,6 +55,14 @@ export async function listSupplierNamesAction() {
   return listSupplierNames();
 }
 
+export async function getSupplierPaletteAction(supplierNameUk: string) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  const { getSupplierRememberedPalette } = await import("@/server/domains/catalog/suppliers");
+  const colors = await getSupplierRememberedPalette(supplierNameUk);
+  return { ok: true as const, colors };
+}
+
 export async function listCompositionNamesAction() {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
