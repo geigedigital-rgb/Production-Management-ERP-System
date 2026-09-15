@@ -36,6 +36,7 @@ export function OrderScreenPrintCalculator({
   coefficients,
   existingDecorations = [],
   locked,
+  hideCosts = false,
 }: {
   orderId: string;
   orderItemId: string;
@@ -44,6 +45,7 @@ export function OrderScreenPrintCalculator({
   coefficients: ScreenPrintCoefficient[];
   existingDecorations?: ExistingDecoration[];
   locked?: boolean;
+  hideCosts?: boolean;
 }) {
   const router = useRouter();
   const existing = useMemo(
@@ -65,11 +67,13 @@ export function OrderScreenPrintCalculator({
           colorCount,
           bandQty: base.bandQty,
           baseRate: base.baseRate,
-          label: `Шовкотрафарет за тиражем · ${colorCount} кол. · ${formatMoneyUah(base.baseRate)}/шт`,
+          label: hideCosts
+            ? `Шовкотрафарет · ${colorCount} кол.`
+            : `Шовкотрафарет за тиражем · ${colorCount} кол. · ${formatMoneyUah(base.baseRate)}/шт`,
         };
       })
       .filter((row): row is NonNullable<typeof row> => row != null);
-  }, [cells, quantity]);
+  }, [cells, quantity, hideCosts]);
 
   const [draftColorCount, setDraftColorCount] = useState(
     existing ? String(parsed?.colorCount ?? "") : "",
@@ -209,7 +213,7 @@ export function OrderScreenPrintCalculator({
             </Select>
           </label>
 
-          {preview ? (
+          {preview && !hideCosts ? (
             <div className="ml-auto text-right">
               <p className="tabular text-[13px] font-semibold">
                 {formatMoneyUah(preview.unitRate)}

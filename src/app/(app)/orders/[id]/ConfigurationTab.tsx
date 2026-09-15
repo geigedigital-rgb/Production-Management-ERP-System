@@ -377,7 +377,12 @@ export function ConfigurationTab({
           customized={customized}
         />
         {sizes.length > 1 ? (
-          <SizeBomScopeHint sizeScope={sizeScope} hasOversizeSizes={hasOversizeSizes} compact />
+          <SizeBomScopeHint
+            sizeScope={sizeScope}
+            hasOversizeSizes={hasOversizeSizes}
+            compact
+            hideUpliftPercents={hideCosts}
+          />
         ) : null}
         {sizeScope !== ALL_SIZES && !locked ? (
           <CopySizeSpec from={sizeScope} sizes={sizeRefs} onCopy={copySpecTo} disabled={pending} />
@@ -417,7 +422,7 @@ export function ConfigurationTab({
                   ? baseUnitCost * OVERSIZE_DEFAULT_COEFFS.materialCoeff
                   : baseUnitCost;
                 const oversizeNorm =
-                  hasOversizeSizes || scopeIsOversize
+                  !hideCosts && (hasOversizeSizes || scopeIsOversize)
                     ? effectiveOversizeConsumption(row.consumption)
                     : null;
                 const showSupplierColor =
@@ -475,7 +480,7 @@ export function ConfigurationTab({
                             color={row.colorSnapshot ?? null}
                             offers={row.supplierOffers ?? []}
                             materialFallbackColors={row.materialAvailableColors}
-                            readOnly={locked || rowBusy}
+                            readOnly={locked || rowBusy || hideCosts}
                           />
                         ) : null}
                       </div>
@@ -883,6 +888,7 @@ export function ConfigurationTab({
           coefficients={screenPrintCoefficients}
           existingDecorations={decorations.map((row) => ({ id: row.id, name: row.name }))}
           locked={locked}
+          hideCosts={hideCosts}
         />
       </TableCard>
 

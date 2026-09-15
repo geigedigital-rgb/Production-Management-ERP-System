@@ -70,3 +70,18 @@ export function canEditOrderComposition(
 export function canViewOrderCosts(access: UserAccess | null): boolean {
   return accessHas(access, "viewProductCosts") || accessHas(access, "saveVersions");
 }
+
+/**
+ * Money / VAT / supplier color / delivery / waste — admin (or cost-view grant).
+ * Managers assemble DRAFT structure only; pricing is filled in later by admin.
+ */
+export function canEditOrderPricing(access: UserAccess | null): boolean {
+  return canViewOrderCosts(access);
+}
+
+export async function assertCanEditOrderPricing(): Promise<UserAccess> {
+  const access = await getCurrentUserAccess();
+  if (!access) throw new Error("UNAUTHORIZED");
+  if (!canEditOrderPricing(access)) throw new Error("FORBIDDEN");
+  return access;
+}

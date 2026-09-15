@@ -19,6 +19,7 @@ import {
 } from "@/lib/draft-composition";
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
 import { materialOptionDescription } from "@/lib/material-catalog-options";
+import { defaultSupplierId } from "@/lib/supplier-colors";
 import { formatMoneyUah } from "@/lib/utils";
 
 export type MaterialCatalogOption = {
@@ -38,6 +39,12 @@ export type MaterialCatalogOption = {
   minWholesaleMeters?: number | null;
   costVatOverride?: "NET" | "GROSS" | null;
   availableColors?: string[];
+  supplierOffers?: Array<{
+    supplierId: string;
+    supplierName: string;
+    isPrimary?: boolean;
+    availableColors: string[];
+  }>;
   metersPerKg?: number | null;
   priceKgUsdCargo?: number | null;
   wholesaleNote?: string | null;
@@ -145,6 +152,8 @@ export function DraftAddMaterialForm({
       costVatMode: showPricing ? costVatMode : pricing.costVatMode,
       priceMode: showPricing ? priceMode : pricing.priceMode,
       availableColors: option.availableColors ?? [],
+      supplierOffers: option.supplierOffers ?? [],
+      supplierId: defaultSupplierId(option.supplierOffers ?? []) ?? null,
       metersPerKg: option.metersPerKg ?? null,
       wholesaleNote: option.wholesaleNote ?? null,
       fabricDeliveryManual: false,

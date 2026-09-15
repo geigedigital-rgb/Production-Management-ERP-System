@@ -4,6 +4,7 @@ import { getFabricPricingGlobals, listMaterials, listUnits } from "@/server/doma
 import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
 import { buildCalcFromProduct, getPricingDefaults } from "@/server/domains/calculation/from-entities";
 import { Breadcrumbs } from "@/components/ui/ObjectHeader";
+import { canViewOrderCosts, getCurrentUserAccess } from "@/server/auth/access";
 import { OrderCreateForm } from "./OrderCreateForm";
 
 const PRICE_TIERS = [1, 10, 50, 100, 250, 500, 1000];
@@ -14,18 +15,30 @@ export default async function NewOrderPage({
   searchParams: Promise<{ clientId?: string; productId?: string }>;
 }) {
   const params = await searchParams;
-  const [clients, products, pricing, sizes, materials, operations, decorations, units, fabricGlobals] =
-    await Promise.all([
-      listClients(),
-      listProducts(),
-      getPricingDefaults(),
-      listSizes(),
-      listMaterials(),
-      listOperations(),
-      listDecorations(),
-      listUnits(),
-      getFabricPricingGlobals(),
-    ]);
+  const [
+    access,
+    clients,
+    products,
+    pricing,
+    sizes,
+    materials,
+    operations,
+    decorations,
+    units,
+    fabricGlobals,
+  ] = await Promise.all([
+    getCurrentUserAccess(),
+    listClients(),
+    listProducts(),
+    getPricingDefaults(),
+    listSizes(),
+    listMaterials(),
+    listOperations(),
+    listDecorations(),
+    listUnits(),
+    getFabricPricingGlobals(),
+  ]);
+  const showCosts = canViewOrderCosts(access);
 
   return (
     <div className="space-y-4">
@@ -34,7 +47,14 @@ export default async function NewOrderPage({
         initialClientId={params.clientId}
         initialProductId={params.productId}
         companyCostMode={fabricGlobals.materialCostVatMode}
-        clients={clients.map((client) => ({ id: client.id, label: client.companyName }))}
+        showCosts={showCosts}
+        clients={clients.map((client) => ({
+          id: client.id,
+          label: client.companyName,
+          contactPerson: client.contactPerson,
+          phone: client.phone,
+          email: client.email,
+        }))}
         sizeOptions={sizes.map((size) => ({
           id: size.id,
           label: size.nameUk,

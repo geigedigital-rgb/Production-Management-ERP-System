@@ -86,10 +86,12 @@ export function OrdersTable({
   orders,
   empty,
   canDelete = false,
+  showAmounts = true,
 }: {
   orders: OrdersTableRow[];
   empty: { title: string; description?: string; action?: React.ReactNode };
   canDelete?: boolean;
+  showAmounts?: boolean;
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -148,15 +150,17 @@ export function OrdersTable({
           <SortableTH columnKey="client" sort={sort} onSort={toggle}>
             Клієнт / склад
           </SortableTH>
-          <SortableTH
-            columnKey="amount"
-            sort={sort}
-            onSort={toggle}
-            align="right"
-            title="Ціна для клієнта вже з урахуванням маржі — це не собівартість"
-          >
-            Сума продажу
-          </SortableTH>
+          {showAmounts ? (
+            <SortableTH
+              columnKey="amount"
+              sort={sort}
+              onSort={toggle}
+              align="right"
+              title="Ціна для клієнта вже з урахуванням маржі — це не собівартість"
+            >
+              Сума продажу
+            </SortableTH>
+          ) : null}
           <SortableTH columnKey="status" sort={sort} onSort={toggle}>
             Стан
           </SortableTH>
@@ -167,7 +171,7 @@ export function OrdersTable({
         <TBody>
           {sorted.length === 0 ? (
             <TableEmpty
-              colSpan={7}
+              colSpan={showAmounts ? 7 : 6}
               icon={<IconGarment size={24} />}
               title={empty.title}
               description={empty.description}
@@ -226,6 +230,7 @@ export function OrdersTable({
                         maxWidth="240px"
                       />
                     </TD>
+                    {showAmounts ? (
                     <TD numeric className="font-medium text-[var(--color-text-primary)]">
                       {hasAmount ? (
                         formatMoneyShort(totalValue)
@@ -238,6 +243,7 @@ export function OrdersTable({
                         </span>
                       )}
                     </TD>
+                    ) : null}
                     <TD nowrap>
                       <div className="flex flex-col items-start gap-1">
                         <OrderStatusBadge status={order.status} />
@@ -293,12 +299,14 @@ export function OrdersTable({
                                 <tr className="border-b border-[var(--color-table-section-border)] text-left">
                                   <th className="px-3 py-1.5">Виріб</th>
                                   <th className="px-3 py-1.5 text-right">К-сть</th>
-                                  <th
-                                    className="cursor-help px-3 py-1.5 text-right"
-                                    title="Сума продажу клієнту вже з урахуванням маржі"
-                                  >
-                                    Сума продажу
-                                  </th>
+                                  {showAmounts ? (
+                                    <th
+                                      className="cursor-help px-3 py-1.5 text-right"
+                                      title="Сума продажу клієнту вже з урахуванням маржі"
+                                    >
+                                      Сума продажу
+                                    </th>
+                                  ) : null}
                                   <th className="px-3 py-1.5 text-right" />
                                 </tr>
                               </thead>
@@ -319,9 +327,11 @@ export function OrdersTable({
                                     <td className="px-3 py-2 text-right tabular text-[var(--color-text-secondary)]">
                                       {item.totalQuantity} шт
                                     </td>
-                                    <td className="px-3 py-2 text-right tabular text-[var(--color-text-secondary)]">
-                                      {item.amount != null ? formatMoneyUah(item.amount) : "—"}
-                                    </td>
+                                    {showAmounts ? (
+                                      <td className="px-3 py-2 text-right tabular text-[var(--color-text-secondary)]">
+                                        {item.amount != null ? formatMoneyUah(item.amount) : "—"}
+                                      </td>
+                                    ) : null}
                                     <td className="px-3 py-2 text-right">
                                       <button
                                         type="button"

@@ -74,12 +74,15 @@ export function SpecColorPicker({
   materialColors,
   /** Persist add/remove on the material / draft row palette. */
   onMaterialColorsChange,
+  /** Tighter swatches for side panels / supplier blocks. */
+  compact = false,
 }: {
   value: string | null | undefined;
   onChange: (next: string | null) => void;
   hint?: string;
   materialColors?: string[] | null;
   onMaterialColorsChange?: (next: string[]) => void;
+  compact?: boolean;
 }) {
   const formId = useId();
   const [customColors, setCustomColors] = useState<SpecColorOption[]>([]);
@@ -164,32 +167,39 @@ export function SpecColorPicker({
   }
 
   return (
-    <div className="space-y-3">
+    <div className={cn("space-y-2", !compact && "space-y-3")}>
       {hint ? <p className="type-caption">{hint}</p> : null}
 
       {catalogLabels.length > 0 ? (
-        <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
-          Варіанти з каталогу
+        <p className="text-[10.5px] font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
+          {compact ? "Палітра постачальника" : "Варіанти з каталогу"}
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-x-3 gap-y-3">
+      <div className={cn("flex flex-wrap", compact ? "gap-x-2 gap-y-2" : "gap-x-3 gap-y-3")}>
         {palette.map((color) => {
           const active = selected ? labelsMatch(color.label, selected) : false;
           const isCatalog = catalogLabels.some((row) => labelsMatch(row, color.label));
           return (
-            <div key={color.id} className="relative flex w-[4.25rem] flex-col items-center gap-1.5 text-center">
+            <div
+              key={color.id}
+              className={cn(
+                "relative flex flex-col items-center text-center",
+                compact ? "w-[3.25rem] gap-1" : "w-[4.25rem] gap-1.5",
+              )}
+            >
               <button
                 type="button"
                 onClick={() => selectColor(color.label)}
-                className="group flex w-full flex-col items-center gap-1.5"
+                className="group flex w-full flex-col items-center gap-1"
                 title={color.label}
               >
                 <span
                   className={cn(
-                    "relative flex size-10 items-center justify-center rounded-full transition-transform duration-150 group-hover:scale-[1.04]",
+                    "relative flex items-center justify-center rounded-full transition-transform duration-150 group-hover:scale-[1.04]",
+                    compact ? "size-7" : "size-10",
                     active
-                      ? "ring-2 ring-[var(--color-primary-600)] ring-offset-2 ring-offset-[var(--color-surface)]"
+                      ? "ring-2 ring-[var(--color-primary-600)] ring-offset-1 ring-offset-[var(--color-surface)]"
                       : "ring-1 ring-black/5",
                     color.bordered && "border border-[var(--color-border-strong)]",
                   )}
@@ -199,7 +209,8 @@ export function SpecColorPicker({
                   {active ? (
                     <span
                       className={cn(
-                        "absolute inset-0 m-auto size-2 rounded-full",
+                        "absolute inset-0 m-auto rounded-full",
+                        compact ? "size-1.5" : "size-2",
                         isLightCssColor(color.swatch)
                           ? "bg-[var(--color-text-primary)]"
                           : "bg-white",
@@ -209,7 +220,8 @@ export function SpecColorPicker({
                 </span>
                 <span
                   className={cn(
-                    "max-w-full truncate text-[11px] font-medium leading-tight",
+                    "max-w-full truncate font-medium leading-tight",
+                    compact ? "text-[10px]" : "text-[11px]",
                     active
                       ? "text-[var(--color-text-primary)]"
                       : "text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)]",
@@ -232,27 +244,38 @@ export function SpecColorPicker({
           );
         })}
 
-        <button
-          type="button"
-          onClick={() => {
-            setAdding((open) => !open);
-            setError(null);
-          }}
-          className="group flex w-[4.25rem] flex-col items-center gap-1.5 text-center"
-          title="Додати колір"
-        >
-          <span
+        {managed || !compact ? (
+          <button
+            type="button"
+            onClick={() => {
+              setAdding((open) => !open);
+              setError(null);
+            }}
             className={cn(
-              "flex size-10 items-center justify-center rounded-full border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] transition-colors group-hover:border-[var(--color-primary-400)] group-hover:text-[var(--color-primary-700)]",
-              adding && "border-[var(--color-primary-500)] text-[var(--color-primary-700)]",
+              "group flex flex-col items-center text-center",
+              compact ? "w-[3.25rem] gap-1" : "w-[4.25rem] gap-1.5",
             )}
+            title="Додати колір"
           >
-            <IconPlus size={16} />
-          </span>
-          <span className="text-[11px] font-medium text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)]">
-            Інший
-          </span>
-        </button>
+            <span
+              className={cn(
+                "flex items-center justify-center rounded-full border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] transition-colors group-hover:border-[var(--color-primary-400)] group-hover:text-[var(--color-primary-700)]",
+                compact ? "size-7" : "size-10",
+                adding && "border-[var(--color-primary-500)] text-[var(--color-primary-700)]",
+              )}
+            >
+              <IconPlus size={compact ? 14 : 16} />
+            </span>
+            <span
+              className={cn(
+                "font-medium text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)]",
+                compact ? "text-[10px]" : "text-[11px]",
+              )}
+            >
+              Інший
+            </span>
+          </button>
+        ) : null}
       </div>
 
       {selected && !selectedInPalette ? (

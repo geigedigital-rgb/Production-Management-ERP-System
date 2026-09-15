@@ -22,6 +22,7 @@ import {
   OwnerDashboard,
 } from "@/components/overview/OwnerDashboard";
 import { DashboardToolbar } from "@/components/overview/DashboardToolbar";
+import { canViewOrderCosts, getCurrentUserAccess } from "@/server/auth/access";
 import { PORTFOLIO_STAGES, dashboardQuery, daysLeft } from "./dashboard-model";
 
 const PORTFOLIO_FOCUS_KEYS = PORTFOLIO_STAGES.map((stage) => stage.key);
@@ -93,6 +94,8 @@ export default async function OverviewPage({
   const focus = parseFocus(params.focus);
   const range = parseRange(params.range);
   const managerId = params.manager || null;
+  const access = await getCurrentUserAccess();
+  const showAmounts = canViewOrderCosts(access);
 
   let data: Awaited<ReturnType<typeof getOwnerDashboard>> | null = null;
   try {
@@ -181,18 +184,22 @@ export default async function OverviewPage({
           <Table>
             <THead>
               <TH>Замовлення</TH>
-              <TH
-                align="right"
-                title="Ціна для клієнта вже з урахуванням маржі — це не собівартість"
-              >
-                Сума продажу
-              </TH>
-              <TH
-                align="right"
-                title="Частка прибутку в сумі продажу, % (не додається зверху до суми)"
-              >
-                Маржа %
-              </TH>
+              {showAmounts ? (
+                <TH
+                  align="right"
+                  title="Ціна для клієнта вже з урахуванням маржі — це не собівартість"
+                >
+                  Сума продажу
+                </TH>
+              ) : null}
+              {showAmounts ? (
+                <TH
+                  align="right"
+                  title="Частка прибутку в сумі продажу, % (не додається зверху до суми)"
+                >
+                  Маржа %
+                </TH>
+              ) : null}
               <TH>Дедлайн</TH>
               <TH>Менеджер</TH>
               <TH>Статус</TH>
@@ -200,7 +207,7 @@ export default async function OverviewPage({
             <TBody>
               {sorted.length === 0 ? (
                 <TableEmpty
-                  colSpan={6}
+                  colSpan={showAmounts ? 6 : 4}
                   title={emptyTitleFor(focus)}
                   description={
                     focus !== "all"
@@ -238,16 +245,20 @@ export default async function OverviewPage({
                           maxWidth="220px"
                         />
                       </TD>
-                      <TD align="right" nowrap>
-                        <span className="tabular font-medium text-[var(--color-text-primary)]">
-                          {order.amount > 0 ? formatMoneyShort(order.amount) : "—"}
-                        </span>
-                      </TD>
-                      <TD align="right" nowrap>
-                        <span className="tabular font-medium text-[var(--color-text-secondary)]">
-                          {order.margin != null ? `${order.margin.toFixed(1)}%` : "—"}
-                        </span>
-                      </TD>
+                      {showAmounts ? (
+                        <TD align="right" nowrap>
+                          <span className="tabular font-medium text-[var(--color-text-primary)]">
+                            {order.amount > 0 ? formatMoneyShort(order.amount) : "—"}
+                          </span>
+                        </TD>
+                      ) : null}
+                      {showAmounts ? (
+                        <TD align="right" nowrap>
+                          <span className="tabular font-medium text-[var(--color-text-secondary)]">
+                            {order.margin != null ? `${order.margin.toFixed(1)}%` : "—"}
+                          </span>
+                        </TD>
+                      ) : null}
                       <TD nowrap>
                         {order.deadline ? (
                           <span

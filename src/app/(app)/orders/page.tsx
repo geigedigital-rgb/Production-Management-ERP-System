@@ -7,7 +7,7 @@ import { TableCard, TableToolbar } from "@/components/ui/Table";
 import { SearchField, FilterChips, ResetFilters } from "@/components/ui/Filters";
 import { IconPlus } from "@/components/ui/Icons";
 import { OrdersTable, type OrdersTableRow } from "@/components/orders/OrdersTable";
-import { accessHas, getCurrentUserAccess } from "@/server/auth/access";
+import { accessHas, canViewOrderCosts, getCurrentUserAccess } from "@/server/auth/access";
 
 const activeStatuses = ["DRAFT", "CALCULATION", "PENDING_APPROVAL", "APPROVED"];
 
@@ -21,6 +21,7 @@ export default async function OrdersPage({
 
   const { q, status, client } = await searchParams;
   const canDelete = accessHas(access, "manageOrders");
+  const showAmounts = canViewOrderCosts(access);
 
   let orders: Awaited<ReturnType<typeof listOrders>> = [];
   try {
@@ -120,6 +121,7 @@ export default async function OrdersPage({
         <OrdersTable
           orders={rows}
           canDelete={canDelete}
+          showAmounts={showAmounts}
           empty={{
             title: term || status ? "Замовлень не знайдено" : "Замовлень ще немає",
             description: term || status

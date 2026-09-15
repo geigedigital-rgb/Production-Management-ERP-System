@@ -17,12 +17,13 @@ export type OrderFact = {
   hint?: string;
 };
 
-/** CRM-style object header: title, badge, subtitle, actions. */
+/** CRM-style object header: order on the left, optional client column on the right. */
 export function OrderWorkspaceHeader({
   title,
   badge,
   subtitle,
   meta,
+  aside,
   actions,
   className,
 }: {
@@ -30,20 +31,81 @@ export function OrderWorkspaceHeader({
   badge?: React.ReactNode;
   subtitle?: React.ReactNode;
   meta?: React.ReactNode;
+  /** Right column — typically client contacts. */
+  aside?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-start justify-between gap-3", className)}>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="type-page-title">{title}</h1>
-          {badge}
+    <div className={cn("flex flex-col gap-4", className)}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="type-page-title">{title}</h1>
+            {badge}
+          </div>
+          {subtitle ? <p className="type-body-secondary mt-1">{subtitle}</p> : null}
         </div>
-        {subtitle ? <p className="type-body-secondary mt-1">{subtitle}</p> : null}
-        {meta ? <div className="mt-1.5">{meta}</div> : null}
+        {actions ? <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div> : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div> : null}
+
+      <div
+        className={cn(
+          "grid gap-4",
+          aside && "lg:grid-cols-[minmax(0,1.2fr)_minmax(220px,0.8fr)] lg:gap-6",
+        )}
+      >
+        <div className="min-w-0">{meta}</div>
+        {aside ? (
+          <aside className="min-w-0 rounded-[10px] border border-[var(--color-divider)] bg-[var(--color-bg)]/50 px-3.5 py-3 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:border-l lg:border-[var(--color-divider)] lg:pl-6">
+            {aside}
+          </aside>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Compact labeled rows for order / client header columns. */
+export function OrderHeaderFacts({
+  title,
+  facts,
+  columns = 3,
+  className,
+}: {
+  title?: string;
+  facts: Array<{ label: string; value: React.ReactNode; hint?: string }>;
+  columns?: 1 | 2 | 3;
+  className?: string;
+}) {
+  if (facts.length === 0) return null;
+  return (
+    <div className={cn("min-w-0", className)}>
+      {title ? (
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-quiet)]">
+          {title}
+        </p>
+      ) : null}
+      <dl
+        className={cn(
+          "grid gap-x-3 gap-y-2",
+          columns === 1 && "grid-cols-1",
+          columns === 2 && "grid-cols-2",
+          columns === 3 && "grid-cols-3",
+        )}
+      >
+        {facts.map((fact) => (
+          <div key={fact.label} className="min-w-0">
+            <dt className="type-caption">{fact.label}</dt>
+            <dd className="mt-0.5 truncate text-[13px] font-semibold leading-snug text-[var(--color-text-primary)]">
+              {fact.value}
+            </dd>
+            {fact.hint ? (
+              <dd className="type-caption mt-0.5 truncate">{fact.hint}</dd>
+            ) : null}
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }

@@ -104,6 +104,10 @@ export async function listMaterials(params?: {
     include: {
       unitOfMeasure: true,
       category: true,
+      supplierOffers: {
+        include: { supplier: true },
+        orderBy: [{ isPrimary: "desc" as const }, { updatedAt: "desc" as const }],
+      },
     },
     orderBy: { nameUk: "asc" },
   });

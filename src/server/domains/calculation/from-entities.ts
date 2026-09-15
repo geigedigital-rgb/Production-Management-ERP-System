@@ -318,14 +318,9 @@ export function buildCalcFromProduct(
         ...payload,
       }));
     }),
-    decorations: product.decorations.map((row) => ({
-      id: row.id,
-      setupCost:
-        row.setupCostOverride != null
-          ? Number(row.setupCostOverride)
-          : Number(row.decorationMethod.setupCost),
-      unitRate: Number(row.decorationMethod.unitRate),
-    })),
+    // Branding / screen-print is order-only — product card economics must not include
+    // leftover ProductDecoration rows that are no longer editable in the BOM UI.
+    decorations: [],
     additionalCosts: product.additionalCosts.map((row) => ({
       id: row.id,
       amount: Number(row.amount),

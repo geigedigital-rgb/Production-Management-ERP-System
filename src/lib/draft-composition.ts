@@ -14,6 +14,7 @@ import {
   type MaterialCostVatMode,
 } from "@/lib/fabric-pricing";
 import { resolveQuantityTierRate } from "@/lib/quantity-tiers";
+import { defaultSupplierId } from "@/lib/supplier-colors";
 
 export function draftKey() {
   return `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -93,6 +94,11 @@ export function cloneComposition(
         ...pricing,
         lineColor: null,
         availableColors: option?.availableColors ?? row.availableColors ?? [],
+        supplierOffers: option?.supplierOffers ?? row.supplierOffers ?? [],
+        supplierId:
+          row.supplierId ??
+          defaultSupplierId(option?.supplierOffers ?? row.supplierOffers ?? []) ??
+          null,
         materialType: option?.materialType ?? row.materialType ?? pricing.materialType,
         metersPerKg: option?.metersPerKg ?? row.metersPerKg ?? null,
         wholesaleNote: option?.wholesaleNote ?? row.wholesaleNote ?? null,
@@ -338,6 +344,7 @@ export function isTrimLikeMaterial(row: Pick<DraftMaterialRow, "materialType" | 
 export function draftMaterialNeedsColor(row: DraftMaterialRow): boolean {
   if (isPackagingMaterial(row)) return false;
   if (isTrimLikeMaterial(row)) return true;
+  if ((row.supplierOffers?.length ?? 0) > 0) return true;
   if ((row.availableColors?.length ?? 0) > 0) return true;
   // Order spec: fabric roll color is chosen per line (лакоста, комірці, основа тощо).
   if (row.materialType === "FABRIC") return true;
@@ -354,7 +361,9 @@ export function draftMaterialShowsColorSlot(
   return (
     draftMaterialNeedsColor(row) ||
     Boolean(row.lineColor?.trim()) ||
-    (row.availableColors?.length ?? 0) > 0
+    Boolean(row.supplierId) ||
+    (row.availableColors?.length ?? 0) > 0 ||
+    (row.supplierOffers?.length ?? 0) > 0
   );
 }
 
@@ -368,21 +377,21 @@ export function draftMaterialMissingChoices(
 ): string[] {
   const missing: string[] = [];
 
-  if (draftMaterialNeedsColor(row) && !row.lineColor?.trim()) {
-    missing.push("Колір");
+  // Color / supplier / VAT are chosen inside the order (admin), not on create draft.
+  if (!options.enableLinePricingControls) return missing;
+
+  if (draftMaterialNeedsColor(row)) {
+    const offers = row.supplierOffers ?? [];
+    if (offers.length > 0 && !row.supplierId) {
+      missing.push("Постачальник");
+    } else if (!row.lineColor?.trim()) {
+      missing.push("Колір");
+    }
   }
-  if (
-    options.enableLinePricingControls &&
-    materialHasPricingControls(row) &&
-    !row.costVatMode
-  ) {
+  if (materialHasPricingControls(row) && !row.costVatMode) {
     missing.push("ПДВ");
   }
-  if (
-    options.enableLinePricingControls &&
-    materialNeedsPriceModeChoice(row) &&
-    !row.priceMode
-  ) {
+  if (materialNeedsPriceModeChoice(row) && !row.priceMode) {
     missing.push("Режим ціни");
   }
   return missing;

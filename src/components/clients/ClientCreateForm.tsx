@@ -15,7 +15,13 @@ export function ClientCreatePanel({
   variant = "primary",
   size = "md",
 }: {
-  onCreated?: (client: { id: string; companyName: string }) => void;
+  onCreated?: (client: {
+    id: string;
+    companyName: string;
+    contactPerson?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  }) => void;
   triggerLabel?: string;
   variant?: "primary" | "secondary" | "ghost";
   size?: "sm" | "md";
@@ -34,6 +40,9 @@ export function ClientCreatePanel({
         onCreated?.({
           id: String(result.clientId),
           companyName: String(result.companyName),
+          contactPerson: result.contactPerson != null ? String(result.contactPerson) : null,
+          phone: result.phone != null ? String(result.phone) : null,
+          email: result.email != null ? String(result.email) : null,
         })
       }
     >

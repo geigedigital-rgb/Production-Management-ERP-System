@@ -168,7 +168,7 @@ export function ProductsTable({
                       <div className="flex justify-end gap-4">
                         {product.prices.map((price, index) => (
                           <span
-                            key={priceTiers[index]}
+                            key={`${product.id}-tier-${product.priceTiers[index] ?? index}`}
                             className={cn(
                               "tabular w-[76px] text-right",
                               !product.ready && "text-[var(--color-text-tertiary)]",

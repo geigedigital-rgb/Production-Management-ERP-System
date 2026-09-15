@@ -18,7 +18,7 @@ import { Banner } from "@/components/ui/Banner";
 import { ViewTabs } from "@/components/ui/Tabs";
 import {
   OrderChevronPipeline,
-  OrderFactsStrip,
+  OrderHeaderFacts,
   OrderWorkspaceHeader,
   OrderWorkspacePanel,
   OrderWorkspaceShell,
@@ -26,7 +26,6 @@ import {
 import { CostStructure } from "@/components/calc/CostSummary";
 import {
   IconCalc,
-  IconClients,
   IconFiles,
   IconProducts,
   IconQuote,
@@ -540,27 +539,9 @@ export default async function OrderDetailPage({
     sizes: product.sizes.map((size) => ({ code: size.size.code, nameUk: size.size.nameUk })),
   }));
 
-  const facts = [
-    {
-      label: "Клієнт",
-      value: (
-        <Link
-          href={`/clients/${order.clientId}`}
-          className="hover:text-[var(--color-primary-700)] hover:underline"
-        >
-          {order.client.companyName}
-        </Link>
-      ),
-      hint: order.client.contactPerson ?? undefined,
-    },
+  const orderFacts = [
     { label: "Менеджер", value: order.manager.name },
     { label: "Дедлайн", value: formatDateUk(order.deadline) },
-    { label: "Кількість", value: `${orderQuantity} шт` },
-    {
-      label: "Позиції",
-      value: String(order.items.length),
-      hint: order.items.length > 1 ? "у замовленні" : undefined,
-    },
     ...(canViewCosts
       ? [
           {
@@ -572,6 +553,27 @@ export default async function OrderDetailPage({
           },
         ]
       : []),
+    { label: "Кількість", value: `${orderQuantity} шт` },
+    {
+      label: "Позиції",
+      value: String(order.items.length),
+      hint: order.items.length > 1 ? "у замовленні" : undefined,
+    },
+  ];
+
+  const clientFacts = [
+    {
+      label: "Контакт",
+      value: order.client.contactPerson?.trim() || "—",
+    },
+    {
+      label: "Телефон",
+      value: order.client.phone?.trim() || "—",
+    },
+    {
+      label: "Email",
+      value: order.client.email?.trim() || "—",
+    },
   ];
 
   const activeDraft = draftLines.find((line) => line.orderItemId === item.id);
@@ -686,27 +688,26 @@ export default async function OrderDetailPage({
                 ) : null}
               </>
             }
-            meta={
-              <p className="text-[13px] text-[var(--color-primary-700)]">
-                <Link
-                  href={`/clients/${order.clientId}`}
-                  className="hover:underline"
-                >
-                  {order.client.companyName}
-                </Link>
-                {order.client.contactPerson ? ` · ${order.client.contactPerson}` : ""}
-              </p>
+            meta={<OrderHeaderFacts title="Замовлення" facts={orderFacts} columns={3} />}
+            aside={
+              <div className="space-y-2.5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-quiet)]">
+                    Клієнт
+                  </p>
+                  <Link
+                    href={`/clients/${order.clientId}`}
+                    className="mt-1 block text-[14px] font-semibold text-[var(--color-primary-700)] transition-colors hover:text-[var(--color-primary-500)] hover:underline"
+                  >
+                    {order.client.companyName}
+                  </Link>
+                </div>
+                <OrderHeaderFacts facts={clientFacts} columns={2} />
+              </div>
             }
             actions={
               <>
                 <QuickActions>
-                  <QuickAction
-                    icon={<IconClients size={15} />}
-                    href={`/clients/${order.clientId}`}
-                    hint="orderClientCard"
-                  >
-                    Клієнт
-                  </QuickAction>
                   {action.quotationReady && accessHas(access, "generateQuotations") ? (
                     <QuickAction
                       icon={<IconQuote size={15} />}
@@ -756,7 +757,6 @@ export default async function OrderDetailPage({
             }
           />
         }
-        facts={<OrderFactsStrip facts={facts} />}
         pipeline={
           <OrderChevronPipeline
             status={order.status}

@@ -10,28 +10,35 @@ export function SizeBomScopeHint({
   materialPct = 15,
   operationPct = 20,
   compact = false,
+  hideUpliftPercents = false,
 }: {
   sizeScope: SizeScope;
   hasOversizeSizes: boolean;
   materialPct?: number;
   operationPct?: number;
   compact?: boolean;
+  /** Managers: no cost-coefficient percentages in copy. */
+  hideUpliftPercents?: boolean;
 }) {
   if (compact) {
     if (sizeScope === ALL_SIZES) {
       return (
         <p className="type-caption">
           База S–XL
-          {hasOversizeSizes
+          {hasOversizeSizes && !hideUpliftPercents
             ? ` · ${OVERSIZE_RANGE_LABEL} авто +${materialPct}% мат. / +${operationPct}% оп.`
-            : ""}
+            : hasOversizeSizes
+              ? ` · ${OVERSIZE_RANGE_LABEL} окремо`
+              : ""}
         </p>
       );
     }
     if (isOversizeCode(sizeScope)) {
       return (
         <p className="type-caption">
-          {sizeScope}: норма вже з +{materialPct}%. Зміна = своя норма розміру.
+          {hideUpliftPercents
+            ? `${sizeScope}: норма для цього розміру. Зміна = своя норма.`
+            : `${sizeScope}: норма вже з +${materialPct}%. Зміна = своя норма розміру.`}
         </p>
       );
     }
@@ -44,14 +51,16 @@ export function SizeBomScopeHint({
     return (
       <p className="type-caption">
         «Усі» — базові норми (S–XL).
-        {hasOversizeSizes ? (
+        {hasOversizeSizes && !hideUpliftPercents ? (
           <>
             {" "}
             Для {OVERSIZE_RANGE_LABEL} у розрахунку автоматично матеріали +{materialPct}% і операції +
             {operationPct}% (поля справа від вкладок). Окремо оновлювати кожен виріб не потрібно.
           </>
+        ) : hasOversizeSizes ? (
+          <> Для {OVERSIZE_RANGE_LABEL} норми задаються окремо.</>
         ) : null}{" "}
-        Ціна матеріалу — з каталогу.
+        {!hideUpliftPercents ? "Ціна матеріалу — з каталогу." : null}
       </p>
     );
   }
@@ -59,15 +68,17 @@ export function SizeBomScopeHint({
   if (isOversizeCode(sizeScope)) {
     return (
       <p className="type-caption">
-        {sizeScope}: у полі норми вже показана база × +{materialPct}%. Змініть цифру — збережеться
-        як своя норма цього розміру. Відсотки справа ({OVERSIZE_RANGE_LABEL}) діють на всі вироби.
+        {hideUpliftPercents
+          ? `${sizeScope}: норма на цій вкладці — лише для цього розміру.`
+          : `${sizeScope}: у полі норми вже показана база × +${materialPct}%. Змініть цифру — збережеться як своя норма цього розміру. Відсотки справа (${OVERSIZE_RANGE_LABEL}) діють на всі вироби.`}
       </p>
     );
   }
 
   return (
     <p className="type-caption">
-      Специфікація для {sizeScope}: норма й відходи на цій вкладці — лише для цього розміру. Решта
+      Специфікація для {sizeScope}: норма
+      {!hideUpliftPercents ? " й відходи" : ""} на цій вкладці — лише для цього розміру. Решта
       лишається на базі з «Усі».
     </p>
   );

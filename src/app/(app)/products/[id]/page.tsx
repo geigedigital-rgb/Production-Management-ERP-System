@@ -294,7 +294,7 @@ export default async function ProductDetailPage({
   const isReady = readyCount === readiness.length;
   const isArchived = product.status === "ARCHIVED";
   const compositionCount =
-    product.materials.length + product.operations.length + product.decorations.length;
+    product.materials.length + product.operations.length;
 
   return (
     <div className="space-y-4">

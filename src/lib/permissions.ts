@@ -42,7 +42,7 @@ export type PermissionMeta = {
 export const PERMISSION_META: PermissionMeta[] = [
   {
     key: PERMISSIONS.manageOrders,
-    label: "Створення та комплектація замовлень (до розрахунку)",
+    label: "Створення та комплектація замовлень (до розрахунку). Без собівартості, ПДВ, кольорів постачальника й доставки.",
     group: "Замовлення",
   },
   {

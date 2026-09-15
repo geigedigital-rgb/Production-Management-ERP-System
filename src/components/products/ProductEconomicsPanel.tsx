@@ -73,7 +73,7 @@ export function ProductEconomicsPanel({
           step={1}
           value={quantityInput}
           onChange={(event) => setQuantityInput(event.target.value)}
-          hint="Матеріали, крій, операції за tier, нанесення і додаткові витрати — від тиражу."
+          hint="Матеріали, крій, операції за tier і додаткові витрати — від тиражу. Нанесення лише в замовленні."
         />
       </div>
 

@@ -59,7 +59,7 @@ export function ProductDetailTabs({
           <p className="type-caption">
             {effectiveTab === "composition"
               ? showPricing
-                ? "Матеріали, операції та нанесення для собівартості"
+                ? "Матеріали й операції для собівартості"
                 : "Склад виробу (без цін і калькуляції)"
               : "Спільні тиражі: крій і прайс в одній таблиці"}
           </p>

@@ -1,27 +1,56 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { SidePanel } from "@/components/ui/Overlay";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { MaterialPricingToggles } from "@/components/composition/PricingToggles";
-import { SpecColorPicker } from "@/components/composition/SpecColorPicker";
+import { SupplierColorFields } from "@/components/catalog/SupplierColorFields";
 import type { DraftMaterialRow } from "@/components/orders/ProductCatalogPanel";
 import {
   draftMaterialMetersNeeded,
   draftMaterialNeedsColor,
   isPackagingSku,
-  isTrimLikeMaterial,
   materialHasPricingControls,
   materialNeedsPriceModeChoice,
   resolveDraftMaterialPrice,
 } from "@/lib/draft-composition";
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
-import { formatMoneyUah, formatUnit } from "@/lib/utils";
-import { updateMaterialAvailableColorsAction } from "@/server/domains/catalog/actions";
+import {
+  colorsForSupplier,
+  reconcileColorForSupplier,
+} from "@/lib/supplier-colors";
+import { cn, formatMoneyUah, formatUnit } from "@/lib/utils";
 
 function round1(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function AttentionHeading({
+  children,
+  attention,
+}: {
+  children: ReactNode;
+  attention?: boolean;
+}) {
+  return (
+    <p
+      className={cn(
+        "type-group-label inline-flex items-center gap-1.5",
+        attention && "text-[var(--color-warning-text)]",
+      )}
+    >
+      {attention ? (
+        <span
+          className="flex size-3.5 shrink-0 items-center justify-center rounded-full border border-[var(--color-warning-text)]/45 bg-[var(--color-warning-bg)] text-[10px] font-bold leading-none text-[var(--color-warning-text)] animate-choice-pulse"
+          aria-hidden
+        >
+          ?
+        </span>
+      ) : null}
+      {children}
+    </p>
+  );
 }
 
 export function DraftMaterialLinePanel({
@@ -57,6 +86,7 @@ export function DraftMaterialLinePanel({
   const hasCut = row.priceMeterUahCutVat != null && row.priceMeterUahCutVat > 0;
   const vatChosen = row.costVatMode != null;
   const needsPriceMode = materialNeedsPriceModeChoice(row);
+  const priceModeMissing = needsPriceMode && !row.priceMode;
   const pricing = showPricing
     ? resolveDraftMaterialPrice(row, quantitiesBySize, companyCostMode)
     : null;
@@ -64,14 +94,17 @@ export function DraftMaterialLinePanel({
     pricing?.hint ||
     (showPricing && !vatChosen
       ? "оберіть ПДВ"
-      : showPricing && needsPriceMode && !row.priceMode
+      : showPricing && priceModeMissing
         ? "оберіть режим ціни"
         : "");
-  const isTrim = isTrimLikeMaterial(row);
-  const showColorPicker = draftMaterialNeedsColor(row);
+  const showColorPicker = enablePricingControls && draftMaterialNeedsColor(row);
   const isFabric = row.materialType === "FABRIC";
-
-  const materialId = row.materialId;
+  const offers = row.supplierOffers ?? [];
+  const supplierMissing = showColorPicker && offers.length > 0 && !row.supplierId;
+  const colorMissing =
+    showColorPicker &&
+    !row.lineColor?.trim() &&
+    (offers.length === 0 || Boolean(row.supplierId));
 
   const wholesaleThreshold = hasCut
     ? row.minWholesaleMeters != null && row.minWholesaleMeters > 0
@@ -112,10 +145,25 @@ export function DraftMaterialLinePanel({
     ? Math.max(0, Number(row.fabricDeliveryAmount) || 0)
     : deliveryAuto;
 
-  function persistPalette(next: string[]) {
-    onChange({ availableColors: next });
-    onCatalogColorsChange?.(materialId, next);
-    void updateMaterialAvailableColorsAction(materialId, next);
+  function changeSupplier(next: string | null) {
+    const color = reconcileColorForSupplier({
+      color: row.lineColor,
+      supplierId: next,
+      offers,
+      materialFallback: row.availableColors,
+    });
+    // Choosing supplier clears color if not in the new palette — user must confirm color.
+    const palette = colorsForSupplier(offers, next, row.availableColors);
+    const keep =
+      color && row.lineColor && color.toLowerCase() === row.lineColor.trim().toLowerCase()
+        ? color
+        : null;
+    onChange({
+      supplierId: next,
+      lineColor: keep,
+      availableColors: palette.length > 0 ? palette : row.availableColors,
+    });
+    if (palette.length > 0) onCatalogColorsChange?.(row.materialId, palette);
   }
 
   return (
@@ -133,6 +181,7 @@ export function DraftMaterialLinePanel({
       }
     >
       <div className="space-y-5">
+        {enablePricingControls ? (
         <section className="space-y-1.5 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2.5">
           <p className="type-caption">Поточна ціна в калькуляції</p>
           <p className="text-[16px] font-semibold tabular-nums">{formatMoneyUah(row.price)}</p>
@@ -142,12 +191,24 @@ export function DraftMaterialLinePanel({
             {pricingModeLabel ? ` · ${pricingModeLabel}` : ""}
           </p>
         </section>
+        ) : (
+        <p className="type-caption rounded-[var(--radius-control)] border border-dashed border-[var(--color-border)] px-3 py-2">
+          Ціна, ПДВ, доставка і колір постачальника виставляються в замовленні після створення
+          (доступ адміна).
+        </p>
+        )}
 
         {showPricing ? (
           <section className="space-y-2">
-            <p className="type-group-label">Закупівельна ціна</p>
+            <AttentionHeading attention={!vatChosen || priceModeMissing}>
+              Закупівельна ціна
+            </AttentionHeading>
             <p className="type-caption">
-              Оберіть ПДВ і режим ціни вручну — значення не підставляються автоматично.
+              {!vatChosen
+                ? "Оберіть ПДВ — без цього ціна в калькуляції не зафіксована."
+                : priceModeMissing
+                  ? "Оберіть режим ціни (авто / відріз / гурт)."
+                  : "ПДВ і режим ціни для цієї позиції."}
             </p>
             <MaterialPricingToggles
               costVatMode={row.costVatMode}
@@ -159,7 +220,7 @@ export function DraftMaterialLinePanel({
           </section>
         ) : null}
 
-        {isFabric ? (
+        {enablePricingControls && isFabric ? (
           <section className="space-y-2">
             <p className="type-group-label">Гурт / партія</p>
             <dl className="grid gap-2 text-[13px] sm:grid-cols-2">
@@ -197,7 +258,7 @@ export function DraftMaterialLinePanel({
           </section>
         ) : null}
 
-        {isFabric ? (
+        {enablePricingControls && isFabric ? (
           <section className="space-y-2">
             <p className="type-group-label">Доставка</p>
             <p className="type-caption">
@@ -317,17 +378,23 @@ export function DraftMaterialLinePanel({
 
         {showColorPicker ? (
           <section className="space-y-2">
-            <p className="type-group-label">Колір для специфікації</p>
-            <SpecColorPicker
-              value={row.lineColor}
-              onChange={(next) => onChange({ lineColor: next })}
-              materialColors={row.availableColors ?? []}
-              onMaterialColorsChange={persistPalette}
-              hint={
-                isTrim
-                  ? "Кольори цієї фурнітури. Можна додати або прибрати з палітри SKU; у специфікації обирається один."
-                  : "Оберіть колір для специфікації. Палітра зберігається в картці матеріалу."
-              }
+            <AttentionHeading attention={supplierMissing || colorMissing}>
+              Постачальник і колір
+            </AttentionHeading>
+            <p className="type-caption">
+              {supplierMissing
+                ? "Спочатку оберіть постачальника — палітра кольорів залежить від нього."
+                : colorMissing
+                  ? "Оберіть колір з палітри обраного постачальника."
+                  : "Палітра береться з умов постачальника в картці матеріалу."}
+            </p>
+            <SupplierColorFields
+              supplierId={row.supplierId}
+              color={row.lineColor}
+              offers={offers}
+              materialFallbackColors={row.availableColors ?? []}
+              onSupplierChange={changeSupplier}
+              onColorChange={(next) => onChange({ lineColor: next })}
             />
           </section>
         ) : isPackagingSku(row) ? (

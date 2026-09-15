@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/server/auth";
-import { assertSessionPermission, getCurrentUserAccess, canEditOrderComposition } from "@/server/auth/access";
+import { assertSessionPermission, getCurrentUserAccess, canEditOrderComposition, canEditOrderPricing, canViewOrderCosts } from "@/server/auth/access";
 import { hasUserPermission } from "@/lib/permissions";
 import {
   addOrderFile,
@@ -125,7 +125,8 @@ const draftItemSchema = z.object({
 export async function createOrderAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
-  await assertSessionPermission("manageOrders");
+  const access = await assertSessionPermission("manageOrders");
+  const allowPricing = canEditOrderPricing(access);
 
   const parsed = createOrderSchema.safeParse({
     clientId: formData.get("clientId"),
@@ -189,7 +190,28 @@ export async function createOrderAction(formData: FormData) {
             quantity: Math.max(0, Math.floor(Number(s.quantity) || 0)),
           }))
           .filter((s) => s.quantity > 0),
-        composition: item.composition,
+        composition: item.composition
+          ? {
+              materials: item.composition.materials.map((row) =>
+                allowPricing
+                  ? row
+                  : {
+                      materialId: row.materialId,
+                      consumptionPerUnit: row.consumptionPerUnit,
+                      sizeCode: row.sizeCode,
+                      sizeCodes: row.sizeCodes,
+                      sizeConsumption: row.sizeConsumption,
+                      // Catalog defaults applied in service — no client waste/price/VAT/color/delivery.
+                    },
+              ),
+              operations: item.composition.operations,
+              decorations: item.composition.decorations.map((row) =>
+                allowPricing
+                  ? row
+                  : { decorationMethodId: row.decorationMethodId },
+              ),
+            }
+          : undefined,
       }));
       if (items.length === 0 || items.some((item) => item.sizeQuantities.length === 0)) {
         return { ok: false as const, error: "QUANTITY_REQUIRED" as const };
@@ -338,12 +360,15 @@ export async function addOrderMaterialAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  const { access } = await assertCanEditOrderComposition(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const materialId = String(formData.get("materialId") ?? "");
   const consumptionPerUnit = Number(formData.get("consumptionPerUnit"));
   const wasteRaw = formData.get("wastePercent");
-  const wastePercent = wasteRaw === "" || wasteRaw == null ? null : Number(wasteRaw);
+  const wastePercent =
+    canEditOrderPricing(access) && wasteRaw !== "" && wasteRaw != null
+      ? Number(wasteRaw)
+      : null;
 
   const sizeCodeRaw = String(formData.get("sizeCode") ?? "").trim();
   const sizeCode = sizeCodeRaw && sizeCodeRaw !== "ALL" ? sizeCodeRaw : null;
@@ -452,7 +477,10 @@ export async function updateOrderDecorationAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  const { access } = await assertCanEditOrderComposition(orderId);
+  if (!canEditOrderPricing(access)) {
+    return { ok: false as const, error: "FORBIDDEN" as const };
+  }
   const id = String(formData.get("id") ?? "");
   const setupRaw = String(formData.get("setupCost") ?? "").trim();
   const unitRaw = String(formData.get("unitRate") ?? "").trim();
@@ -474,7 +502,10 @@ export async function updateOrderDecorationAction(formData: FormData) {
 export async function getOrderMaterialDetailAction(orderItemMaterialId: string) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
-  await assertSessionPermission("manageOrders");
+  const access = await assertSessionPermission("manageOrders");
+  if (!canViewOrderCosts(access)) {
+    return { ok: false as const, error: "FORBIDDEN" as const };
+  }
 
   const detail = await getOrderItemMaterialDetail(orderItemMaterialId);
   if (!detail) return { ok: false as const, error: "NOT_FOUND" as const };
@@ -487,7 +518,8 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  const { access } = await assertCanEditOrderComposition(orderId);
+  const allowPricing = canEditOrderPricing(access);
   const id = String(formData.get("id") ?? "");
   const hasSupplierField = formData.has("supplierId");
   const supplierId = hasSupplierField
@@ -554,6 +586,29 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
     return { ok: false as const, error: "VALIDATION" as const };
   }
 
+  // Managers may only adjust consumption (BOM structure). Pricing fields need cost rights.
+  if (!allowPricing) {
+    if (
+      hasSupplierField ||
+      hasColorField ||
+      formData.has("cargoUsdPerKg") ||
+      formData.has("usdUahRate") ||
+      formData.has("fabricDeliveryAmount") ||
+      formData.has("fabricDeliveryManual") ||
+      formData.has("costVatOverride") ||
+      wastePercent != null ||
+      hasThresholdField
+    ) {
+      return { ok: false as const, error: "FORBIDDEN" as const };
+    }
+    if (consumptionPerUnit == null) {
+      return { ok: false as const, error: "VALIDATION" as const };
+    }
+    await updateOrderItemMaterialTerms({ id, consumptionPerUnit });
+    revalidatePath(`/orders/${orderId}`);
+    return { ok: true as const };
+  }
+
   await updateOrderItemMaterialTerms({
     id,
     ...(hasSupplierField ? { supplierId } : {}),
@@ -578,7 +633,10 @@ export async function updateOrderFabricDeliveryAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  const { access } = await assertCanEditOrderComposition(orderId);
+  if (!canEditOrderPricing(access)) {
+    return { ok: false as const, error: "FORBIDDEN" as const };
+  }
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const amount = Number(formData.get("amount"));
   const manual = formData.get("manual") === "1";
@@ -598,7 +656,10 @@ export async function updateOrderItemSewerCountAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  const { access } = await assertCanEditOrderComposition(orderId);
+  if (!canEditOrderPricing(access)) {
+    return { ok: false as const, error: "FORBIDDEN" as const };
+  }
   const orderItemId = String(formData.get("orderItemId") ?? "");
   const raw = String(formData.get("sewerCountOverride") ?? "").trim();
   const clear = formData.get("clearOverride") === "1" || raw === "";
@@ -646,7 +707,10 @@ export async function updateOrderMaterialActualPriceAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  const { access } = await assertCanEditOrderComposition(orderId);
+  if (!canEditOrderPricing(access)) {
+    return { ok: false as const, error: "FORBIDDEN" as const };
+  }
   const id = String(formData.get("id") ?? "");
   const raw = String(formData.get("actualPurchasePrice") ?? "").trim();
   const actualPurchasePrice = raw === "" ? null : Number(raw);

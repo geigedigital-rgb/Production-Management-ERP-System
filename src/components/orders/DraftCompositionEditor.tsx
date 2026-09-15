@@ -57,6 +57,9 @@ export function DraftCompositionEditor({
   confirmDisabled,
   companyCostMode = "NET",
   fabricGlobals,
+  /** Order create: color / ПДВ are chosen later inside the order, not here. */
+  enableLinePricingControls = false,
+  showSubtotals = true,
 }: {
   product: CatalogProduct;
   composition: DraftComposition;
@@ -79,6 +82,8 @@ export function DraftCompositionEditor({
   confirmDisabled?: boolean;
   companyCostMode?: MaterialCostVatMode;
   fabricGlobals?: { usdUahRate: number; fabricCargoUsdPerKg: number };
+  enableLinePricingControls?: boolean;
+  showSubtotals?: boolean;
 }) {
   const productSizes = product.sizes.length
     ? product.sizes
@@ -94,14 +99,16 @@ export function DraftCompositionEditor({
 
   const sizes = qtyMode === "total" ? [TOTAL_SIZE] : productSizes;
   const compositionReady = composition.materials.length > 0 && composition.operations.length > 0;
-  const incompleteMaterials = compositionMissingMaterialChoices(composition, {
-    enableLinePricingControls: true,
-    companyCostMode,
-  });
+  const incompleteMaterials = enableLinePricingControls
+    ? compositionMissingMaterialChoices(composition, {
+        enableLinePricingControls: true,
+        companyCostMode,
+      })
+    : [];
   const choicesComplete = incompleteMaterials.length === 0;
   const compositionReadyLabel = !compositionReady
     ? "Потрібен склад"
-    : !choicesComplete
+    : enableLinePricingControls && !choicesComplete
       ? `Потрібен вибір · ${incompleteMaterials.length}`
       : null;
 
@@ -158,9 +165,9 @@ export function DraftCompositionEditor({
             </div>
             <p className="type-caption mt-0.5 truncate">
               {product.nameUk ?? product.label}
-              {!choicesComplete
+              {enableLinePricingControls && !choicesComplete
                 ? " · оберіть колір і ПДВ у рядках з маркером"
-                : " · додавайте рядки в таблицях нижче"}
+                : " · склад і тираж; колір і постачальник — у замовленні"}
             </p>
           </div>
         </div>
@@ -187,7 +194,8 @@ export function DraftCompositionEditor({
         onOperationCatalogAdd={onOperationCatalogAdd}
         onDecorationCatalogAdd={onDecorationCatalogAdd}
         quantitiesBySize={quantities}
-        enableLinePricingControls
+        enableLinePricingControls={enableLinePricingControls}
+        showSubtotals={showSubtotals}
         companyCostMode={companyCostMode}
         fabricGlobals={fabricGlobals}
       />
@@ -237,7 +245,7 @@ export function DraftCompositionEditor({
           />
           {confirmDisabled ? (
             <span className="type-caption text-[var(--color-text-tertiary)]">
-              {incompleteMaterials.length > 0
+              {enableLinePricingControls && incompleteMaterials.length > 0
                 ? `${incompleteMaterials.length} без параметрів`
                 : "вкажіть кількість"}
             </span>

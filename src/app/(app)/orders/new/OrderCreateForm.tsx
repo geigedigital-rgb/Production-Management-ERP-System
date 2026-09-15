@@ -23,7 +23,7 @@ import {
   type MaterialCatalogOption,
   type OperationCatalogOption,
 } from "@/components/orders/DraftCompositionEditor";
-import { syncDraftMaterialPrices, compositionMissingMaterialChoices, isPackagingSku } from "@/lib/draft-composition";
+import { syncDraftMaterialPrices, isPackagingSku } from "@/lib/draft-composition";
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
 import {
   IconAlert,
@@ -34,17 +34,16 @@ import {
 } from "@/components/ui/Icons";
 import { createOrderAction } from "@/server/domains/orders/actions";
 import { cn, formatMoneyUah } from "@/lib/utils";
-import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
-import {
-  OrderChevronPipeline,
-  OrderDetailSection,
-  OrderFactsStrip,
-  OrderWorkspaceHeader,
-  OrderWorkspaceShell,
-} from "@/components/orders/OrderWorkspaceLayout";
+import { OrderDetailSection } from "@/components/orders/OrderWorkspaceLayout";
 import { IconClients } from "@/components/ui/Icons";
 
-type ClientOption = { id: string; label: string };
+type ClientOption = {
+  id: string;
+  label: string;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
 type SizeOption = { id: string; label: string; code?: string };
 
 type DraftLine = {
@@ -87,6 +86,7 @@ export function OrderCreateForm({
   decorationCatalog: initialDecorationCatalog,
   companyCostMode = "NET",
   fabricGlobals,
+  showCosts = false,
   initialClientId,
   initialProductId,
 }: {
@@ -99,6 +99,8 @@ export function OrderCreateForm({
   decorationCatalog: DecorationCatalogOption[];
   companyCostMode?: MaterialCostVatMode;
   fabricGlobals?: { usdUahRate: number; fabricCargoUsdPerKg: number };
+  /** Admin: money columns on draft BOM. Color / ПДВ still chosen inside the order. */
+  showCosts?: boolean;
   initialClientId?: string;
   initialProductId?: string;
 }) {
@@ -153,18 +155,8 @@ export function OrderCreateForm({
   const stagingTotal = stagingUsesTotalOnly
     ? stagingQty.ONE || 0
     : stagingTotalQty;
-  const stagingIncompleteMaterials =
-    stagingComposition && stagingTotal > 0
-      ? compositionMissingMaterialChoices(stagingComposition, {
-          enableLinePricingControls: true,
-          companyCostMode,
-        })
-      : [];
   const stagingReady = Boolean(
-    stagingProductId &&
-      stagingComposition &&
-      stagingTotal > 0 &&
-      stagingIncompleteMaterials.length === 0,
+    stagingProductId && stagingComposition && stagingTotal > 0,
   );
 
   const linesQty = lines.reduce(
@@ -176,10 +168,12 @@ export function OrderCreateForm({
         : 0),
     0,
   );
-  const estimate = lines.reduce((sum, line) => {
-    const { sum: lineSum } = lineTotal(line, products);
-    return sum + (lineSum ?? 0);
-  }, 0);
+  const estimate = showCosts
+    ? lines.reduce((sum, line) => {
+        const { sum: lineSum } = lineTotal(line, products);
+        return sum + (lineSum ?? 0);
+      }, 0)
+    : 0;
 
   const readyToSubmit = Boolean(clientId && lines.length > 0);
 
@@ -191,9 +185,36 @@ export function OrderCreateForm({
     setEditingKey(null);
   }
 
+  /** Keep an order line open in the left workspace (view / edit). */
+  function focusLine(line: DraftLine) {
+    setEditingKey(line.key);
+    setStagingProductId(line.productId);
+    setStagingComposition({
+      materials: line.composition.materials.map((row) => ({ ...row })),
+      operations: line.composition.operations.map((row) => ({ ...row })),
+      decorations: line.composition.decorations.map((row) => ({ ...row })),
+    });
+    setStagingQty({ ...line.quantities });
+    setStagingComment(line.comment);
+  }
+
+  function cancelStaging() {
+    if (editingKey) {
+      const line = lines.find((row) => row.key === editingKey);
+      if (line) {
+        focusLine(line);
+        return;
+      }
+    }
+    const last = lines[lines.length - 1];
+    if (last) focusLine(last);
+    else clearStaging();
+  }
+
   function selectProduct(id: string) {
     const product = products.find((row) => row.id === id);
     if (!product) return;
+    // New position from catalog — leave confirmed lines in the table as-is.
     setStagingProductId(id);
     setStagingComposition(
       syncDraftMaterialPrices(
@@ -207,14 +228,10 @@ export function OrderCreateForm({
     setEditingKey(null);
   }
 
-  function addOrSaveStaging() {
-    if (!stagingProduct || !stagingComposition || stagingTotal <= 0) return;
-    if (stagingIncompleteMaterials.length > 0) {
-      setError("Підтвердіть параметри всіх матеріалів (колір, ПДВ тощо) перед додаванням позиції.");
-      return;
-    }
-    const payload: DraftLine = {
-      key: editingKey ?? newKey(),
+  function buildStagingPayload(key: string): DraftLine | null {
+    if (!stagingProduct || !stagingComposition || stagingTotal <= 0) return null;
+    return {
+      key,
       productId: stagingProduct.id,
       label: stagingProduct.label,
       quantities: { ...stagingQty },
@@ -228,28 +245,32 @@ export function OrderCreateForm({
         decorations: stagingComposition.decorations.map((row) => ({ ...row })),
       },
     };
+  }
+
+  function addOrSaveStaging() {
+    const key = editingKey ?? newKey();
+    const payload = buildStagingPayload(key);
+    if (!payload) return;
     setLines((prev) => {
       if (editingKey) return prev.map((line) => (line.key === editingKey ? payload : line));
       return [...prev, payload];
     });
-    clearStaging();
+    // Keep composition on the left; catalog stays open to add another product.
+    focusLine(payload);
   }
 
   function editLine(line: DraftLine) {
-    setEditingKey(line.key);
-    setStagingProductId(line.productId);
-    setStagingComposition({
-      materials: line.composition.materials.map((row) => ({ ...row })),
-      operations: line.composition.operations.map((row) => ({ ...row })),
-      decorations: line.composition.decorations.map((row) => ({ ...row })),
-    });
-    setStagingQty({ ...line.quantities });
-    setStagingComment(line.comment);
+    focusLine(line);
   }
 
   function removeLine(key: string) {
-    setLines((prev) => prev.filter((line) => line.key !== key));
-    if (editingKey === key) clearStaging();
+    const next = lines.filter((line) => line.key !== key);
+    setLines(next);
+    if (editingKey === key) {
+      const fallback = next[next.length - 1];
+      if (fallback) focusLine(fallback);
+      else clearStaging();
+    }
   }
 
   function onSubmit(formData: FormData) {
@@ -258,13 +279,23 @@ export function OrderCreateForm({
       setError("Додайте клієнта і хоча б одну позицію в список замовлення.");
       return;
     }
-    if (stagingProductId && stagingTotal > 0) {
+    // Block only an unfinished *new* position; open edits of an existing line are flushed below.
+    if (!editingKey && stagingProductId && stagingTotal > 0) {
       setError("Спочатку погодьте позицію або скасуйте підготовку.");
       return;
     }
 
+    let linesForSubmit = lines;
+    if (editingKey) {
+      const payload = buildStagingPayload(editingKey);
+      if (payload) {
+        linesForSubmit = lines.map((line) => (line.key === editingKey ? payload : line));
+        setLines(linesForSubmit);
+      }
+    }
+
     const itemsJson = JSON.stringify(
-      lines.map((line) => ({
+      linesForSubmit.map((line) => ({
         productId: line.productId,
         comment: line.comment || null,
         sizeQuantities: line.sizes.map((size) => ({
@@ -325,55 +356,11 @@ export function OrderCreateForm({
 
   return (
     <form id="order-create-form" action={onSubmit} className="space-y-4 pb-16">
-      <OrderWorkspaceShell
-        header={
-          <OrderWorkspaceHeader
-            title="Нове замовлення"
-            badge={<OrderStatusBadge status="DRAFT" dot />}
-            subtitle="Зберіть позиції, підтвердіть склад і створіть замовлення"
-            meta={
-              selectedClient ? (
-                <p className="text-[13px] text-[var(--color-primary-700)]">{selectedClient.label}</p>
-              ) : (
-                <p className="text-[13px] text-[var(--color-text-tertiary)]">Клієнт ще не обраний</p>
-              )
-            }
-          />
-        }
-        facts={
-          <OrderFactsStrip
-            facts={[
-              {
-                label: "Клієнт",
-                value: selectedClient?.label ?? "—",
-              },
-              {
-                label: "Дедлайн",
-                value: deadline ? new Date(deadline).toLocaleDateString("uk-UA") : "—",
-              },
-              {
-                label: "Позиції",
-                value: String(lines.length),
-              },
-              {
-                label: "Кількість",
-                value: `${linesQty} шт`,
-              },
-              {
-                label: "Орієнтир",
-                value: estimate > 0 ? formatMoneyUah(estimate) : "—",
-              },
-            ]}
-          />
-        }
-        pipeline={<OrderChevronPipeline status="DRAFT" nextTitle="1/5 · Оберіть клієнта і додайте позиції" />}
-      />
-
       <SplitWorkspace
         className="xl:grid-cols-[minmax(0,1fr)_minmax(200px,232px)]"
         left={
           <>
-            <OrderDetailSection icon={<IconClients size={16} />} title="Дані замовлення">
+            <OrderDetailSection icon={<IconClients size={16} />} title="Замовник і умови">
             <div className="space-y-4">
               <FormGroup
                 label="Клієнт"
@@ -384,7 +371,18 @@ export function OrderCreateForm({
                     size="sm"
                     triggerLabel="Новий клієнт"
                     onCreated={(client) => {
-                      setClients((prev) => [...prev, { id: client.id, label: client.companyName }]);
+                      setClients((prev) => {
+                        const next = {
+                          id: client.id,
+                          label: client.companyName,
+                          contactPerson: client.contactPerson ?? null,
+                          phone: client.phone ?? null,
+                          email: client.email ?? null,
+                        };
+                        return prev.some((row) => row.id === client.id)
+                          ? prev.map((row) => (row.id === client.id ? next : row))
+                          : [...prev, next];
+                      });
                       setClientId(client.id);
                     }}
                   />
@@ -405,6 +403,41 @@ export function OrderCreateForm({
                   ))}
                 </Select>
               </FormGroup>
+
+              {selectedClient ? (
+                <div className="rounded-[10px] border border-[var(--color-divider)] bg-[var(--color-bg)]/40 px-3.5 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-quiet)]">
+                    Дані клієнта
+                  </p>
+                  <p className="mt-1 text-[14px] font-semibold text-[var(--color-text-primary)]">
+                    {selectedClient.label}
+                  </p>
+                  <dl className="mt-2 grid gap-x-4 gap-y-1.5 sm:grid-cols-3">
+                    <div className="min-w-0">
+                      <dt className="type-caption">Контакт</dt>
+                      <dd className="truncate text-[13px] text-[var(--color-text-secondary)]">
+                        {selectedClient.contactPerson?.trim() || "—"}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="type-caption">Телефон</dt>
+                      <dd className="truncate text-[13px] text-[var(--color-text-secondary)]">
+                        {selectedClient.phone?.trim() || "—"}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="type-caption">Email</dt>
+                      <dd className="truncate text-[13px] text-[var(--color-text-secondary)]">
+                        {selectedClient.email?.trim() || "—"}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              ) : (
+                <p className="type-caption">
+                  Після вибору або створення клієнта тут зʼявляться контактні дані.
+                </p>
+              )}
 
               <FormGroup label="Терміни" columns={2}>
                 <Input name="title" label="Назва запиту" placeholder="Необовʼязково" />
@@ -432,6 +465,8 @@ export function OrderCreateForm({
                 unitOptions={unitOptions}
                 companyCostMode={companyCostMode}
                 fabricGlobals={fabricGlobals}
+                enableLinePricingControls={false}
+                showSubtotals={showCosts}
                 onMaterialCatalogAdd={(option) =>
                   setMaterialCatalog((prev) =>
                     prev.some((row) => row.id === option.id) ? prev : [...prev, option],
@@ -459,7 +494,7 @@ export function OrderCreateForm({
                 }
                 onCommentChange={setStagingComment}
                 onCompositionChange={setStagingComposition}
-                onCancel={clearStaging}
+                onCancel={cancelStaging}
                 onConfirm={addOrSaveStaging}
                 confirmDisabled={!stagingReady}
               />
@@ -468,8 +503,16 @@ export function OrderCreateForm({
                 <EmptyState
                   size="lg"
                   icon={<IconGarment size={28} />}
-                  title="Спочатку виберіть виріб"
-                  description="Після вибору тут зʼявляться матеріали, операції та попередня калькуляція."
+                  title={
+                    lines.length > 0
+                      ? "Оберіть виріб у каталозі або позицію в списку"
+                      : "Спочатку виберіть виріб"
+                  }
+                  description={
+                    lines.length > 0
+                      ? "Натисніть «Редагувати» у списку або додайте новий виріб з панелі справа."
+                      : "Після вибору тут зʼявляться матеріали, операції та попередня калькуляція."
+                  }
                 />
               </div>
             )}
@@ -498,7 +541,9 @@ export function OrderCreateForm({
                         <th className="px-3 py-2 text-left">Виріб</th>
                         <th className="px-3 py-2 text-right">К-сть</th>
                         <th className="px-3 py-2 text-left">Склад</th>
-                        <th className="px-3 py-2 text-right">Орієнтир</th>
+                        {showCosts ? (
+                          <th className="px-3 py-2 text-right">Орієнтир</th>
+                        ) : null}
                         <th className="px-3 py-2" />
                       </tr>
                     </thead>
@@ -534,13 +579,15 @@ export function OrderCreateForm({
                             <td className="px-3 py-2 text-[var(--color-text-secondary)]">
                               {line.materialsCount} мат. · {line.operationsCount} оп.
                             </td>
-                            <td className="px-3 py-2 text-right tabular">
-                              {sum != null
-                                ? formatMoneyUah(sum)
-                                : unit != null
-                                  ? formatMoneyUah(unit)
-                                  : "—"}
-                            </td>
+                            {showCosts ? (
+                              <td className="px-3 py-2 text-right tabular">
+                                {sum != null
+                                  ? formatMoneyUah(sum)
+                                  : unit != null
+                                    ? formatMoneyUah(unit)
+                                    : "—"}
+                              </td>
+                            ) : null}
                             <td className="px-3 py-2">
                               <div className="flex justify-end gap-1">
                                 <Button
@@ -575,41 +622,39 @@ export function OrderCreateForm({
           </>
         }
         right={
-          !stagingProduct ? (
-            <ProductCatalogPanel
-              products={products}
-              selectedId={stagingProductId}
-              onSelect={selectProduct}
-              headerAction={
-                <ProductCreatePanel
-                  sizes={sizeOptions}
-                  materialCatalog={materialCatalog}
-                  operationCatalog={operationCatalog}
-                  decorationCatalog={decorationCatalog}
-                  unitOptions={unitOptions}
-                  variant="ghost"
-                  size="sm"
-                  triggerLabel="Новий"
-                  onCreated={(product) => {
-                    setProducts((prev) =>
-                      prev.some((row) => row.id === product.id) ? prev : [product, ...prev],
-                    );
-                    setStagingProductId(product.id);
-                    setStagingComposition(
-                      syncDraftMaterialPrices(
-                        cloneComposition(product, materialCatalog, companyCostMode),
-                        {},
-                        companyCostMode,
-                      ),
-                    );
-                    setStagingQty({});
-                    setStagingComment("");
-                    setEditingKey(null);
-                  }}
-                />
-              }
-            />
-          ) : undefined
+          <ProductCatalogPanel
+            products={products}
+            selectedId={stagingProductId}
+            onSelect={selectProduct}
+            headerAction={
+              <ProductCreatePanel
+                sizes={sizeOptions}
+                materialCatalog={materialCatalog}
+                operationCatalog={operationCatalog}
+                decorationCatalog={decorationCatalog}
+                unitOptions={unitOptions}
+                variant="ghost"
+                size="sm"
+                triggerLabel="Новий"
+                onCreated={(product) => {
+                  setProducts((prev) =>
+                    prev.some((row) => row.id === product.id) ? prev : [product, ...prev],
+                  );
+                  setStagingProductId(product.id);
+                  setStagingComposition(
+                    syncDraftMaterialPrices(
+                      cloneComposition(product, materialCatalog, companyCostMode),
+                      {},
+                      companyCostMode,
+                    ),
+                  );
+                  setStagingQty({});
+                  setStagingComment("");
+                  setEditingKey(null);
+                }}
+              />
+            }
+          />
         }
       />
 

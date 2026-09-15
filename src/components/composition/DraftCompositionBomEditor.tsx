@@ -111,6 +111,7 @@ export function DraftCompositionBomEditor({
   onDecorationCatalogAdd?: (option: DecorationCatalogOption) => void;
   quantitiesBySize?: Record<string, number>;
   quantityHint?: number;
+  /** When false, hide money/waste columns (manager assemble mode). */
   showSubtotals?: boolean;
   scopeHint?: ReactNode | ((sizeScope: SizeScope) => ReactNode);
   /** Order draft: per-row ПДВ / гурт·відріз toggles with live price. */
@@ -120,6 +121,7 @@ export function DraftCompositionBomEditor({
   cutRateHint?: string;
   fabricGlobals?: { usdUahRate: number; fabricCargoUsdPerKg: number };
 }) {
+  const hideCosts = !showSubtotals;
   const [sizeScope, setSizeScope] = useState<SizeScope>(ALL_SIZES);
   const [selectedMaterialKey, setSelectedMaterialKey] = useState<string | null>(null);
   const sizeCodes = sizes.map((size) => size.code);
@@ -259,7 +261,11 @@ export function DraftCompositionBomEditor({
                     customized={customized}
                   />
                   {sizes.length > 1 ? (
-                    <SizeBomScopeHint sizeScope={sizeScope} hasOversizeSizes={hasOversizeSizes} />
+                    <SizeBomScopeHint
+                      sizeScope={sizeScope}
+                      hasOversizeSizes={hasOversizeSizes}
+                      hideUpliftPercents={hideCosts}
+                    />
                   ) : null}
                   {resolvedScopeHint}
                   {sizeScope !== ALL_SIZES ? (
@@ -276,15 +282,15 @@ export function DraftCompositionBomEditor({
           <THead>
             <TH className="min-w-[12rem] w-[38%]">Матеріал</TH>
             <TH align="right">Норма / од.</TH>
-            <TH align="right">Відходи</TH>
-            <TH align="right">Ціна</TH>
-            <TH align="right">Собівартість / од.</TH>
+            {!hideCosts ? <TH align="right">Відходи</TH> : null}
+            {!hideCosts ? <TH align="right">Ціна</TH> : null}
+            {!hideCosts ? <TH align="right">Собівартість / од.</TH> : null}
             <TH width="44px" />
           </THead>
           <TBody>
             {visibleMaterials.length === 0 ? (
               <TableEmpty
-                colSpan={6}
+                colSpan={3 + (hideCosts ? 0 : 3)}
                 icon={<IconMaterials size={22} />}
                 title={sizeScope === ALL_SIZES ? "Матеріалів ще немає" : "Немає матеріалів для цього розміру"}
                 description="Додайте з рядка нижче або створіть новий матеріал."
@@ -328,25 +334,30 @@ export function DraftCompositionBomEditor({
                 const pricingChoiceHint = draftMaterialPricingChoiceHint(row, {
                   enableLinePricingControls,
                 });
-                const showMarker = showColorSlot || needsAttention;
+                const showMarker =
+                  enableLinePricingControls && (showColorSlot || needsAttention);
                 const baseUnitCost = consumption * (1 + row.waste / 100) * row.price;
                 const displayUnitCost = scopeIsOversize
                   ? baseUnitCost * OVERSIZE_DEFAULT_COEFFS.materialCoeff
                   : baseUnitCost;
                 const oversizeNorm =
-                  hasOversizeSizes || scopeIsOversize
+                  !hideCosts && (hasOversizeSizes || scopeIsOversize)
                     ? effectiveOversizeConsumption(consumption)
                     : null;
                 return (
                   <TR
                     key={row.key}
                     className={cn(
-                      "cursor-pointer transition-colors",
+                      "transition-colors",
+                      !hideCosts && "cursor-pointer",
                       isSelected
                         ? "bg-[var(--color-tint-sage)]/50"
-                        : "hover:bg-[var(--color-surface-hover)]",
+                        : !hideCosts && "hover:bg-[var(--color-surface-hover)]",
                     )}
-                    onClick={() => setSelectedMaterialKey(row.key)}
+                    onClick={() => {
+                      if (hideCosts) return;
+                      setSelectedMaterialKey(row.key);
+                    }}
                   >
                     <TD title={row.name} className="min-w-[12rem] w-[38%] align-top">
                       <div className="flex items-start gap-2">
@@ -402,41 +413,47 @@ export function DraftCompositionBomEditor({
                         ) : null}
                       </span>
                     </TD>
-                    <TD align="right" onClick={(event) => event.stopPropagation()}>
-                      <span className="inline-flex items-center justify-end gap-0.5">
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={row.waste}
-                          onChange={(event) =>
-                            updateMaterial(row.key, {
-                              waste: Math.max(0, Number(event.target.value) || 0),
-                            })
-                          }
-                          className="h-7 w-[56px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
-                        />
-                        <span className="text-[12px] text-[var(--color-text-secondary)]">%</span>
-                      </span>
-                    </TD>
-                    <TD numeric className="text-[var(--color-text-secondary)]">
-                      <div>{formatMoneyUah(row.price)}</div>
-                      {pricing?.hint ? (
-                        <div className="mt-0.5 text-[10px] font-normal leading-tight text-[var(--color-text-tertiary)]">
-                          {pricing.hint}
-                        </div>
-                      ) : null}
-                    </TD>
-                    <TD numeric className="font-medium">
-                      <span className="inline-flex flex-col items-end gap-0.5">
-                        <span>{formatMoneyUah(displayUnitCost)}</span>
-                        {scopeIsOversize ? (
-                          <span className="text-[10px] font-normal text-[var(--color-text-quiet)]">
-                            база {formatMoneyUah(baseUnitCost)}
-                          </span>
+                    {!hideCosts ? (
+                      <TD align="right" onClick={(event) => event.stopPropagation()}>
+                        <span className="inline-flex items-center justify-end gap-0.5">
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={row.waste}
+                            onChange={(event) =>
+                              updateMaterial(row.key, {
+                                waste: Math.max(0, Number(event.target.value) || 0),
+                              })
+                            }
+                            className="h-7 w-[56px] rounded-[6px] border border-[var(--color-border)] bg-white px-1.5 text-right text-[12.5px] tabular outline-none focus:border-[var(--color-primary-500)]"
+                          />
+                          <span className="text-[12px] text-[var(--color-text-secondary)]">%</span>
+                        </span>
+                      </TD>
+                    ) : null}
+                    {!hideCosts ? (
+                      <TD numeric className="text-[var(--color-text-secondary)]">
+                        <div>{formatMoneyUah(row.price)}</div>
+                        {pricing?.hint ? (
+                          <div className="mt-0.5 text-[10px] font-normal leading-tight text-[var(--color-text-tertiary)]">
+                            {pricing.hint}
+                          </div>
                         ) : null}
-                      </span>
-                    </TD>
+                      </TD>
+                    ) : null}
+                    {!hideCosts ? (
+                      <TD numeric className="font-medium">
+                        <span className="inline-flex flex-col items-end gap-0.5">
+                          <span>{formatMoneyUah(displayUnitCost)}</span>
+                          {scopeIsOversize ? (
+                            <span className="text-[10px] font-normal text-[var(--color-text-quiet)]">
+                              база {formatMoneyUah(baseUnitCost)}
+                            </span>
+                          ) : null}
+                        </span>
+                      </TD>
+                    ) : null}
                     <TD align="center" onClick={(event) => event.stopPropagation()}>
                       <button
                         type="button"
@@ -543,13 +560,13 @@ export function DraftCompositionBomEditor({
           <THead>
             <TH>Операція</TH>
             <TH>Метод</TH>
-            <TH align="right">Вартість / од.</TH>
+            {!hideCosts ? <TH align="right">Вартість / од.</TH> : null}
             <TH width="44px" />
           </THead>
           <TBody>
             {visibleOperations.length === 0 ? (
               <TableEmpty
-                colSpan={4}
+                colSpan={3 + (hideCosts ? 0 : 1)}
                 icon={<IconOperations size={22} />}
                 title={sizeScope === ALL_SIZES ? "Операцій ще немає" : "Немає операцій для цього розміру"}
                 description="Додайте з рядка нижче або створіть нову операцію."
@@ -567,11 +584,12 @@ export function DraftCompositionBomEditor({
                       })
                     : null;
                 const cutRange =
+                  !hideCosts &&
                   cutDisplay?.minRate != null &&
                   cutDisplay.maxRate != null &&
                   cutDisplay.minRate !== cutDisplay.maxRate
                     ? `діапазон ${formatMoneyUah(cutDisplay.minRate)}–${formatMoneyUah(cutDisplay.maxRate)}`
-                    : cutDisplay?.previewRate != null
+                    : !hideCosts && cutDisplay?.previewRate != null
                       ? `${cutDisplay.previewQty} шт`
                       : null;
                 return (
@@ -593,6 +611,7 @@ export function DraftCompositionBomEditor({
                       </span>
                     )}
                   </TD>
+                  {!hideCosts ? (
                   <TD
                     numeric={!isCut}
                     align={isCut ? "right" : undefined}
@@ -607,6 +626,7 @@ export function DraftCompositionBomEditor({
                       formatMoneyUah(operationUnitCost(row, controlQty))
                     )}
                   </TD>
+                  ) : null}
                   <TD align="center">
                     <button
                       type="button"

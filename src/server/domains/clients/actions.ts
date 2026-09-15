@@ -27,7 +27,14 @@ export async function createClientAction(formData: FormData) {
   const client = await createClient(parsed.data);
   revalidatePath("/clients");
   revalidatePath("/orders/new");
-  return { ok: true as const, clientId: client.id, companyName: client.companyName };
+  return {
+    ok: true as const,
+    clientId: client.id,
+    companyName: client.companyName,
+    contactPerson: client.contactPerson,
+    phone: client.phone,
+    email: client.email,
+  };
 }
 
 export async function bulkArchiveClientsAction(formData: FormData) {
