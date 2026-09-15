@@ -9,8 +9,9 @@ import {
   effectiveOversizeConsumption,
   isOversizeCode,
   OVERSIZE_DEFAULT_COEFFS,
-  oversizeUpliftCaption,
+  OVERSIZE_RANGE_LABEL,
 } from "@/lib/size-coeffs";
+import { materialOptionDescription } from "@/lib/material-catalog-options";
 import {
   CompositionAddBar,
   DraftAddMaterialForm,
@@ -305,10 +306,13 @@ export function DraftCompositionBomEditor({
                   ? row.sizeCodes.join(" · ")
                   : mixed
                     ? "Норма різна по розмірах"
-                    : hasOversizeSizes
-                      ? oversizeUpliftCaption()
-                      : null;
+                    : null;
                 const subtitle = [sizeSubtitle, choiceSummary].filter(Boolean).join(" · ") || undefined;
+                const catalog = materialOptions.find((option) => option.id === row.materialId);
+                const specHint = materialOptionDescription(
+                  catalog?.densityGsm,
+                  catalog?.composition,
+                );
                 const isSelected = selectedMaterialKey === row.key;
                 const showColorSlot = draftMaterialShowsColorSlot(row, {
                   enableLinePricingControls,
@@ -355,6 +359,14 @@ export function DraftCompositionBomEditor({
                         ) : null}
                         <div className="min-w-0 flex-1">
                           <CellStack title={row.name} subtitle={subtitle} wrap />
+                          {specHint ? (
+                            <p
+                              className="mt-0.5 truncate text-[11.5px] leading-snug text-[var(--color-text-quiet)]"
+                              title={specHint}
+                            >
+                              {specHint}
+                            </p>
+                          ) : null}
                           <DraftChoiceAttention hint={pricingChoiceHint} />
                         </div>
                       </div>
@@ -385,7 +397,7 @@ export function DraftCompositionBomEditor({
                         </span>
                         {oversizeNorm != null ? (
                           <span className="text-[10px] text-[var(--color-text-quiet)]">
-                            3XL+ ≈ {oversizeNorm} {formatUnit(row.unit)}
+                            {OVERSIZE_RANGE_LABEL} ≈ {oversizeNorm} {formatUnit(row.unit)}
                           </span>
                         ) : null}
                       </span>

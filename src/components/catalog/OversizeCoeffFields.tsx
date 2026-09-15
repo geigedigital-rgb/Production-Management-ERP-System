@@ -3,10 +3,11 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateOversizeCoeffsAction } from "@/server/domains/settings/actions";
+import { OVERSIZE_RANGE_LABEL } from "@/lib/size-coeffs";
 import { cn } from "@/lib/utils";
 
 /**
- * Right-aligned 3XL+ uplift controls next to size tabs.
+ * Right-aligned 3XL–6XL uplift controls next to size tabs.
  * Edits company SizeRule for 3XL / 4XL / 5XL / 6XL (shared %).
  */
 export function OversizeCoeffFields({
@@ -52,10 +53,10 @@ export function OversizeCoeffFields({
         "flex shrink-0 flex-nowrap items-center justify-end gap-x-3 whitespace-nowrap",
         className,
       )}
-      title="Надбавка 3XL / 4XL / 5XL / 6XL до базових норм з вкладки «Усі». Діє для всіх виробів."
+      title="Надбавка для розмірів 3XL–6XL до базових норм з вкладки «Усі». Діє для всіх виробів."
     >
       <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-quiet)]">
-        3XL+
+        {OVERSIZE_RANGE_LABEL}
       </span>
       <label className="inline-flex items-center gap-1 text-[11.5px] text-[var(--color-text-secondary)]">
         мат.
@@ -69,7 +70,7 @@ export function OversizeCoeffFields({
           onChange={(event) => setMat(event.target.value)}
           onBlur={() => save(mat, ops)}
           className={inputClass}
-          aria-label="Надбавка матеріалів для 3XL+"
+          aria-label={`Надбавка матеріалів для ${OVERSIZE_RANGE_LABEL}`}
         />
         <span>%</span>
       </label>
@@ -85,7 +86,7 @@ export function OversizeCoeffFields({
           onChange={(event) => setOps(event.target.value)}
           onBlur={() => save(mat, ops)}
           className={inputClass}
-          aria-label="Надбавка операцій для 3XL+"
+          aria-label={`Надбавка операцій для ${OVERSIZE_RANGE_LABEL}`}
         />
         <span>%</span>
       </label>

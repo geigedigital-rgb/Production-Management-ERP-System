@@ -44,7 +44,7 @@ import {
   effectiveOversizeConsumption,
   isOversizeCode,
   OVERSIZE_DEFAULT_COEFFS,
-  oversizeUpliftCaption,
+  OVERSIZE_RANGE_LABEL,
 } from "@/lib/size-coeffs";
 import {
   ALL_SIZES,
@@ -491,7 +491,7 @@ export function ConfigurationTab({
                           </span>
                           {oversizeNorm != null ? (
                             <span className="text-[10px] text-[var(--color-text-quiet)]">
-                              3XL+ ≈ {oversizeNorm} {row.unit}
+                              {OVERSIZE_RANGE_LABEL} ≈ {oversizeNorm} {row.unit}
                             </span>
                           ) : null}
                         </span>

@@ -1,6 +1,9 @@
 /** Oversized garment sizes: higher material waste and sewing rates (from 3XL up). */
 export const OVERSIZE_CODES = ["3XL", "4XL", "5XL", "6XL"] as const;
 
+/** Short UI label for the shared oversize band (not a single size). */
+export const OVERSIZE_RANGE_LABEL = "3XL–6XL";
+
 export type SizeCoeff = {
   materialCoeff: number;
   operationCoeff: number;
@@ -72,7 +75,7 @@ export function oversizeOperationPct(rules?: SizeCoeffRule[] | null): number {
 
 /** Short Ukrainian labels for BOM / calc UI. */
 export function oversizeUpliftCaption(rules?: SizeCoeffRule[] | null): string {
-  return `3XL+ · матеріали +${oversizeMaterialPct(rules)}% · операції +${oversizeOperationPct(rules)}%`;
+  return `${OVERSIZE_RANGE_LABEL} · матеріали +${oversizeMaterialPct(rules)}% · операції +${oversizeOperationPct(rules)}%`;
 }
 
 export function effectiveOversizeConsumption(

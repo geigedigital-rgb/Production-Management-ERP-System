@@ -1,8 +1,8 @@
 import { ALL_SIZES, type SizeScope } from "@/lib/size-bom";
-import { isOversizeCode } from "@/lib/size-coeffs";
+import { isOversizeCode, OVERSIZE_RANGE_LABEL } from "@/lib/size-coeffs";
 
 /**
- * Explains size tabs: shared base on «Усі», auto 3XL+ uplift from company %, optional overrides.
+ * Explains size tabs: shared base on «Усі», auto 3XL–6XL uplift from company %, optional overrides.
  */
 export function SizeBomScopeHint({
   sizeScope,
@@ -23,7 +23,7 @@ export function SizeBomScopeHint({
         <p className="type-caption">
           База S–XL
           {hasOversizeSizes
-            ? ` · 3XL+ авто +${materialPct}% мат. / +${operationPct}% оп.`
+            ? ` · ${OVERSIZE_RANGE_LABEL} авто +${materialPct}% мат. / +${operationPct}% оп.`
             : ""}
         </p>
       );
@@ -47,7 +47,7 @@ export function SizeBomScopeHint({
         {hasOversizeSizes ? (
           <>
             {" "}
-            Для XXL / 3XL / 4XL у розрахунку автоматично матеріали +{materialPct}% і операції +
+            Для {OVERSIZE_RANGE_LABEL} у розрахунку автоматично матеріали +{materialPct}% і операції +
             {operationPct}% (поля справа від вкладок). Окремо оновлювати кожен виріб не потрібно.
           </>
         ) : null}{" "}
@@ -60,7 +60,7 @@ export function SizeBomScopeHint({
     return (
       <p className="type-caption">
         {sizeScope}: у полі норми вже показана база × +{materialPct}%. Змініть цифру — збережеться
-        як своя норма цього розміру. Відсотки справа діють на всі вироби.
+        як своя норма цього розміру. Відсотки справа ({OVERSIZE_RANGE_LABEL}) діють на всі вироби.
       </p>
     );
   }

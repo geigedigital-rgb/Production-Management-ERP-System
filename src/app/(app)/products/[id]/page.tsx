@@ -451,6 +451,8 @@ export default async function ProductDetailPage({
                 sizeCodes: sizeCodesFromScopes(row.sizeScopes),
                 sizeConsumption: sizeConsumptionFromNorms(row.sizeNorms),
                 sizeWaste: sizeWasteFromNorms(row.sizeNorms),
+                composition: row.material.composition?.trim() || null,
+                densityGsm: row.material.densityGsm?.trim() || null,
                 supplierId: row.supplierId,
                 colorSnapshot: row.colorSnapshot,
                 materialAvailableColors: row.material.availableColors ?? [],

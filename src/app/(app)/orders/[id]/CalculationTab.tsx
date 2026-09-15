@@ -18,6 +18,7 @@ import type { CalculationResult } from "@/server/domains/calculation/engine";
 import type { DecorationRow, FabricDeliveryRow, MaterialRow, OperationRow } from "./ConfigurationTab";
 import {
   isOversizeCode,
+  OVERSIZE_RANGE_LABEL,
   oversizeMaterialPct,
   oversizeOperationPct,
   oversizeUpliftCaption,
@@ -208,7 +209,7 @@ export function CalculationTab({
             {oversizeRows.length > 0 ? (
               <TR muted>
                 <TD colSpan={4} className="type-caption">
-                  У сумах нижче вже враховано {oversizeUpliftCaption()} на частку тиражу 3XL+.
+                  У сумах нижче вже враховано {oversizeUpliftCaption()} на частку тиражу {OVERSIZE_RANGE_LABEL}.
                 </TD>
               </TR>
             ) : null}
@@ -229,7 +230,7 @@ export function CalculationTab({
                     {row.consumption} {row.unit} × (1 + {row.waste}%) × {formatMoneyUah(row.price)}
                     {row.sizeCode ? ` · ${row.sizeCode}` : ""}
                     {oversizeRows.length > 0 && !row.sizeCode
-                      ? ` · для 3XL+ ще ×${(1 + oversizeMaterialPct() / 100).toFixed(2)}`
+                      ? ` · для ${OVERSIZE_RANGE_LABEL} ще ×${(1 + oversizeMaterialPct() / 100).toFixed(2)}`
                       : ""}
                   </TD>
                   <TD numeric className="text-[var(--color-text-secondary)]">
@@ -251,7 +252,7 @@ export function CalculationTab({
             {oversizeRows.length > 0 ? (
               <TR muted>
                 <TD colSpan={4} className="type-caption">
-                  Для 3XL+ ставка операцій ×{(1 + oversizeOperationPct() / 100).toFixed(2)} вже в
+                  Для {OVERSIZE_RANGE_LABEL} ставка операцій ×{(1 + oversizeOperationPct() / 100).toFixed(2)} вже в
                   підсумку.
                 </TD>
               </TR>

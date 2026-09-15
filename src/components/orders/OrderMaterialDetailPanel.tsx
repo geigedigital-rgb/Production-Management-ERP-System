@@ -12,6 +12,7 @@ import { formatMoneyUah, formatUnit } from "@/lib/utils";
 import {
   effectiveOversizeConsumption,
   isOversizeCode,
+  OVERSIZE_RANGE_LABEL,
   oversizeMaterialPct,
   oversizeUpliftCaption,
 } from "@/lib/size-coeffs";
@@ -512,7 +513,7 @@ export function OrderMaterialDetailPanel({
                         Крупні розміри в тиражі
                       </p>
                       <p className="type-caption">
-                        База {base} {formatUnit(detail.unit)}/од. → 3XL+ ≈ {effective}{" "}
+                        База {base} {formatUnit(detail.unit)}/од. → {OVERSIZE_RANGE_LABEL} ≈ {effective}{" "}
                         {formatUnit(detail.unit)}/од. (+{oversizeMaterialPct()}% у калькуляції).{" "}
                         {oversizeUpliftCaption()}.
                       </p>

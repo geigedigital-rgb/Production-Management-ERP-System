@@ -14,7 +14,7 @@ import {
 import { formatDateUk, formatUnit } from "@/lib/utils";
 import { lineNeedOnSizes } from "@/lib/size-bom";
 import { operationMethodLabel } from "@/lib/operation-labels";
-import { isOversizeCode, oversizeUpliftCaption } from "@/lib/size-coeffs";
+import { isOversizeCode, OVERSIZE_RANGE_LABEL, oversizeUpliftCaption } from "@/lib/size-coeffs";
 import { getPricingForOrder } from "@/server/domains/calculation/from-entities";
 import { displayScreenPrintLineName } from "@/lib/screen-print-pricing";
 
@@ -225,7 +225,7 @@ export default async function SpecificationPage({
         <PrintDocSection title="Матеріали — що видати на партію" breakable>
           {hasOversize ? (
             <PrintDocMuted>
-              У потребі вже враховано {oversizeUpliftCaption(sizeRules)} на частку 3XL+.
+              У потребі вже враховано {oversizeUpliftCaption(sizeRules)} на частку {OVERSIZE_RANGE_LABEL}.
             </PrintDocMuted>
           ) : null}
           {materials.length === 0 ? (

@@ -24,10 +24,10 @@ import { OversizeCoeffFields } from "@/components/catalog/OversizeCoeffFields";
 import {
   effectiveOversizeConsumption,
   isOversizeCode,
-  oversizeUpliftCaption,
   resolveOversizeUplift,
   type SizeCoeffRule,
 } from "@/lib/size-coeffs";
+import { materialOptionDescription } from "@/lib/material-catalog-options";
 import {
   ALL_SIZES,
   appliesToSize,
@@ -70,6 +70,8 @@ type MaterialView = {
   sizeCodes: string[] | null;
   sizeConsumption: Record<string, number>;
   sizeWaste?: Record<string, number>;
+  composition?: string | null;
+  densityGsm?: string | null;
   supplierId?: string | null;
   colorSnapshot?: string | null;
   supplierOffers?: Array<{
@@ -389,31 +391,40 @@ export function ProductSizeBom({
                 const unitCost =
                   displayConsumption * (1 + waste / 100) * row.price;
                 const autoFromBase = scopeIsOversize && !hasSizeNorm;
+                const specHint = materialOptionDescription(row.densityGsm, row.composition);
                 return (
                   <TR key={row.id}>
                     <TD title={row.name} className="min-w-[12rem] w-[38%] align-top">
                       <div className="space-y-1">
-                        <CellStack
-                          title={row.name}
-                          subtitle={
-                            [
-                              row.sizeCodes?.length
-                                ? row.sizeCodes.join(" · ")
-                                : mixed
-                                  ? "Базова норма; по розмірах є перевизначення"
-                                  : hasOversizeSizes && sizeScope === ALL_SIZES
-                                    ? oversizeUpliftCaption(sizeRules)
+                        <div className="min-w-0">
+                          <CellStack
+                            title={row.name}
+                            subtitle={
+                              [
+                                row.sizeCodes?.length
+                                  ? row.sizeCodes.join(" · ")
+                                  : mixed
+                                    ? "Базова норма; по розмірах є перевизначення"
                                     : autoFromBase
                                       ? `авто +${materialPct}% від бази ${row.consumption}`
                                       : scopeIsOversize && hasSizeNorm
                                         ? "своя норма для розміру"
                                         : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ") || undefined
-                          }
-                          wrap
-                        />
+                              ]
+                                .filter(Boolean)
+                                .join(" · ") || undefined
+                            }
+                            wrap
+                          />
+                          {specHint ? (
+                            <p
+                              className="mt-0.5 truncate text-[11.5px] leading-snug text-[var(--color-text-quiet)]"
+                              title={specHint}
+                            >
+                              {specHint}
+                            </p>
+                          ) : null}
+                        </div>
                         {(row.supplierOffers?.length ?? 0) > 0 ||
                         (row.materialAvailableColors?.length ?? 0) > 0 ? (
                           <ProductMaterialSupplierColorEditor
