@@ -30,6 +30,7 @@ import {
 import { operationMethodLabel } from "@/lib/operation-labels";
 import { isCutOperationName, resolveCutUnitRateForProduct, summarizeCutOperationDisplay } from "@/lib/cut-rate";
 import {
+  isDeliveryOperationName,
   pickOperationQuantityTiers,
   resolveQuantityTierRate,
 } from "@/lib/quantity-tiers";
@@ -487,7 +488,9 @@ export default async function ProductDetailPage({
                   : 0,
                 unitRate: canViewCosts ? Number(row.decorationMethod.unitRate) : 0,
               })),
-              materialsSubtotal: canViewCosts ? Number(calc.materialsSubtotal) : 0,
+              materialsSubtotal: canViewCosts
+                ? Number(calc.materialsSubtotal) / ECONOMICS_PREVIEW_QTY
+                : 0,
               operationsSubtotal: canViewCosts ? operationsSubtotalFixed : 0,
               hasCutOperation,
               decorationSetupTotal: canViewCosts
@@ -533,6 +536,19 @@ export default async function ProductDetailPage({
                 ratePerUnit: Number(tier.ratePerUnit),
               })),
             }}
+            deliveryOp={(() => {
+              const row = product.operations.find(
+                (op) =>
+                  op.operation.calculationMethod === "QUANTITY_TIER" &&
+                  isDeliveryOperationName(op.operation.nameUk),
+              );
+              if (!row) return null;
+              return {
+                productOperationId: row.id,
+                name: row.operation.nameUk,
+                tiers: pickOperationQuantityTiers(row.rateTiers, row.operation.rateTiers),
+              };
+            })()}
             price={{
               productId: product.id,
               isBaseModel: product.isBaseModel,

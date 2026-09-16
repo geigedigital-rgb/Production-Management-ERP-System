@@ -10,6 +10,7 @@ import { SidePanel } from "@/components/ui/Overlay";
 import { SidePanelSkeleton } from "@/components/ui/Skeleton";
 import {
   IconCalc,
+  IconClients,
   IconFabricKind,
   IconFormTitle,
   IconMeterPrice,
@@ -306,10 +307,9 @@ function MaterialFields({
   const showRollParams = type === "FABRIC" && fabricMeterPricing;
   /** Density + width drive м.п./кг when buying in kg. */
   const densityWidthRequired = type === "FABRIC" && fabricUnitMode === "kg";
-  /** Show density/width only when they drive a calc (kg → м.п./кг, m2 → ₴/м). */
-  const showDensityField = type === "FABRIC" && fabricUnitMode === "kg";
-  const showWidthField =
-    type === "FABRIC" && (fabricUnitMode === "kg" || fabricUnitMode === "m2");
+  /** Density/width visible for all meter-priced fabrics (edit + catalog); required only in kg. */
+  const showDensityField = type === "FABRIC" && fabricMeterPricing;
+  const showWidthField = type === "FABRIC" && fabricMeterPricing;
   const widthRequiredForM2 = type === "FABRIC" && fabricUnitMode === "m2";
   /** м.п./кг: required+auto for kg; optional logistics for m/m2. */
   const showMetersPerKg = type === "FABRIC" && fabricMeterPricing;
@@ -483,7 +483,10 @@ function MaterialFields({
   const purchaseReadOnly = type === "FABRIC" && !fabricEachPricing;
 
   const wizardSteps = useMemo(() => {
-    if (type !== "FABRIC") return ["Основне", "Ціна", "Готово"];
+    if (type !== "FABRIC") {
+      if (wizard) return ["Основне", "Постачальник", "Готово"];
+      return ["Основне", "Постачальник", "Ціна", "Готово"];
+    }
     if (managePricingSeparately) {
       return ["Основне", "Параметри", "Доставка", "Готово"];
     }
@@ -506,8 +509,8 @@ function MaterialFields({
 
   const stepKey = wizardSteps[wizardStep] ?? "Основне";
 
-  const wizardMultiSuppliers =
-    wizard && type === "FABRIC" && !managePricingSeparately;
+  const wizardMultiSuppliers = wizard && !managePricingSeparately;
+  const supplierPricingKind = type === "FABRIC" && !fabricEachPricing ? "fabric" : "unit";
 
   /** Mirror primary draft into classic form fields so createMaterial still syncs primary. */
   useEffect(() => {
@@ -524,6 +527,10 @@ function MaterialFields({
       setSupplierSelect(SUPPLIER_OTHER);
       setSupplierOther(name);
     }
+    if (supplierPricingKind === "unit") {
+      if (primary.priceMeterUahNoVat) setPurchasePrice(primary.priceMeterUahNoVat);
+      return;
+    }
     if (primary.priceKgUsd) setPriceKgUsd(primary.priceKgUsd);
     if (primary.priceKgUsdVat) setPriceKgUsdVat(primary.priceKgUsdVat);
     if (primary.priceMeterUahNoVat) setPriceMeterNoVat(primary.priceMeterUahNoVat);
@@ -535,7 +542,7 @@ function MaterialFields({
     if (primary.deliveryType) {
       setDeliveryType(normalizeFabricDeliveryType(primary.deliveryType));
     }
-  }, [wizardMultiSuppliers, supplierDrafts, knownSuppliers]);
+  }, [wizardMultiSuppliers, supplierDrafts, knownSuppliers, supplierPricingKind]);
 
   function stepCanNext(): boolean {
     if (stepKey === "Основне") return Boolean(nameUk.trim() && unitOfMeasureId);
@@ -1005,6 +1012,7 @@ function MaterialFields({
                   knownSuppliers={knownSuppliers}
                   defaultDeliveryType={deliveryType}
                   onEditingChange={setSupplierDraftEditing}
+                  pricingKind={supplierPricingKind}
                 />
               </>
             ) : (
@@ -1326,26 +1334,99 @@ function MaterialFields({
           </div>
         </>
       ) : (
-        <div className={!wizard || showStep("Готово") || showStep("Ціна") ? "space-y-4" : "hidden"}>
-        <FormGroup
-          label={wizard ? undefined : "Ідентифікація"}
-          icon={wizard ? undefined : <IconSpec size={14} />}
-          columns={2}
-          compact
+        <div
+          className={
+            showStep("Постачальник") || showStep("Ціна") || showStep("Готово") || !wizard
+              ? "space-y-4"
+              : "hidden"
+          }
         >
-          <Input
-            name="supplierCode"
-            label="Код / артикул"
-            optional
-            defaultValue={defaults?.supplierCode}
-          />
-          <Input
-            name="colorOrAttribute"
-            label="Колір / характеристика"
-            optional
-            defaultValue={defaults?.colorOrAttribute}
-          />
-        </FormGroup>
+          {wizardMultiSuppliers ? (
+            <>
+              <input
+                type="hidden"
+                name="supplierCode"
+                value={supplierValue || defaults?.supplierCode || ""}
+              />
+              <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
+              <input
+                type="hidden"
+                name="supplierOffersJson"
+                value={JSON.stringify(supplierDrafts)}
+              />
+              <MaterialSupplierDraftsEditor
+                offers={supplierDrafts}
+                onChange={setSupplierDrafts}
+                metersPerKg={null}
+                fabricGlobals={liveGlobals}
+                knownSuppliers={knownSuppliers}
+                defaultDeliveryType={deliveryType}
+                onEditingChange={setSupplierDraftEditing}
+                pricingKind="unit"
+              />
+              <Input
+                name="colorOrAttribute"
+                label="Колір / характеристика"
+                optional
+                defaultValue={defaults?.colorOrAttribute}
+              />
+            </>
+          ) : managePricingSeparately ? (
+            <FormGroup
+              label={wizard ? undefined : "Характеристика"}
+              icon={wizard ? undefined : <IconSpec size={14} />}
+              columns={2}
+              compact
+            >
+              <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
+              <Input
+                name="colorOrAttribute"
+                label="Колір / характеристика"
+                optional
+                defaultValue={defaults?.colorOrAttribute}
+              />
+            </FormGroup>
+          ) : (
+            <FormGroup
+              label={wizard ? undefined : "Постачальник"}
+              icon={wizard ? undefined : <IconClients size={14} />}
+              columns={2}
+              compact
+            >
+              <div className="space-y-2 sm:col-span-2">
+                <Select
+                  label="Постачальник"
+                  optional
+                  value={supplierSelect}
+                  onChange={(event) => setSupplierSelect(event.target.value)}
+                >
+                  <option value="">Оберіть…</option>
+                  {knownSuppliers.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                  <option value={SUPPLIER_OTHER}>Додати нового…</option>
+                </Select>
+                <input type="hidden" name="supplierCode" value={supplierValue} />
+                {supplierSelect === SUPPLIER_OTHER ? (
+                  <Input
+                    label="Назва постачальника"
+                    required
+                    value={supplierOther}
+                    onChange={(event) => setSupplierOther(event.target.value)}
+                    placeholder="Наприклад Зейджан"
+                  />
+                ) : null}
+              </div>
+              <Input
+                name="colorOrAttribute"
+                label="Колір / характеристика"
+                optional
+                defaultValue={defaults?.colorOrAttribute}
+              />
+            </FormGroup>
+          )}
         </div>
       )}
 
@@ -1593,25 +1674,24 @@ export function MaterialEditPanel({
                 defaults={loaded}
                 fabricGlobals={globals}
                 suppliers={suppliers}
-                managePricingSeparately={loaded.type === "FABRIC"}
+                managePricingSeparately
               />
-              {loaded.type === "FABRIC" ? (
-                <MaterialSuppliersEditor
-                  materialId={loaded.id}
-                  metersPerKg={loaded.metersPerKg}
-                  fabricGlobals={globals}
-                  onPrimaryChanged={() => {
-                    void (async () => {
-                      const result = await getMaterialForEditAction(loaded.id);
-                      if (result.ok && "material" in result) {
-                        setLoaded(result.material);
-                        setGlobals(result.fabricGlobals);
-                      }
-                      router.refresh();
-                    })();
-                  }}
-                />
-              ) : null}
+              <MaterialSuppliersEditor
+                materialId={loaded.id}
+                metersPerKg={loaded.metersPerKg}
+                fabricGlobals={globals}
+                pricingKind={loaded.type === "FABRIC" ? "fabric" : "unit"}
+                onPrimaryChanged={() => {
+                  void (async () => {
+                    const result = await getMaterialForEditAction(loaded.id);
+                    if (result.ok && "material" in result) {
+                      setLoaded(result.material);
+                      setGlobals(result.fabricGlobals);
+                    }
+                    router.refresh();
+                  })();
+                }}
+              />
             </>
           )}
         </form>

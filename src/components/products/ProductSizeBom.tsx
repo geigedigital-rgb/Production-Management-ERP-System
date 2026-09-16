@@ -59,6 +59,7 @@ import {
   summarizeCutOperationDisplay,
   type CutRateTier,
 } from "@/lib/cut-rate";
+import { isDeliveryOperationName } from "@/lib/quantity-tiers";
 
 function moveIdRelative(
   ids: string[],
@@ -1037,7 +1038,9 @@ export function ProductSizeBom({
         ? operations
             .filter(
               (row) =>
-                row.methodCode === "QUANTITY_TIER" && !isCutOperationName(row.name),
+                row.methodCode === "QUANTITY_TIER" &&
+                !isCutOperationName(row.name) &&
+                !isDeliveryOperationName(row.name),
             )
             .map((row) => (
               <ProductOperationRateEditor
@@ -1049,6 +1052,16 @@ export function ProductSizeBom({
               />
             ))
         : null}
+
+      {!hideCosts &&
+      operations.some(
+        (row) =>
+          row.methodCode === "QUANTITY_TIER" && isDeliveryOperationName(row.name),
+      ) ? (
+        <p className="type-caption rounded-[10px] border border-dashed border-[var(--color-border)] px-3 py-2.5">
+          Ставки доставки за тиражем — у вкладці «Прайс і крій» (колонка «Достав.»).
+        </p>
+      ) : null}
 
       {!hideCosts ? (
         <p className="type-caption rounded-[10px] border border-dashed border-[var(--color-border)] px-3 py-2.5">

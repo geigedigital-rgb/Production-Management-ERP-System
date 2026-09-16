@@ -90,6 +90,7 @@ export function MaterialSupplierDraftsEditor({
   knownSuppliers,
   defaultDeliveryType = "CARGO",
   onEditingChange,
+  pricingKind = "fabric",
 }: {
   offers: MaterialSupplierOfferDraft[];
   onChange: (next: MaterialSupplierOfferDraft[]) => void;
@@ -98,6 +99,8 @@ export function MaterialSupplierDraftsEditor({
   knownSuppliers: string[];
   defaultDeliveryType?: FabricDeliveryTypeCode;
   onEditingChange: (editing: boolean) => void;
+  /** fabric = $/кг + м.п.; unit = ціна ₴/од. (фурнітура / інші матеріали). */
+  pricingKind?: "fabric" | "unit";
 }) {
   const [error, setError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | "new" | null>(null);
@@ -185,17 +188,26 @@ export function MaterialSupplierDraftsEditor({
       setError("Вкажіть постачальника.");
       return;
     }
+    if (pricingKind === "unit") {
+      const price = Number(draft.priceMeterUahNoVat);
+      if (!(price >= 0) || draft.priceMeterUahNoVat.trim() === "") {
+        setError("Вкажіть ціну закупки (₴).");
+        return;
+      }
+    }
     const cut = draft.priceMeterUahCutVat.trim();
     const threshold = draft.minWholesaleMeters.trim();
     const cutValue = cut ? Number(cut) : 0;
     const hasCut = cutValue > 0;
-    if (threshold && !hasCut) {
-      setError("Межу гурту можна задати лише разом із ціною відрізу.");
-      return;
-    }
-    if (hasCut && (!threshold || Number(threshold) <= 0)) {
-      setError("Якщо є відріз — вкажіть межу гурту (м).");
-      return;
+    if (pricingKind === "fabric") {
+      if (threshold && !hasCut) {
+        setError("Межу гурту можна задати лише разом із ціною відрізу.");
+        return;
+      }
+      if (hasCut && (!threshold || Number(threshold) <= 0)) {
+        setError("Якщо є відріз — вкажіть межу гурту (м).");
+        return;
+      }
     }
 
     const wantPrimary = draft.asPrimary || offers.length === 0;
@@ -213,8 +225,8 @@ export function MaterialSupplierDraftsEditor({
       priceMeterUahVat:
         draft.priceMeterUahVat ||
         (derived.priceMeterUahVat != null ? String(derived.priceMeterUahVat) : ""),
-      priceMeterUahCutVat: hasCut ? cut : "",
-      minWholesaleMeters: hasCut ? threshold : "",
+      priceMeterUahCutVat: pricingKind === "fabric" && hasCut ? cut : "",
+      minWholesaleMeters: pricingKind === "fabric" && hasCut ? threshold : "",
       wholesaleNote: draft.wholesaleNote,
       availableColors: draft.availableColors,
     };
@@ -295,8 +307,13 @@ export function MaterialSupplierDraftsEditor({
                     </span>
                   ) : null}
                   <span className="type-caption ml-2">
-                    {fabricDeliveryTypeLabel(row.deliveryType)}
-                    {row.cargoUsdPerKg ? ` · ${row.cargoUsdPerKg} $/кг` : ""}
+                    {pricingKind === "unit"
+                      ? row.priceMeterUahNoVat
+                        ? formatMoneyUah(Number(row.priceMeterUahNoVat))
+                        : "без ціни"
+                      : `${fabricDeliveryTypeLabel(row.deliveryType)}${
+                          row.cargoUsdPerKg ? ` · ${row.cargoUsdPerKg} $/кг` : ""
+                        }`}
                   </span>
                   {colors.length > 0 ? (
                     <span className="type-caption ml-2 inline-flex flex-wrap items-center gap-1">
@@ -433,6 +450,35 @@ export function MaterialSupplierDraftsEditor({
             />
           </FormGroup>
 
+          {pricingKind === "unit" ? (
+            <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={2} compact>
+              <Input
+                label="Ціна закупки"
+                type="number"
+                min={0}
+                step="0.01"
+                suffix="₴"
+                required
+                value={draft.priceMeterUahNoVat}
+                onChange={(event) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    priceMeterUahNoVat: event.target.value,
+                    priceMeterUahVat: event.target.value,
+                  }))
+                }
+              />
+              <Input
+                className="sm:col-span-2"
+                label="Примітка"
+                optional
+                value={draft.wholesaleNote}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, wholesaleNote: event.target.value }))
+                }
+              />
+            </FormGroup>
+          ) : (
           <FormGroup label="Доставка і закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
             <Select
               label="Тип доставки"
@@ -622,6 +668,7 @@ export function MaterialSupplierDraftsEditor({
               </p>
             ) : null}
           </FormGroup>
+          )}
 
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" onClick={saveDraft}>

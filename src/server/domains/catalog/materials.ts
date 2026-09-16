@@ -204,7 +204,7 @@ export async function createMaterial(raw: MaterialFormValues) {
     },
   });
 
-  if (data.type === "FABRIC" && data.supplierCode) {
+  if (data.supplierCode) {
     const { syncPrimarySupplierOfferFromMaterial } = await import(
       "@/server/domains/catalog/suppliers"
     );
@@ -218,7 +218,11 @@ export async function createMaterial(raw: MaterialFormValues) {
         fabric.priceKgUsdCargo != null ? Number(fabric.priceKgUsdCargo) : null,
       priceKgUsdVat: fabric.priceKgUsdVat != null ? Number(fabric.priceKgUsdVat) : null,
       priceMeterUahNoVat:
-        fabric.priceMeterUahNoVat != null ? Number(fabric.priceMeterUahNoVat) : null,
+        fabric.priceMeterUahNoVat != null
+          ? Number(fabric.priceMeterUahNoVat)
+          : data.type !== "FABRIC"
+            ? Number(data.purchasePrice)
+            : null,
       priceMeterUahVat:
         fabric.priceMeterUahVat != null ? Number(fabric.priceMeterUahVat) : null,
       priceMeterUahCutVat:
@@ -228,7 +232,7 @@ export async function createMaterial(raw: MaterialFormValues) {
       minWholesaleMeters:
         fabric.minWholesaleMeters != null ? Number(fabric.minWholesaleMeters) : null,
       wholesaleNote: fabric.wholesaleNote,
-      cargoUsdPerKg,
+      cargoUsdPerKg: data.type === "FABRIC" ? cargoUsdPerKg : 0,
       globals: globalsForDeliveryType(globals, fabric.deliveryType),
     });
   }

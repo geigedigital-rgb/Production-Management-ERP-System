@@ -31,7 +31,14 @@ export function resolveQuantityTierRate(args: {
 
   if (tiers.length === 0) return args.fallbackRate;
 
-  let rate = args.fallbackRate;
+  // Below the first configured rung: use that rung (small runs are not "free").
+  // Previously fallbackRate (often 0) applied until minQuantity, which made ops
+  // jump when crossing the first tier (e.g. 20 → 30).
+  if (qty < tiers[0]!.minQuantity) {
+    return tiers[0]!.ratePerUnit;
+  }
+
+  let rate = tiers[0]!.ratePerUnit;
   for (const tier of tiers) {
     if (tier.minQuantity <= qty) rate = tier.ratePerUnit;
     else break;
@@ -81,4 +88,9 @@ export function parseRateTiersInput(
   return [...byMin.entries()]
     .map(([minQuantity, ratePerUnit]) => ({ minQuantity, ratePerUnit }))
     .sort((a, b) => a.minQuantity - b.minQuantity);
+}
+
+/** Hardware/material delivery ops priced by tirage (not fabric cargo $/kg). */
+export function isDeliveryOperationName(nameUk: string | null | undefined) {
+  return /доставк/i.test(String(nameUk ?? "").trim());
 }

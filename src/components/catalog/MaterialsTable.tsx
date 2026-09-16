@@ -123,13 +123,13 @@ export function MaterialsTable({
               label="Обрати всі"
             />
           </TH>
-          <SortableTH columnKey="name" sort={sort} onSort={toggle}>
+          <SortableTH columnKey="name" sort={sort} onSort={toggle} className="min-w-[18rem] w-[42%]">
             Матеріал
           </SortableTH>
           <SortableTH columnKey="type" sort={sort} onSort={toggle}>
             Тип
           </SortableTH>
-          <SortableTH columnKey="unit" sort={sort} onSort={toggle} align="center">
+          <SortableTH columnKey="unit" sort={sort} onSort={toggle} align="center" width="3rem">
             Од.
           </SortableTH>
           <SortableTH columnKey="price" sort={sort} onSort={toggle} align="right">
@@ -193,13 +193,13 @@ export function MaterialsTable({
                       label={`Обрати ${row.nameUk}`}
                     />
                   </TD>
-                  <TD>
-                    <CellStack title={row.nameUk} subtitle={row.details || undefined} maxWidth="300px" />
+                  <TD className="min-w-[18rem]">
+                    <CellStack title={row.nameUk} subtitle={row.details || undefined} wrap />
                   </TD>
                   <TD nowrap className="text-[var(--color-text-secondary)]">
                     {typeLabels[row.type] ?? row.type}
                   </TD>
-                  <TD align="center" nowrap>
+                  <TD align="center" nowrap className="w-[3rem] type-mono text-[12px] tabular-nums text-[var(--color-text-secondary)]">
                     {formatUnit(row.unitCode)}
                   </TD>
                   <TD numeric className="font-medium">

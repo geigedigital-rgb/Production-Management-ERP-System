@@ -1,8 +1,13 @@
 "use client";
 
-import { useMemo, useState, useTransition, type ComponentProps } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { updateProductCommercialPricesAction, updateProductCutRatesAction } from "@/server/domains/products/actions";
+import {
+  updateProductCommercialPricesAction,
+  updateProductCutRatesAction,
+  updateProductOperationRateTiersAction,
+} from "@/server/domains/products/actions";
 import {
   hintForQty,
   hydrateCommercialPriceTiers,
@@ -10,15 +15,30 @@ import {
 } from "@/components/products/ProductPriceFields";
 import { resolveCutRatePerUnit, resolveOptimalCutQty } from "@/lib/cut-rate";
 import { resolveCommercialPricePerUnit } from "@/lib/commercial-price";
+import { resolveQuantityTierRate } from "@/lib/quantity-tiers";
 import { defaultSewingMultiplierForQty } from "@/lib/sewing-markup";
 import { formatAmount, formatMoneyUah } from "@/lib/utils";
 
 type Row = {
   minQuantity: number;
   cutRate: number;
+  deliveryRate: number;
   pricePerUnit: number;
   sewingMultiplier: number;
   showOnCard: boolean;
+};
+
+type DeliveryOp = {
+  productOperationId: string;
+  name: string;
+  tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
+};
+
+type Baseline = {
+  rows: Row[];
+  optimalQty: number;
+  optimalCutTotal: number;
+  isBaseModel: boolean;
 };
 
 /** Digit inputs — width comes from the column / className. */
@@ -48,6 +68,33 @@ const thClass = "px-2 py-2 type-caption font-medium text-[var(--color-text-quiet
 const tdClass = "px-2 py-1.5 align-middle";
 const tdNum = `${tdClass} whitespace-nowrap text-right`;
 
+const LEAVE_MESSAGE =
+  "Є незбережені зміни в «Прайс і крій». Зберегти їх чи вийти без змін?";
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function cloneRows(rows: Row[]): Row[] {
+  return rows.map((row) => ({ ...row }));
+}
+
+function rowsEqual(a: Row[], b: Row[]) {
+  if (a.length !== b.length) return false;
+  return a.every((row, index) => {
+    const other = b[index];
+    if (!other) return false;
+    return (
+      row.minQuantity === other.minQuantity &&
+      row.cutRate === other.cutRate &&
+      row.deliveryRate === other.deliveryRate &&
+      row.pricePerUnit === other.pricePerUnit &&
+      row.sewingMultiplier === other.sewingMultiplier &&
+      row.showOnCard === other.showOnCard
+    );
+  });
+}
+
 function cutRateFromOptimalTotal(optimalTotal: number, qty: number): number {
   if (!(qty > 0) || !(optimalTotal >= 0) || !Number.isFinite(optimalTotal)) return 0;
   return Math.round((optimalTotal / qty) * 100) / 100;
@@ -67,6 +114,7 @@ function ensureOptimalRow(rows: Row[], optimalQty: number, cutRate: number): Row
     {
       minQuantity: optimalQty,
       cutRate,
+      deliveryRate: last?.deliveryRate ?? 0,
       pricePerUnit: last?.pricePerUnit ?? 0,
       sewingMultiplier: last?.sewingMultiplier ?? defaultSewingMultiplierForQty(optimalQty),
       showOnCard: false,
@@ -82,35 +130,103 @@ function spreadCutFromOptimal(rows: Row[], optimalTotal: number): Row[] {
   }));
 }
 
+function baselineRatesForQty(qty: number, baseline: Baseline) {
+  const exact = baseline.rows.find((row) => row.minQuantity === qty);
+  if (exact) {
+    return { cut: exact.cutRate, delivery: exact.deliveryRate };
+  }
+  const cut = resolveCutRatePerUnit({
+    quantity: qty,
+    optimalQty: baseline.optimalQty,
+    tiers: baseline.rows.map((row) => ({
+      minQuantity: row.minQuantity,
+      ratePerUnit: row.cutRate,
+    })),
+    fallbackRate: baseline.rows[baseline.rows.length - 1]?.cutRate ?? 0,
+  });
+  const delivery = resolveQuantityTierRate({
+    quantity: qty,
+    tiers: baseline.rows.map((row) => ({
+      minQuantity: row.minQuantity,
+      ratePerUnit: row.deliveryRate,
+    })),
+    fallbackRate: baseline.rows[0]?.deliveryRate ?? 0,
+  });
+  return { cut, delivery };
+}
+
+/** Live economics: swap cut/delivery rates into server hint without waiting for save. */
+function liveEconomics(args: {
+  hint: TirageCostHint | null;
+  cutRate: number;
+  deliveryRate: number;
+  baselineCut: number;
+  baselineDelivery: number;
+}) {
+  const materialsPerUnit = args.hint?.materialsPerUnit ?? 0;
+  const additionalPerUnit = args.hint?.additionalPerUnit ?? 0;
+  const decorationsPerUnit = args.hint?.decorationsPerUnit ?? 0;
+  const baseOps = args.hint?.operationsPerUnit ?? 0;
+  const operationsPerUnit = roundMoney(
+    baseOps - args.baselineCut - args.baselineDelivery + args.cutRate + args.deliveryRate,
+  );
+  const costPerUnit = roundMoney(
+    (args.hint?.costPerUnit ??
+      materialsPerUnit + baseOps + additionalPerUnit + decorationsPerUnit) -
+      args.baselineCut -
+      args.baselineDelivery +
+      args.cutRate +
+      args.deliveryRate,
+  );
+  return { materialsPerUnit, operationsPerUnit, additionalPerUnit, costPerUnit };
+}
+
 export function ProductPriceCutPanel({
   productId,
   optimalQty: initialOptimalQty,
   cutTiers,
+  deliveryOp = null,
   isBaseModel: initialIsBaseModel,
   priceTiers,
   costHints = [],
+  onDirtyChange,
 }: {
   productId: string;
   optimalQty: number | null;
   cutTiers: Array<{ minQuantity: number; ratePerUnit: number }>;
+  deliveryOp?: DeliveryOp | null;
   isBaseModel: boolean;
   priceTiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard?: boolean }>;
   costHints?: TirageCostHint[];
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const router = useRouter();
+  const hasDelivery = Boolean(deliveryOp);
+  const deliveryTiers = deliveryOp?.tiers ?? [];
+  const dirtyRef = useRef(false);
+  const pendingHrefRef = useRef<string | null>(null);
+
   const initialMerged = useMemo(() => {
     const qtySet = new Set<number>();
     for (const t of cutTiers) qtySet.add(t.minQuantity);
     for (const t of priceTiers) qtySet.add(t.minQuantity);
+    for (const t of deliveryTiers) qtySet.add(t.minQuantity);
     const qtys = [...qtySet].sort((a, b) => a - b);
     if (qtys.length === 0) qtys.push(50);
 
     const cutMap = new Map(cutTiers.map((t) => [t.minQuantity, t.ratePerUnit]));
     const priceMap = new Map(priceTiers.map((t) => [t.minQuantity, t.pricePerUnit]));
     const cardMap = new Map(priceTiers.map((t) => [t.minQuantity, t.showOnCard === true]));
+    const deliveryFallback = deliveryTiers[0]?.ratePerUnit ?? 0;
 
     const base = qtys.map((q) => ({
       minQuantity: q,
       cutRate: cutMap.get(q) ?? 0,
+      deliveryRate: resolveQuantityTierRate({
+        quantity: q,
+        tiers: deliveryTiers,
+        fallbackRate: deliveryFallback,
+      }),
       pricePerUnit: priceMap.get(q) ?? 0,
       sewingMultiplier: defaultSewingMultiplierForQty(q),
       showOnCard: cardMap.get(q) ?? false,
@@ -121,9 +237,10 @@ export function ProductPriceCutPanel({
       pricePerUnit: row.pricePerUnit,
       sewingMultiplier: row.sewingMultiplier ?? defaultSewingMultiplierForQty(row.minQuantity),
       cutRate: base[index]?.cutRate ?? 0,
+      deliveryRate: base[index]?.deliveryRate ?? 0,
       showOnCard: base[index]?.showOnCard ?? false,
     }));
-  }, [cutTiers, priceTiers, costHints]);
+  }, [cutTiers, priceTiers, costHints, deliveryTiers]);
 
   const resolvedInitialOptimal = useMemo(() => {
     if (initialOptimalQty != null && initialOptimalQty > 0) return initialOptimalQty;
@@ -145,20 +262,78 @@ export function ProductPriceCutPanel({
     return Math.round(rate * resolvedInitialOptimal * 100) / 100;
   }, [cutTiers, resolvedInitialOptimal]);
 
-  const [rows, setRows] = useState(() =>
-    initialMerged.map((r) => ({
-      minQuantity: r.minQuantity,
-      cutRate: r.cutRate,
-      pricePerUnit: r.pricePerUnit,
-      sewingMultiplier: r.sewingMultiplier,
-      showOnCard: r.showOnCard,
-    })),
-  );
+  const [rows, setRows] = useState(() => cloneRows(initialMerged));
   const [optimalQty, setOptimalQty] = useState(resolvedInitialOptimal);
   const [optimalCutTotal, setOptimalCutTotal] = useState(initialOptimalTotal);
   const [isBaseModel, setIsBaseModel] = useState(initialIsBaseModel);
+  const [baseline, setBaseline] = useState<Baseline>(() => ({
+    rows: cloneRows(initialMerged),
+    optimalQty: resolvedInitialOptimal,
+    optimalCutTotal: initialOptimalTotal,
+    isBaseModel: initialIsBaseModel,
+  }));
   const [message, setMessage] = useState<string | null>(null);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const isDirty =
+    !rowsEqual(rows, baseline.rows) ||
+    optimalQty !== baseline.optimalQty ||
+    optimalCutTotal !== baseline.optimalCutTotal ||
+    isBaseModel !== baseline.isBaseModel;
+
+  useEffect(() => {
+    dirtyRef.current = isDirty;
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = LEAVE_MESSAGE;
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]");
+      if (!anchor) return;
+      const hrefAttr = anchor.getAttribute("href");
+      if (
+        !hrefAttr ||
+        hrefAttr.startsWith("#") ||
+        hrefAttr.startsWith("mailto:") ||
+        hrefAttr.startsWith("tel:")
+      ) {
+        return;
+      }
+      let nextUrl: URL;
+      try {
+        nextUrl = new URL(hrefAttr, window.location.href);
+      } catch {
+        return;
+      }
+      if (nextUrl.origin !== window.location.origin) return;
+      const next = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+      const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (next === current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pendingHrefRef.current = next;
+      setPendingHref(next);
+      setLeaveOpen(true);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [isDirty]);
 
   const previewQty = rows[0]?.minQuantity || 50;
   const previewCut = resolveCutRatePerUnit({
@@ -193,6 +368,7 @@ export function ProductPriceCutPanel({
       const next: Row = {
         minQuantity: nextQty,
         cutRate: cutRateFromOptimalTotal(optimalCutTotal, nextQty),
+        deliveryRate: last?.deliveryRate ?? 0,
         pricePerUnit: last?.pricePerUnit ?? 0,
         sewingMultiplier: last?.sewingMultiplier ?? defaultSewingMultiplierForQty(nextQty),
         showOnCard: false,
@@ -209,6 +385,7 @@ export function ProductPriceCutPanel({
       return hydrated.map((h, i) => ({
         minQuantity: h.minQuantity,
         cutRate: i < prev.length ? prev[i]!.cutRate : next.cutRate,
+        deliveryRate: i < prev.length ? prev[i]!.deliveryRate : next.deliveryRate,
         pricePerUnit: h.pricePerUnit,
         sewingMultiplier: h.sewingMultiplier ?? defaultSewingMultiplierForQty(h.minQuantity),
         showOnCard: i < prev.length ? prev[i]!.showOnCard : false,
@@ -216,32 +393,96 @@ export function ProductPriceCutPanel({
     });
   }
 
-  function saveAll() {
-    setMessage(null);
-    startTransition(async () => {
-      const cutResult = await updateProductCutRatesAction({
-        productId,
-        optimalQty,
-        tiers: rows.map((r) => ({
-          minQuantity: r.minQuantity,
-          ratePerUnit: r.cutRate,
-        })),
-      });
-      if (!cutResult.ok) {
-        setMessage(cutResult.error);
-        return;
-      }
-      const priceResult = await updateProductCommercialPricesAction({
-        productId,
-        isBaseModel,
-        tiers: rows.map((r) => ({
-          minQuantity: r.minQuantity,
-          pricePerUnit: r.pricePerUnit,
-          showOnCard: r.showOnCard,
-        })),
-      });
-      setMessage(priceResult.ok ? "Крій і прайс збережено" : priceResult.error);
+  function markSaved(nextRows: Row[]) {
+    setBaseline({
+      rows: cloneRows(nextRows),
+      optimalQty,
+      optimalCutTotal,
+      isBaseModel,
     });
+  }
+
+  function persist(): Promise<boolean> {
+    setMessage(null);
+    return new Promise((resolve) => {
+      startTransition(async () => {
+        const cutResult = await updateProductCutRatesAction({
+          productId,
+          optimalQty,
+          tiers: rows.map((r) => ({
+            minQuantity: r.minQuantity,
+            ratePerUnit: r.cutRate,
+          })),
+        });
+        if (!cutResult.ok) {
+          setMessage(cutResult.error);
+          resolve(false);
+          return;
+        }
+        if (deliveryOp) {
+          const formData = new FormData();
+          formData.set("productId", productId);
+          formData.set("productOperationId", deliveryOp.productOperationId);
+          formData.set(
+            "rateTiersJson",
+            JSON.stringify(
+              rows.map((r) => ({
+                minQuantity: r.minQuantity,
+                ratePerUnit: r.deliveryRate,
+              })),
+            ),
+          );
+          const deliveryResult = await updateProductOperationRateTiersAction(formData);
+          if (!deliveryResult.ok) {
+            setMessage("Не вдалося зберегти доставку");
+            resolve(false);
+            return;
+          }
+        }
+        const priceResult = await updateProductCommercialPricesAction({
+          productId,
+          isBaseModel,
+          tiers: rows.map((r) => ({
+            minQuantity: r.minQuantity,
+            pricePerUnit: r.pricePerUnit,
+            showOnCard: r.showOnCard,
+          })),
+        });
+        if (!priceResult.ok) {
+          setMessage(priceResult.error);
+          resolve(false);
+          return;
+        }
+        markSaved(rows);
+        setMessage(
+          hasDelivery ? "Крій, доставку і прайс збережено" : "Крій і прайс збережено",
+        );
+        router.refresh();
+        resolve(true);
+      });
+    });
+  }
+
+  function discardAndLeave() {
+    const href = pendingHrefRef.current ?? pendingHref;
+    setLeaveOpen(false);
+    setPendingHref(null);
+    pendingHrefRef.current = null;
+    setRows(cloneRows(baseline.rows));
+    setOptimalQty(baseline.optimalQty);
+    setOptimalCutTotal(baseline.optimalCutTotal);
+    setIsBaseModel(baseline.isBaseModel);
+    if (href) router.push(href);
+  }
+
+  async function saveAndLeave() {
+    const href = pendingHrefRef.current ?? pendingHref;
+    const ok = await persist();
+    if (!ok) return;
+    setLeaveOpen(false);
+    setPendingHref(null);
+    pendingHrefRef.current = null;
+    if (href) router.push(href);
   }
 
   return (
@@ -250,7 +491,8 @@ export function ProductPriceCutPanel({
         <div>
           <p className="type-label">Прайс і крій</p>
           <p className="type-caption mt-0.5">
-            Колонки економіки партії рахуються з складу. Галочка «Картка» — базовий прайс у меню
+            Економіка перераховується одразу; на сервер — лише після «Зберегти»
+            {hasDelivery ? ". Доставка — ₴/шт за тиражем" : ""}. Галочка «Картка» — прайс у меню
             «Вироби».
           </p>
         </div>
@@ -299,6 +541,9 @@ export function ProductPriceCutPanel({
       </div>
 
       {message ? <p className="type-caption text-[var(--color-text-muted)]">{message}</p> : null}
+      {isDirty ? (
+        <p className="type-caption text-[var(--color-warning-text)]">Є незбережені зміни</p>
+      ) : null}
 
       <div className="w-full overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
         <div className="flex items-center justify-between gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/40 px-2.5 py-1.5">
@@ -309,6 +554,7 @@ export function ProductPriceCutPanel({
             <col className="w-[3.25rem]" />
             <col className="w-[5.5rem]" />
             <col className="w-[5.5rem]" />
+            {hasDelivery ? <col className="w-[5.5rem]" /> : null}
             <col />
             <col />
             <col />
@@ -316,7 +562,6 @@ export function ProductPriceCutPanel({
             <col className="w-[8.5rem]" />
             <col />
             <col className="w-[3.75rem]" />
-            <col />
             <col />
             <col className="w-[6.75rem]" />
             <col className="w-[2.25rem]" />
@@ -328,14 +573,28 @@ export function ProductPriceCutPanel({
               </th>
               <th className={thClass}>Тираж</th>
               <th className={thClass}>Крій</th>
+              {hasDelivery ? (
+                <th
+                  className={thClass}
+                  title={deliveryOp?.name ?? "Доставка фурнітури/матеріалів · ₴/шт"}
+                >
+                  Достав.
+                </th>
+              ) : null}
               <th className={`${thClass} text-right`} title="Матеріали / шт">
                 Мат.
               </th>
-              <th className={`${thClass} text-right`} title="Операції / шт">
+              <th
+                className={`${thClass} text-right`}
+                title="Усі операції / шт (крій, пошив, пакування, доставка…)"
+              >
                 Опер.
               </th>
-              <th className={`${thClass} text-right`} title="Інші / шт">
-                Інші
+              <th
+                className={`${thClass} text-right`}
+                title="Постійні витрати / шт = пошив ÷ коеф. з довідника"
+              >
+                ПВ
               </th>
               <th className={`${thClass} text-right`}>Собів.</th>
               <th className={`${thClass} text-right`} title="Пошив × множник націнки">
@@ -343,9 +602,6 @@ export function ProductPriceCutPanel({
               </th>
               <th className={`${thClass} text-right`}>Націнка</th>
               <th className={`${thClass} text-right`}>Маржа</th>
-              <th className={`${thClass} text-right`} title="Прибуток / шт">
-                Приб.
-              </th>
               <th className={`${thClass} text-right`} title="Прибуток партії">
                 Партія
               </th>
@@ -357,15 +613,20 @@ export function ProductPriceCutPanel({
             {rows.map((row, index) => {
               const hint = hintForQty(costHints, row.minQuantity);
               const sewing = hint?.sewingPerUnit ?? 0;
-              const cost = hint?.costPerUnit ?? 0;
+              const baselineRates = baselineRatesForQty(row.minQuantity, baseline);
+              const live = liveEconomics({
+                hint,
+                cutRate: row.cutRate,
+                deliveryRate: hasDelivery ? row.deliveryRate : 0,
+                baselineCut: baselineRates.cut,
+                baselineDelivery: hasDelivery ? baselineRates.delivery : 0,
+              });
+              const cost = live.costPerUnit;
               const markup = row.pricePerUnit - cost;
               const profitPerUnit = markup;
               const marginPercent =
                 row.pricePerUnit > 0 ? (profitPerUnit / row.pricePerUnit) * 100 : 0;
               const qty = row.minQuantity;
-              const materialsPerUnit = hint?.materialsPerUnit ?? 0;
-              const operationsPerUnit = hint?.operationsPerUnit ?? 0;
-              const additionalPerUnit = hint?.additionalPerUnit ?? 0;
               const isOptimal = row.minQuantity === optimalQty;
               return (
                 <tr
@@ -401,7 +662,10 @@ export function ProductPriceCutPanel({
                         className="w-full"
                         value={row.minQuantity}
                         onChange={(event) => {
-                          const minQuantity = Math.max(1, Math.round(Number(event.target.value)) || 1);
+                          const minQuantity = Math.max(
+                            1,
+                            Math.round(Number(event.target.value)) || 1,
+                          );
                           setRows((prev) => {
                             const next = [...prev];
                             next[index] = {
@@ -442,14 +706,35 @@ export function ProductPriceCutPanel({
                       }}
                     />
                   </td>
+                  {hasDelivery ? (
+                    <td className={tdClass}>
+                      <CompactInput
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        inputMode="decimal"
+                        className="w-full"
+                        value={row.deliveryRate}
+                        title={deliveryOp?.name ?? "Доставка · ₴/шт"}
+                        onChange={(event) => {
+                          const deliveryRate = Number(event.target.value);
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[index] = { ...row, deliveryRate };
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
+                  ) : null}
                   <td className={tdNum}>
-                    <MoneyCell value={materialsPerUnit} />
+                    <MoneyCell value={live.materialsPerUnit} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={operationsPerUnit} />
+                    <MoneyCell value={live.operationsPerUnit} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={additionalPerUnit} />
+                    <MoneyCell value={live.additionalPerUnit} />
                   </td>
                   <td className={tdNum}>
                     <MoneyCell value={cost} tone="strong" />
@@ -493,9 +778,6 @@ export function ProductPriceCutPanel({
                     <span className="type-mono text-[12px] font-medium tabular-nums text-[var(--color-text)]">
                       {Number.isFinite(marginPercent) ? `${marginPercent.toFixed(0)}%` : "—"}
                     </span>
-                  </td>
-                  <td className={tdNum}>
-                    <MoneyCell value={profitPerUnit} />
                   </td>
                   <td className={tdNum}>
                     <MoneyCell value={profitPerUnit * qty} tone="strong" />
@@ -583,13 +865,63 @@ export function ProductPriceCutPanel({
         >
           Перерахувати ціни
         </Button>
-        <Button type="button" size="sm" onClick={saveAll} disabled={pending}>
-          {pending ? "Збереження…" : "Зберегти крій і прайс"}
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            void persist();
+          }}
+          disabled={pending || !isDirty}
+        >
+          {pending
+            ? "Збереження…"
+            : hasDelivery
+              ? "Зберегти крій, доставку і прайс"
+              : "Зберегти крій і прайс"}
         </Button>
         <span className="type-caption ml-auto">
-          {previewQty} шт → крій {formatMoneyUah(previewCut)} · клієнту {formatMoneyUah(previewPrice)}
+          {previewQty} шт → крій {formatMoneyUah(previewCut)} · клієнту{" "}
+          {formatMoneyUah(previewPrice)}
         </span>
       </div>
+
+      {leaveOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="price-cut-leave-title"
+            className="w-full max-w-md rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-soft)]"
+          >
+            <p id="price-cut-leave-title" className="type-label">
+              Незбережені зміни
+            </p>
+            <p className="type-caption mt-2 text-[var(--color-text-secondary)]">
+              У таблиці «Прайс і крій» є зміни. Зберегти їх перед виходом чи вийти без збереження?
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setLeaveOpen(false);
+                  setPendingHref(null);
+                  pendingHrefRef.current = null;
+                }}
+              >
+                Залишитись
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={discardAndLeave}>
+                Вийти без змін
+              </Button>
+              <Button type="button" size="sm" disabled={pending} onClick={() => void saveAndLeave()}>
+                {pending ? "Збереження…" : "Зберегти і вийти"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

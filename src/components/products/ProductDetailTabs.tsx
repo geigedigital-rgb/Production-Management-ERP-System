@@ -13,6 +13,7 @@ export function ProductDetailTabs({
   compositionCount,
   bom,
   cut,
+  deliveryOp = null,
   price,
   showPricing = true,
 }: {
@@ -25,6 +26,11 @@ export function ProductDetailTabs({
     optimalQty: number | null;
     tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
   };
+  deliveryOp?: {
+    productOperationId: string;
+    name: string;
+    tiers: Array<{ minQuantity: number; ratePerUnit: number }>;
+  } | null;
   price: {
     productId: string;
     isBaseModel: boolean;
@@ -74,6 +80,7 @@ export function ProductDetailTabs({
           productId={productId}
           optimalQty={cut.optimalQty}
           cutTiers={cut.tiers}
+          deliveryOp={deliveryOp}
           isBaseModel={price.isBaseModel}
           priceTiers={price.tiers}
           costHints={price.costHints}

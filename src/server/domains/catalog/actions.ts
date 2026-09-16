@@ -140,11 +140,7 @@ export async function createMaterialAction(formData: FormData) {
   const result = await createMaterial(parsed.data);
 
   const offersRaw = formData.get("supplierOffersJson");
-  if (
-    parsed.data.type === "FABRIC" &&
-    typeof offersRaw === "string" &&
-    offersRaw.trim()
-  ) {
+  if (typeof offersRaw === "string" && offersRaw.trim()) {
     try {
       const { upsertMaterialSupplierOffer } = await import(
         "@/server/domains/catalog/suppliers"

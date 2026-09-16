@@ -15,10 +15,13 @@ export function SegmentedTabs({
   items,
   active,
   className,
+  onNavigate,
 }: {
   items: TabItem[];
   active: string;
   className?: string;
+  /** Return false to block navigation (e.g. unsaved changes). */
+  onNavigate?: (href: string) => boolean | void;
 }) {
   return (
     <div
@@ -65,7 +68,21 @@ export function SegmentedTabs({
         }
 
         return (
-          <Link key={item.key} href={item.href} className={classes} aria-current={isActive ? "page" : undefined}>
+          <Link
+            key={item.key}
+            href={item.href}
+            className={classes}
+            aria-current={isActive ? "page" : undefined}
+            onClick={
+              onNavigate
+                ? (event) => {
+                    if (onNavigate(item.href) === false) {
+                      event.preventDefault();
+                    }
+                  }
+                : undefined
+            }
+          >
             {content}
           </Link>
         );
