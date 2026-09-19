@@ -23,9 +23,17 @@ export type TirageCostHint = {
   costPerUnit: number;
   sewingPerUnit: number;
   cutPerUnit: number;
-  /** Per-unit breakdown for the economics strip under each tirage row. */
+  deliveryPerUnit?: number;
+  /** Ops left after cut/sew/delivery + product additionalCosts (not PV) — shown as «Пакування». */
+  otherOpsPerUnit?: number;
+  /** Concrete operation names in the packaging column. */
+  otherLineNames?: string[];
+  /** True when product.additionalCosts contribute to the packaging column. */
+  otherHasExtraAdditional?: boolean;
+  /** Per-unit breakdown; Price&Cut multiplies by tirage for the costing sheet. */
   materialsPerUnit?: number;
   operationsPerUnit?: number;
+  /** PV only (sewing ÷ directory coefficient). Not a bundle of additional costs. */
   additionalPerUnit?: number;
   decorationsPerUnit?: number;
 };

@@ -24,14 +24,17 @@ import {
   type CutRateProduct,
 } from "@/lib/cut-rate";
 import {
+  isDeliveryOperationName,
   pickOperationQuantityTiers,
   resolveQuantityTierRate,
   type QuantityRateTier,
 } from "@/lib/quantity-tiers";
 import { resolveSizeCoeffs, isOversizeCode } from "@/lib/size-coeffs";
 import { isSewOperationName } from "@/lib/sewing-markup";
+import { resolveMaterialLinePurchasePrice, type MaterialCostVatMode } from "@/lib/fabric-pricing";
 import {
   FIXED_COST_ADDITIONAL_ID,
+  isFixedCostOperationName,
   type FixedCostAllocation,
 } from "@/lib/fixed-costs";
 import {
@@ -166,6 +169,7 @@ export async function getPricingDefaults() {
     targetRatePercent: 0,
     minimumMarginPercent: Number(pricing?.minimumMarginPercent ?? 15),
     roundingDecimals: 2,
+    materialCostVatMode: (pricing?.materialCostVatMode ?? "NET") as MaterialCostVatMode,
     sizeRules: sizeRules.map((row) => ({
       sizeCode: row.sizeCode,
       materialCoeff: Number(row.materialCoeff),
@@ -216,6 +220,54 @@ export type FixedCostCalcOptions = {
   monthlyTotal: number;
 };
 
+function numOrNull(value: { toString(): string } | number | null | undefined): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function productMaterialPurchasePrice(args: {
+  row: ProductDetail["materials"][number];
+  sizes: Array<{ sizeCode: string; quantity: number; materialCoeff?: number }>;
+  sizeCodes: string[];
+  quantityAware: boolean;
+  companyCostMode: MaterialCostVatMode;
+}): number {
+  const catalog = Number(args.row.material.purchasePrice);
+  if (!args.quantityAware) return catalog;
+
+  const applies = effectiveSizeCodes(sizeCodesFromScopes(args.row.sizeScopes), args.sizeCodes);
+  const sizeConsumption = sizeConsumptionFromNorms(args.row.sizeNorms);
+  const sizeWaste = sizeWasteFromNorms(args.row.sizeNorms);
+  const baseWaste = Number(args.row.wastePercent ?? args.row.material.defaultWastePercent);
+  let metersNeeded = 0;
+  for (const size of args.sizes) {
+    if (size.quantity <= 0 || !applies.includes(size.sizeCode)) continue;
+    const hasExplicitNorm = sizeConsumption[size.sizeCode] != null;
+    const consumption = consumptionForSize(
+      Number(args.row.consumptionPerUnit),
+      sizeConsumption,
+      size.sizeCode,
+    );
+    const waste = wasteForSize(baseWaste, sizeWaste, size.sizeCode);
+    const coeff = hasExplicitNorm ? 1 : (size.materialCoeff ?? 1);
+    metersNeeded += consumption * (1 + waste / 100) * size.quantity * coeff;
+  }
+
+  return resolveMaterialLinePurchasePrice({
+    type: args.row.material.type,
+    purchasePrice: catalog,
+    priceMeterUahNoVat: numOrNull(args.row.material.priceMeterUahNoVat),
+    priceMeterUahVat: numOrNull(args.row.material.priceMeterUahVat),
+    priceMeterUahCutVat: numOrNull(args.row.material.priceMeterUahCutVat),
+    metersPerRoll: numOrNull(args.row.material.metersPerRoll),
+    minWholesaleMeters: numOrNull(args.row.material.minWholesaleMeters),
+    costVatOverride: args.row.material.costVatOverride ?? null,
+    companyCostMode: args.companyCostMode,
+    metersNeeded,
+  }).purchasePrice;
+}
+
 export function buildCalcFromProduct(
   product: ProductDetail,
   quantity: number,
@@ -224,12 +276,24 @@ export function buildCalcFromProduct(
     targetRatePercent: number;
     sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>;
     fixedCosts?: FixedCostCalcOptions | null;
+    materialCostVatMode?: MaterialCostVatMode;
+    /** When true, fabric ₴/м follows cut vs wholesale for this tirage (same as order). */
+    quantityAwareMaterialPrices?: boolean;
+    /**
+     * Size mix for spreading the tirage quantity.
+     * "standard" — XS–XXL only (Прайс і крій). "all" — full grid including 3XL–6XL.
+     */
+    sizeMode?: "all" | "standard";
   },
 ): CalculationResult {
   const sizeRules = pricing.sizeRules;
+  const productSizes =
+    pricing.sizeMode === "standard"
+      ? product.sizes.filter((row) => !isOversizeCode(row.size.code))
+      : product.sizes;
   const sizes =
-    product.sizes.length > 0
-      ? product.sizes.map((row) => {
+    productSizes.length > 0
+      ? productSizes.map((row) => {
           const coeffs = resolveSizeCoeffs(row.size.code, sizeRules);
           return {
             sizeCode: row.size.code,
@@ -248,13 +312,19 @@ export function buildCalcFromProduct(
   }
 
   const sizeCodes =
-    product.sizes.length > 0 ? product.sizes.map((row) => row.size.code) : ["ONE"];
+    productSizes.length > 0 ? productSizes.map((row) => row.size.code) : ["ONE"];
 
   const input: CalculationInput = {
     sizes,
     materials: product.materials.flatMap((row): MaterialLineInput[] => {
       const baseWaste = Number(row.wastePercent ?? row.material.defaultWastePercent);
-      const price = Number(row.material.purchasePrice);
+      const price = productMaterialPurchasePrice({
+        row,
+        sizes,
+        sizeCodes,
+        quantityAware: Boolean(pricing.quantityAwareMaterialPrices),
+        companyCostMode: pricing.materialCostVatMode ?? "NET",
+      });
       const applies = effectiveSizeCodes(sizeCodesFromScopes(row.sizeScopes), sizeCodes);
       const sizeConsumption = sizeConsumptionFromNorms(row.sizeNorms);
       const sizeWaste = sizeWasteFromNorms(row.sizeNorms);
@@ -294,6 +364,8 @@ export function buildCalcFromProduct(
       });
     }),
     operations: product.operations.flatMap((row): OperationLineInput[] => {
+      const nameUk = row.operation.nameUk;
+      if (isFixedCostOperationName(nameUk)) return [];
       const applies = effectiveSizeCodes(sizeCodesFromScopes(row.sizeScopes), sizeCodes);
       const unitRate = resolveProductOperationUnitRate(row, quantity, product);
       const payload = {
@@ -306,7 +378,9 @@ export function buildCalcFromProduct(
             : row.operation.standardOutputPerShift != null
               ? Number(row.operation.standardOutputPerShift)
               : null,
-        applySizeCoeff: true as const,
+        // Cut and trim-delivery are job/tirage rates (₴/шт × qty), not oversize labor.
+        applySizeCoeff:
+          !isCutOperationName(nameUk) && !isDeliveryOperationName(nameUk),
       };
       if (applies.length === sizeCodes.length) {
         return [{ id: row.id, groupKey: row.operationId, sizeCode: null, ...payload }];
@@ -529,16 +603,22 @@ export function buildCalcFromOrderItem(
         applySizeCoeff: !(sizeCode != null && isOversizeCode(sizeCode)),
       };
     }),
-    operations: item.operations.map((row) => ({
-      id: row.id,
-      groupKey: row.operationId ?? row.nameSnapshot ?? row.id,
-      sizeCode: row.sizeCode ?? null,
-      method: row.calculationMethod,
-      unitRate: resolveOrderOperationUnitRate(row, totalQuantity, options),
-      shiftCost: row.shiftCost != null ? Number(row.shiftCost) : null,
-      standardOutput: row.standardOutput != null ? Number(row.standardOutput) : null,
-      applySizeCoeff: true,
-    })),
+    operations: item.operations.flatMap((row) => {
+      if (isFixedCostOperationName(row.nameSnapshot)) return [];
+      return [
+        {
+          id: row.id,
+          groupKey: row.operationId ?? row.nameSnapshot ?? row.id,
+          sizeCode: row.sizeCode ?? null,
+          method: row.calculationMethod,
+          unitRate: resolveOrderOperationUnitRate(row, totalQuantity, options),
+          shiftCost: row.shiftCost != null ? Number(row.shiftCost) : null,
+          standardOutput: row.standardOutput != null ? Number(row.standardOutput) : null,
+          applySizeCoeff:
+            !isCutOperationName(row.nameSnapshot) && !isDeliveryOperationName(row.nameSnapshot),
+        },
+      ];
+    }),
     decorations: item.decorations.map((row) => ({
       id: row.id,
       setupCost: Number(row.setupCost),

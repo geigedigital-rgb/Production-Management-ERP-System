@@ -37,6 +37,7 @@ import {
 import {
   computeFixedCostMetrics,
   fixedCostPerUnitFromSewing,
+  isFixedCostOperationName,
 } from "@/lib/fixed-costs";
 import { SHARED_PRODUCT_TIRAGE_QTYS, isSewOperationName } from "@/lib/sewing-markup";
 
@@ -54,6 +55,7 @@ function operationFallbackRate(row: ProductDetail["operations"][number]) {
 
 function operationUnitCost(row: ProductDetail["operations"][number]) {
   if (isCutOperationName(row.operation.nameUk)) return 0;
+  if (isFixedCostOperationName(row.operation.nameUk)) return 0;
   if (row.operation.calculationMethod === "SHIFT_OUTPUT") {
     const output =
       row.standardOverride != null
@@ -207,9 +209,25 @@ export default async function ProductDetailPage({
     ...(product.commercialPriceTiers ?? []).map((tier) => tier.minQuantity),
   ]);
   const priceQtys = [...priceQtySet].filter((qty) => qty > 0).sort((a, b) => a - b);
+  const otherLineNames = product.operations
+    .filter((row) => {
+      const name = row.operation.nameUk;
+      return (
+        !isCutOperationName(name) &&
+        !isSewOperationName(name) &&
+        !isDeliveryOperationName(name) &&
+        !isFixedCostOperationName(name)
+      );
+    })
+    .map((row) => row.operation.nameUk);
+  const otherHasExtraAdditional = product.additionalCosts.some((row) => Number(row.amount) > 0);
   const tirageCostHints = canViewCosts
     ? priceQtys.map((qty) => {
-        const calc = buildCalcFromProduct(product, qty, pricingWithFixed);
+        const calc = buildCalcFromProduct(product, qty, {
+          ...pricingWithFixed,
+          quantityAwareMaterialPrices: true,
+          sizeMode: "standard",
+        });
         let sewingPerUnit = 0;
         if (sewRow) {
           const fallback = operationFallbackRate(sewRow);
@@ -228,15 +246,42 @@ export default async function ProductDetailPage({
         const cutPerUnit = cutRow
           ? resolveCutUnitRateForProduct(product, qty, operationFallbackRate(cutRow))
           : 0;
+        const deliveryRow = product.operations.find(
+          (op) =>
+            op.operation.calculationMethod === "QUANTITY_TIER" &&
+            isDeliveryOperationName(op.operation.nameUk),
+        );
+        const deliveryPerUnit = deliveryRow
+          ? resolveQuantityTierRate({
+              quantity: qty,
+              tiers: pickOperationQuantityTiers(deliveryRow.rateTiers, deliveryRow.operation.rateTiers),
+              fallbackRate: operationFallbackRate(deliveryRow),
+            })
+          : 0;
+        const operationsPerUnit = qty > 0 ? Number(calc.operationsSubtotal) / qty : 0;
+        const extraAdditionalTotal = product.additionalCosts.reduce((sum, row) => {
+          const amount = Number(row.amount);
+          if (!Number.isFinite(amount)) return sum;
+          return sum + (row.isPerUnit ? amount * qty : amount);
+        }, 0);
+        const pvTotal = Math.max(0, Number(calc.additionalCostsSubtotal) - extraAdditionalTotal);
+        const extraAdditionalPerUnit = qty > 0 ? extraAdditionalTotal / qty : 0;
+        // Пакування = операції комплектації крім крою/пошиву/доставки + additionalCosts виробу.
+        const otherOpsPerUnit =
+          operationsPerUnit - cutPerUnit - sewingPerUnit - deliveryPerUnit + extraAdditionalPerUnit;
         return {
           minQuantity: qty,
           costPerUnit: Number(calc.costPerUnit),
           sewingPerUnit,
           cutPerUnit,
-          materialsPerUnit: Number(calc.materialsSubtotal) / qty,
-          operationsPerUnit: Number(calc.operationsSubtotal) / qty,
-          additionalPerUnit: Number(calc.additionalCostsSubtotal) / qty,
-          decorationsPerUnit: Number(calc.decorationsSubtotal) / qty,
+          deliveryPerUnit,
+          otherOpsPerUnit,
+          otherLineNames,
+          otherHasExtraAdditional,
+          materialsPerUnit: qty > 0 ? Number(calc.materialsSubtotal) / qty : 0,
+          operationsPerUnit,
+          additionalPerUnit: qty > 0 ? pvTotal / qty : 0,
+          decorationsPerUnit: qty > 0 ? Number(calc.decorationsSubtotal) / qty : 0,
         };
       })
     : [];
@@ -264,7 +309,12 @@ export default async function ProductDetailPage({
   const operationRows = product.operations.map((row) => mapOperationRow(row, product));
   const hasCutOperation = operationRows.some((row) => row.isCut);
   const operationsSubtotalFixed = operationRows
-    .filter((row) => !row.isCut)
+    .filter(
+      (row) =>
+        !row.isCut &&
+        !isDeliveryOperationName(row.name) &&
+        !isFixedCostOperationName(row.name),
+    )
     .reduce((sum, row) => sum + row.unitCost, 0);
 
   let fixedCostPreview: {

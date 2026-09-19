@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import {
@@ -16,8 +25,12 @@ import {
 import { resolveCutRatePerUnit, resolveOptimalCutQty } from "@/lib/cut-rate";
 import { resolveCommercialPricePerUnit } from "@/lib/commercial-price";
 import { resolveQuantityTierRate } from "@/lib/quantity-tiers";
-import { defaultSewingMultiplierForQty } from "@/lib/sewing-markup";
-import { formatAmount, formatMoneyUah } from "@/lib/utils";
+import { defaultSewingMultiplierForQty, suggestSellingFromSewingMarkup } from "@/lib/sewing-markup";
+import {
+  buildTirageFormulaTips,
+  buildTirageHeaderTips,
+} from "@/lib/tirage-formula-tips";
+import { cn, formatAmount, formatMoneyUah } from "@/lib/utils";
 
 type Row = {
   minQuantity: number;
@@ -52,15 +65,95 @@ function CompactInput({ className, ...props }: ComponentProps<"input">) {
 }
 
 /** Dense table cell — no ₴ (unit shown once in the table caption). */
-function MoneyCell({ value, tone }: { value: number; tone?: "quiet" | "strong" }) {
+function MoneyCell({
+  value,
+  tone,
+  tip,
+}: {
+  value: number;
+  tone?: "quiet" | "strong";
+  tip?: string;
+}) {
   const color =
     tone === "strong"
       ? "font-medium text-[var(--color-text)]"
       : "text-[var(--color-text-secondary)]";
-  return (
+  const body = (
     <span className={`type-mono text-[12px] tabular-nums ${color}`}>
       {Number.isFinite(value) ? formatAmount(value) : "—"}
     </span>
+  );
+  return tip ? <FormulaTip tip={tip}>{body}</FormulaTip> : body;
+}
+
+/** Hover tip: CSS for cells; fixed portal for headers so overflow-x does not clip. */
+function FormulaTip({
+  tip,
+  children,
+  className,
+  placement = "above",
+}: {
+  tip: string;
+  children: ReactNode;
+  className?: string;
+  placement?: "above" | "below";
+}) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+
+  function show() {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setCoords({
+      top: placement === "below" ? r.bottom + 6 : r.top - 6,
+      left: r.left + r.width / 2,
+    });
+    setOpen(true);
+  }
+
+  function hide() {
+    setOpen(false);
+  }
+
+  return (
+    <span
+      ref={anchorRef}
+      className={cn("relative inline-flex max-w-full cursor-help", className)}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+    >
+      {children}
+      {open && coords
+        ? createPortal(
+            <span
+              role="tooltip"
+              className={
+                "pointer-events-none fixed z-[100] w-max max-w-[20rem] -translate-x-1/2 " +
+                (placement === "above" ? "-translate-y-full " : "") +
+                "rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-2 text-left " +
+                "text-[11px] leading-snug font-normal normal-case tracking-normal whitespace-pre-line " +
+                "text-[var(--color-text-secondary)] shadow-[var(--shadow-soft)]"
+              }
+              style={{ top: coords.top, left: coords.left }}
+            >
+              {tip}
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
+}
+
+function HeaderTip({ tip, children }: { tip: string; children: ReactNode }) {
+  return (
+    <FormulaTip tip={tip} placement="below">
+      <span className="border-b border-dotted border-[var(--color-text-quiet)]/55">{children}</span>
+    </FormulaTip>
   );
 }
 
@@ -130,55 +223,22 @@ function spreadCutFromOptimal(rows: Row[], optimalTotal: number): Row[] {
   }));
 }
 
-function baselineRatesForQty(qty: number, baseline: Baseline) {
-  const exact = baseline.rows.find((row) => row.minQuantity === qty);
-  if (exact) {
-    return { cut: exact.cutRate, delivery: exact.deliveryRate };
-  }
-  const cut = resolveCutRatePerUnit({
-    quantity: qty,
-    optimalQty: baseline.optimalQty,
-    tiers: baseline.rows.map((row) => ({
-      minQuantity: row.minQuantity,
-      ratePerUnit: row.cutRate,
-    })),
-    fallbackRate: baseline.rows[baseline.rows.length - 1]?.cutRate ?? 0,
-  });
-  const delivery = resolveQuantityTierRate({
-    quantity: qty,
-    tiers: baseline.rows.map((row) => ({
-      minQuantity: row.minQuantity,
-      ratePerUnit: row.deliveryRate,
-    })),
-    fallbackRate: baseline.rows[0]?.deliveryRate ?? 0,
-  });
-  return { cut, delivery };
-}
-
-/** Live economics: swap cut/delivery rates into server hint without waiting for save. */
-function liveEconomics(args: {
+/** Mutually exclusive tirage totals. Собів = мат + крій + пошив + достав + інші + ПВ. */
+function liveTirageSheet(args: {
   hint: TirageCostHint | null;
+  qty: number;
   cutRate: number;
   deliveryRate: number;
-  baselineCut: number;
-  baselineDelivery: number;
 }) {
-  const materialsPerUnit = args.hint?.materialsPerUnit ?? 0;
-  const additionalPerUnit = args.hint?.additionalPerUnit ?? 0;
-  const decorationsPerUnit = args.hint?.decorationsPerUnit ?? 0;
-  const baseOps = args.hint?.operationsPerUnit ?? 0;
-  const operationsPerUnit = roundMoney(
-    baseOps - args.baselineCut - args.baselineDelivery + args.cutRate + args.deliveryRate,
-  );
-  const costPerUnit = roundMoney(
-    (args.hint?.costPerUnit ??
-      materialsPerUnit + baseOps + additionalPerUnit + decorationsPerUnit) -
-      args.baselineCut -
-      args.baselineDelivery +
-      args.cutRate +
-      args.deliveryRate,
-  );
-  return { materialsPerUnit, operationsPerUnit, additionalPerUnit, costPerUnit };
+  const qty = args.qty > 0 ? args.qty : 0;
+  const materials = roundMoney((args.hint?.materialsPerUnit ?? 0) * qty);
+  const sewing = roundMoney((args.hint?.sewingPerUnit ?? 0) * qty);
+  const other = roundMoney((args.hint?.otherOpsPerUnit ?? 0) * qty);
+  const pv = roundMoney((args.hint?.additionalPerUnit ?? 0) * qty);
+  const cut = roundMoney(args.cutRate * qty);
+  const delivery = roundMoney(args.deliveryRate * qty);
+  const cost = roundMoney(materials + cut + sewing + delivery + other + pv);
+  return { materials, sewing, other, pv, cut, delivery, cost };
 }
 
 export function ProductPriceCutPanel({
@@ -205,6 +265,13 @@ export function ProductPriceCutPanel({
   const deliveryTiers = deliveryOp?.tiers ?? [];
   const dirtyRef = useRef(false);
   const pendingHrefRef = useRef<string | null>(null);
+  const headerTips = useMemo(() => {
+    const sample = costHints.find((h) => (h.otherLineNames?.length ?? 0) > 0) ?? costHints[0];
+    return buildTirageHeaderTips({
+      otherLineNames: sample?.otherLineNames,
+      otherHasExtraAdditional: sample?.otherHasExtraAdditional,
+    });
+  }, [costHints]);
 
   const initialMerged = useMemo(() => {
     const qtySet = new Set<number>();
@@ -491,8 +558,8 @@ export function ProductPriceCutPanel({
         <div>
           <p className="type-label">Прайс і крій</p>
           <p className="type-caption mt-0.5">
-            Економіка перераховується одразу; на сервер — лише після «Зберегти»
-            {hasDelivery ? ". Доставка — ₴/шт за тиражем" : ""}. Галочка «Картка» — прайс у меню
+            Суми в таблиці — на весь тираж, крім крою, доставки і ціни (₴/шт). Статті не дублюються.
+            {hasDelivery ? " Доставка — сітка ₴/шт за тиражем." : ""} Галочка «Картка» — прайс у меню
             «Вироби».
           </p>
         </div>
@@ -547,86 +614,112 @@ export function ProductPriceCutPanel({
 
       <div className="w-full overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
         <div className="flex items-center justify-between gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/40 px-2.5 py-1.5">
-          <p className="type-caption text-[var(--color-text-quiet)]">Тиражі · суми в ₴</p>
+          <p className="type-caption text-[var(--color-text-quiet)]">
+            Мат + Крій×тираж + Пошив + Достав×тираж + Пакування + ПВ = Собів · суми в ₴
+          </p>
         </div>
-        <table className="w-full min-w-[48rem] table-fixed border-collapse text-left">
+        <table className="w-full min-w-[64rem] table-fixed border-collapse text-left">
           <colgroup>
             <col className="w-[3.25rem]" />
             <col className="w-[5.5rem]" />
-            <col className="w-[5.5rem]" />
-            {hasDelivery ? <col className="w-[5.5rem]" /> : null}
+            <col className="w-[5.75rem]" />
+            {hasDelivery ? <col className="w-[5.75rem]" /> : null}
             <col />
             <col />
             <col />
             <col />
-            <col className="w-[8.5rem]" />
+            <col />
+            <col className="w-[4.5rem]" />
+            <col className="w-[6.75rem]" />
+            <col />
             <col />
             <col className="w-[3.75rem]" />
-            <col />
-            <col className="w-[6.75rem]" />
             <col className="w-[2.25rem]" />
           </colgroup>
           <thead>
             <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg)]/50">
-              <th className={`${thClass} text-center`} title="Показувати в картці виробу">
-                Картка
+              <th className={`${thClass} text-center`}>
+                <HeaderTip tip={headerTips.card}>Картка</HeaderTip>
               </th>
-              <th className={thClass}>Тираж</th>
-              <th className={thClass}>Крій</th>
+              <th className={thClass}>
+                <HeaderTip tip={headerTips.qty}>Тираж</HeaderTip>
+              </th>
+              <th className={thClass}>
+                <HeaderTip tip={headerTips.cut}>Крій</HeaderTip>
+              </th>
               {hasDelivery ? (
-                <th
-                  className={thClass}
-                  title={deliveryOp?.name ?? "Доставка фурнітури/матеріалів · ₴/шт"}
-                >
-                  Достав.
+                <th className={thClass}>
+                  <HeaderTip tip={headerTips.delivery}>Достав.</HeaderTip>
                 </th>
               ) : null}
-              <th className={`${thClass} text-right`} title="Матеріали / шт">
-                Мат.
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.materials}>Мат.</HeaderTip>
               </th>
-              <th
-                className={`${thClass} text-right`}
-                title="Усі операції / шт (крій, пошив, пакування, доставка…)"
-              >
-                Опер.
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.sewing}>Пошив</HeaderTip>
               </th>
-              <th
-                className={`${thClass} text-right`}
-                title="Постійні витрати / шт = пошив ÷ коеф. з довідника"
-              >
-                ПВ
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.other}>Пакування</HeaderTip>
               </th>
-              <th className={`${thClass} text-right`}>Собів.</th>
-              <th className={`${thClass} text-right`} title="Пошив × множник націнки">
-                Пошив ×
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.pv}>ПВ</HeaderTip>
               </th>
-              <th className={`${thClass} text-right`}>Націнка</th>
-              <th className={`${thClass} text-right`}>Маржа</th>
-              <th className={`${thClass} text-right`} title="Прибуток партії">
-                Партія
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.cost}>Собів.</HeaderTip>
               </th>
-              <th className={thClass}>Ціна</th>
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.multiplier}>×</HeaderTip>
+              </th>
+              <th className={thClass}>
+                <HeaderTip tip={headerTips.price}>Ціна/шт</HeaderTip>
+              </th>
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.selling}>Продаж</HeaderTip>
+              </th>
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.profit}>Прибуток</HeaderTip>
+              </th>
+              <th className={`${thClass} text-right`}>
+                <HeaderTip tip={headerTips.margin}>Маржа</HeaderTip>
+              </th>
               <th className={thClass} />
             </tr>
           </thead>
           <tbody>
             {rows.map((row, index) => {
               const hint = hintForQty(costHints, row.minQuantity);
-              const sewing = hint?.sewingPerUnit ?? 0;
-              const baselineRates = baselineRatesForQty(row.minQuantity, baseline);
-              const live = liveEconomics({
+              const sewingPerUnit = hint?.sewingPerUnit ?? 0;
+              const qty = row.minQuantity;
+              const sheet = liveTirageSheet({
                 hint,
+                qty,
                 cutRate: row.cutRate,
                 deliveryRate: hasDelivery ? row.deliveryRate : 0,
-                baselineCut: baselineRates.cut,
-                baselineDelivery: hasDelivery ? baselineRates.delivery : 0,
               });
-              const cost = live.costPerUnit;
-              const markup = row.pricePerUnit - cost;
-              const profitPerUnit = markup;
-              const marginPercent =
-                row.pricePerUnit > 0 ? (profitPerUnit / row.pricePerUnit) * 100 : 0;
-              const qty = row.minQuantity;
+              const selling = roundMoney(row.pricePerUnit * qty);
+              const profit = roundMoney(selling - sheet.cost);
+              const marginPercent = selling > 0 ? (profit / selling) * 100 : 0;
+              const tips = buildTirageFormulaTips({
+                qty,
+                cutRate: row.cutRate,
+                cutTotal: sheet.cut,
+                deliveryRate: hasDelivery ? row.deliveryRate : 0,
+                deliveryTotal: sheet.delivery,
+                deliveryName: deliveryOp?.name,
+                materials: sheet.materials,
+                sewingTotal: sheet.sewing,
+                sewingPerUnit,
+                other: sheet.other,
+                otherLineNames: hint?.otherLineNames,
+                otherHasExtraAdditional: hint?.otherHasExtraAdditional,
+                pv: sheet.pv,
+                cost: sheet.cost,
+                multiplier: row.sewingMultiplier,
+                pricePerUnit: row.pricePerUnit,
+                selling,
+                profit,
+                marginPercent,
+              });
               const isOptimal = row.minQuantity === optimalQty;
               return (
                 <tr
@@ -685,82 +778,97 @@ export function ProductPriceCutPanel({
                     </div>
                   </td>
                   <td className={tdClass}>
-                    <CompactInput
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      inputMode="decimal"
-                      className="w-full"
-                      value={row.cutRate}
-                      title="Можна підправити вручну; «Розкласти крій» знову візьме від оптимуму"
-                      onChange={(event) => {
-                        const cutRate = Number(event.target.value);
-                        setRows((prev) => {
-                          const next = [...prev];
-                          next[index] = { ...row, cutRate };
-                          return next;
-                        });
-                        if (isOptimal && Number.isFinite(cutRate)) {
-                          setOptimalCutTotal(Math.round(cutRate * optimalQty * 100) / 100);
-                        }
-                      }}
-                    />
-                  </td>
-                  {hasDelivery ? (
-                    <td className={tdClass}>
+                    <div className="flex flex-col items-end gap-0.5">
                       <CompactInput
                         type="number"
                         min={0}
                         step="0.01"
                         inputMode="decimal"
                         className="w-full"
-                        value={row.deliveryRate}
-                        title={deliveryOp?.name ?? "Доставка · ₴/шт"}
+                        value={row.cutRate}
+                        title={tips.cut}
                         onChange={(event) => {
-                          const deliveryRate = Number(event.target.value);
+                          const cutRate = Number(event.target.value);
                           setRows((prev) => {
                             const next = [...prev];
-                            next[index] = { ...row, deliveryRate };
+                            next[index] = { ...row, cutRate };
                             return next;
                           });
+                          if (isOptimal && Number.isFinite(cutRate)) {
+                            setOptimalCutTotal(Math.round(cutRate * optimalQty * 100) / 100);
+                          }
                         }}
                       />
+                      <FormulaTip tip={tips.cut}>
+                        <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
+                          {formatAmount(sheet.cut)}
+                        </span>
+                      </FormulaTip>
+                    </div>
+                  </td>
+                  {hasDelivery ? (
+                    <td className={tdClass}>
+                      <div className="flex flex-col items-end gap-0.5">
+                        <CompactInput
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          className="w-full"
+                          value={row.deliveryRate}
+                          title={tips.delivery}
+                          onChange={(event) => {
+                            const deliveryRate = Number(event.target.value);
+                            setRows((prev) => {
+                              const next = [...prev];
+                              next[index] = { ...row, deliveryRate };
+                              return next;
+                            });
+                          }}
+                        />
+                        <FormulaTip tip={tips.delivery}>
+                          <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
+                            {formatAmount(sheet.delivery)}
+                          </span>
+                        </FormulaTip>
+                      </div>
                     </td>
                   ) : null}
                   <td className={tdNum}>
-                    <MoneyCell value={live.materialsPerUnit} />
+                    <MoneyCell value={sheet.materials} tip={tips.materials} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={live.operationsPerUnit} />
+                    <MoneyCell value={sheet.sewing} tip={tips.sewing} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={live.additionalPerUnit} />
+                    <MoneyCell value={sheet.other} tip={tips.other} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={cost} tone="strong" />
+                    <MoneyCell value={sheet.pv} tip={tips.pv} />
+                  </td>
+                  <td className={tdNum}>
+                    <MoneyCell value={sheet.cost} tip={tips.cost} tone="strong" />
                   </td>
                   <td className={tdClass}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span
-                        className="type-mono min-w-0 shrink text-[12px] tabular-nums text-[var(--color-text-secondary)]"
-                        title="Пошив ₴/шт"
-                      >
-                        {Number.isFinite(sewing) ? formatAmount(sewing) : "—"}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-[var(--color-text-quiet)]">×</span>
+                    <FormulaTip tip={tips.multiplier} className="w-full">
                       <CompactInput
                         type="number"
                         min={1}
                         step="0.01"
                         inputMode="decimal"
-                        className="w-[3.4rem] shrink-0 text-center"
+                        className="w-full text-center"
                         value={row.sewingMultiplier}
-                        title="Множник націнки на пошив"
+                        title={tips.multiplier}
                         onChange={(event) => {
                           const sewingMultiplier = Number(event.target.value);
+                          const costPerUnit = qty > 0 ? sheet.cost / qty : 0;
                           const pricePerUnit =
-                            sewing > 0 && Number.isFinite(sewingMultiplier)
-                              ? Math.round(sewing * sewingMultiplier * 100) / 100
+                            sewingPerUnit > 0 && Number.isFinite(sewingMultiplier)
+                              ? suggestSellingFromSewingMarkup({
+                                  costPerUnit,
+                                  sewingPerUnit,
+                                  multiplier: sewingMultiplier,
+                                })
                               : row.pricePerUnit;
                           setRows((prev) => {
                             const next = [...prev];
@@ -769,36 +877,41 @@ export function ProductPriceCutPanel({
                           });
                         }}
                       />
-                    </div>
-                  </td>
-                  <td className={tdNum}>
-                    <MoneyCell value={markup} />
-                  </td>
-                  <td className={tdNum}>
-                    <span className="type-mono text-[12px] font-medium tabular-nums text-[var(--color-text)]">
-                      {Number.isFinite(marginPercent) ? `${marginPercent.toFixed(0)}%` : "—"}
-                    </span>
-                  </td>
-                  <td className={tdNum}>
-                    <MoneyCell value={profitPerUnit * qty} tone="strong" />
+                    </FormulaTip>
                   </td>
                   <td className={tdClass}>
-                    <CompactInput
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      inputMode="decimal"
-                      className="w-full font-semibold"
-                      value={row.pricePerUnit}
-                      onChange={(event) => {
-                        const pricePerUnit = Number(event.target.value);
-                        setRows((prev) => {
-                          const next = [...prev];
-                          next[index] = { ...row, pricePerUnit };
-                          return next;
-                        });
-                      }}
-                    />
+                    <FormulaTip tip={tips.price} className="w-full">
+                      <CompactInput
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        inputMode="decimal"
+                        className="w-full font-semibold"
+                        value={row.pricePerUnit}
+                        title={tips.price}
+                        onChange={(event) => {
+                          const pricePerUnit = Number(event.target.value);
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[index] = { ...row, pricePerUnit };
+                            return next;
+                          });
+                        }}
+                      />
+                    </FormulaTip>
+                  </td>
+                  <td className={tdNum}>
+                    <MoneyCell value={selling} tip={tips.selling} />
+                  </td>
+                  <td className={tdNum}>
+                    <MoneyCell value={profit} tip={tips.profit} tone="strong" />
+                  </td>
+                  <td className={tdNum}>
+                    <FormulaTip tip={tips.margin}>
+                      <span className="type-mono text-[12px] font-medium tabular-nums text-[var(--color-text)]">
+                        {Number.isFinite(marginPercent) ? `${marginPercent.toFixed(0)}%` : "—"}
+                      </span>
+                    </FormulaTip>
                   </td>
                   <td className={`${tdClass} text-center`}>
                     <button

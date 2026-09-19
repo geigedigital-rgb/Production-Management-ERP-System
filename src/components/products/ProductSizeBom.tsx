@@ -60,6 +60,7 @@ import {
   type CutRateTier,
 } from "@/lib/cut-rate";
 import { isDeliveryOperationName } from "@/lib/quantity-tiers";
+import { isFixedCostOperationName } from "@/lib/fixed-costs";
 
 function moveIdRelative(
   ids: string[],
@@ -187,12 +188,14 @@ function formatCutCostCell(row: OperationView, previewQty: number, cutRateContex
   const range =
     cut.minRate != null && cut.maxRate != null && cut.minRate !== cut.maxRate
       ? `${formatMoneyUah(cut.minRate)}–${formatMoneyUah(cut.maxRate)}`
-      : null;
+      : cut.previewRate != null
+        ? formatMoneyUah(cut.previewRate)
+        : null;
 
   return {
-    primary: formatMoneyUah(cut.previewRate),
-    secondary: range ? `діапазон ${range}` : `${previewQty} шт`,
-    title: `${CUT_RATES_TAB_HINT}. При ${previewQty} шт — ${formatMoneyUah(cut.previewRate)}/шт`,
+    primary: range ?? "—",
+    secondary: "₴/од. · сума на тираж у «Прайс і крій»",
+    title: `${CUT_RATES_TAB_HINT}. Крій залежить від тиражу, не фіксована ставка.`,
   };
 }
 
@@ -302,6 +305,7 @@ export function ProductSizeBom({
     sizeScope === ALL_SIZES
       ? orderedOperations
       : orderedOperations.filter((row) => appliesToSize(row.sizeCodes, sizeScope));
+  const hasDeliveryOp = operations.some((row) => isDeliveryOperationName(row.name));
   const customized = customizedSizeCodes({
     allCodes: sizes.map((size) => size.code),
     materials,
@@ -909,6 +913,23 @@ export function ProductSizeBom({
                             редагувати крій →
                           </Link>
                         </div>
+                      ) : row.methodCode === "QUANTITY_TIER" && isDeliveryOperationName(row.name) ? (
+                        <span className="inline-flex flex-col items-end gap-0.5">
+                          <span className="type-caption">за тиражем</span>
+                          <Link
+                            href={`/products/${productId}?tab=pricing`}
+                            className="type-caption text-[var(--color-primary-700)] hover:underline"
+                          >
+                            Прайс і крій →
+                          </Link>
+                        </span>
+                      ) : isFixedCostOperationName(row.name) ? (
+                        <span className="inline-flex flex-col items-end gap-0.5">
+                          <span className="type-caption">довідник ПВ</span>
+                          <span className="type-caption text-[var(--color-text-quiet)]">
+                            не окрема ставка
+                          </span>
+                        </span>
                       ) : row.methodCode === "QUANTITY_TIER" ? (
                         <span className="inline-flex flex-col items-end gap-0.5">
                           <span className="tabular">{formatMoneyUah(row.unitCost)}</span>
@@ -979,26 +1000,31 @@ export function ProductSizeBom({
                   colSpan={2 + (canReorder ? 1 : 0)}
                   className="text-[var(--color-text-secondary)]"
                 >
-                  {hasCutOperation ? "Операції без крою / од." : "Операції разом / од."}
+                  {hasCutOperation || hasDeliveryOp
+                    ? hasCutOperation && hasDeliveryOp
+                      ? "Операції без крою/доставки / од."
+                      : hasCutOperation
+                        ? "Операції без крою / од."
+                        : "Операції без доставки / од."
+                    : "Операції разом / од."}
                 </TD>
                 <TD numeric>{formatMoneyUah(operationsSubtotal)}</TD>
                 {!readOnly ? <TD /> : null}
               </tr>
-              {hasCutOperation ? (
+              {hasCutOperation || hasDeliveryOp ? (
                 <tr>
                   <TD
                     colSpan={2 + (canReorder ? 1 : 0)}
                     className="text-[var(--color-text-secondary)]"
                   >
-                    Крій
+                    {hasCutOperation && hasDeliveryOp
+                      ? "Крій і доставка"
+                      : hasCutOperation
+                        ? "Крій"
+                        : "Доставка"}
                   </TD>
-                  <TD numeric className="font-medium">
-                    {(() => {
-                      const cutRow = operations.find((row) => row.isCut);
-                      if (!cutRow || !cutRateContext) return "—";
-                      const cell = formatCutCostCell(cutRow, previewQty, cutRateContext);
-                      return cell.primary;
-                    })()}
+                  <TD numeric className="type-caption">
+                    за тиражем →
                   </TD>
                   {!readOnly ? <TD /> : null}
                 </tr>
@@ -1040,7 +1066,8 @@ export function ProductSizeBom({
               (row) =>
                 row.methodCode === "QUANTITY_TIER" &&
                 !isCutOperationName(row.name) &&
-                !isDeliveryOperationName(row.name),
+                !isDeliveryOperationName(row.name) &&
+                !isFixedCostOperationName(row.name),
             )
             .map((row) => (
               <ProductOperationRateEditor

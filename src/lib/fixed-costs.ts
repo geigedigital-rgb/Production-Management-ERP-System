@@ -16,6 +16,13 @@
 export const FIXED_COST_ADDITIONAL_ID = "fixed-overhead";
 export const FIXED_COST_LINE_NAME_UK = "Постійні витрати";
 
+/** Catalog leftover named like PV — real PV is sewing ÷ directory coefficient, not an operation. */
+export function isFixedCostOperationName(nameUk: string | null | undefined) {
+  const name = String(nameUk ?? "").trim();
+  if (!name) return false;
+  return name === FIXED_COST_LINE_NAME_UK || /постійні\s+витрат/i.test(name);
+}
+
 export type FixedCostParams = {
   workingDaysPerMonth: number;
   sewerCount: number;

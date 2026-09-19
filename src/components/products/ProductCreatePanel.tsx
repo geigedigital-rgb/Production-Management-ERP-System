@@ -542,7 +542,7 @@ export function ProductCreatePanel({
                 }}
                 className="h-4 w-4 accent-[var(--color-primary-600)]"
               />
-              Базова модель категорії
+              Базова модель каталогу
             </label>
             {(isBaseModel || priceTiers.length > 0) && (
               <ProductPriceFields tiers={priceTiers} onTiersChange={setPriceTiers} />
