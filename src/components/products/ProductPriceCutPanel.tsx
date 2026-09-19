@@ -557,11 +557,6 @@ export function ProductPriceCutPanel({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="type-label">Прайс і крій</p>
-          <p className="type-caption mt-0.5">
-            Суми в таблиці — на весь тираж, крім крою, доставки і ціни (₴/шт). Статті не дублюються.
-            {hasDelivery ? " Доставка — сітка ₴/шт за тиражем." : ""} Галочка «Картка» — прайс у меню
-            «Вироби».
-          </p>
         </div>
         <label className="inline-flex items-center gap-2 type-caption">
           <input
