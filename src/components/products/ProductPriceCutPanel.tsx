@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -354,7 +353,7 @@ export function ProductPriceCutPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [saving, setSaving] = useState(false);
 
   const isDirty =
     !rowsEqual(rows, baseline.rows) ||
@@ -366,26 +365,6 @@ export function ProductPriceCutPanel({
     dirtyRef.current = isDirty;
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
-
-  // After save + router.refresh, reload × / prices from server when panel is clean.
-  useEffect(() => {
-    if (dirtyRef.current) return;
-    setRows(cloneRows(initialMerged));
-    setBaseline({
-      rows: cloneRows(initialMerged),
-      optimalQty: resolvedInitialOptimal,
-      optimalCutTotal: initialOptimalTotal,
-      isBaseModel: initialIsBaseModel,
-    });
-    setOptimalQty(resolvedInitialOptimal);
-    setOptimalCutTotal(initialOptimalTotal);
-    setIsBaseModel(initialIsBaseModel);
-  }, [
-    initialMerged,
-    resolvedInitialOptimal,
-    initialOptimalTotal,
-    initialIsBaseModel,
-  ]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -492,75 +471,82 @@ export function ProductPriceCutPanel({
     });
   }
 
-  function markSaved(nextRows: Row[]) {
+  function markSaved(nextRows: Row[], nextOptimalQty: number, nextOptimalTotal: number, nextBase: boolean) {
     setBaseline({
       rows: cloneRows(nextRows),
-      optimalQty,
-      optimalCutTotal,
-      isBaseModel,
+      optimalQty: nextOptimalQty,
+      optimalCutTotal: nextOptimalTotal,
+      isBaseModel: nextBase,
     });
   }
 
-  function persist(): Promise<boolean> {
+  async function persist(): Promise<boolean> {
+    if (saving) return false;
     setMessage(null);
-    return new Promise((resolve) => {
-      startTransition(async () => {
-        const cutResult = await updateProductCutRatesAction({
-          productId,
-          optimalQty,
-          tiers: rows.map((r) => ({
-            minQuantity: r.minQuantity,
-            ratePerUnit: r.cutRate,
-          })),
-        });
-        if (!cutResult.ok) {
-          setMessage(cutResult.error);
-          resolve(false);
-          return;
-        }
-        if (deliveryOp) {
-          const formData = new FormData();
-          formData.set("productId", productId);
-          formData.set("productOperationId", deliveryOp.productOperationId);
-          formData.set(
-            "rateTiersJson",
-            JSON.stringify(
-              rows.map((r) => ({
-                minQuantity: r.minQuantity,
-                ratePerUnit: r.deliveryRate,
-              })),
-            ),
-          );
-          const deliveryResult = await updateProductOperationRateTiersAction(formData);
-          if (!deliveryResult.ok) {
-            setMessage("Не вдалося зберегти доставку");
-            resolve(false);
-            return;
-          }
-        }
-        const priceResult = await updateProductCommercialPricesAction({
-          productId,
-          isBaseModel,
-          tiers: rows.map((r) => ({
-            minQuantity: r.minQuantity,
-            pricePerUnit: r.pricePerUnit,
-            showOnCard: r.showOnCard,
-            sewingMultiplier: r.sewingMultiplier,
-          })),
-        });
-        if (!priceResult.ok) {
-          setMessage(priceResult.error);
-          resolve(false);
-          return;
-        }
-        markSaved(rows);
-        setMessage(
-          hasDelivery ? "Крій, доставку і прайс збережено" : "Крій і прайс збережено",
-        );
-        router.refresh();
-        resolve(true);
+    setSaving(true);
+    const snapshotRows = cloneRows(rows);
+    const snapshotOptimalQty = optimalQty;
+    const snapshotOptimalTotal = optimalCutTotal;
+    const snapshotBaseModel = isBaseModel;
+    try {
+      const cutResult = await updateProductCutRatesAction({
+        productId,
+        optimalQty: snapshotOptimalQty,
+        tiers: snapshotRows.map((r) => ({
+          minQuantity: r.minQuantity,
+          ratePerUnit: r.cutRate,
+        })),
       });
-    });
+      if (!cutResult.ok) {
+        setMessage(cutResult.error);
+        return false;
+      }
+      if (deliveryOp) {
+        const formData = new FormData();
+        formData.set("productId", productId);
+        formData.set("productOperationId", deliveryOp.productOperationId);
+        formData.set(
+          "rateTiersJson",
+          JSON.stringify(
+            snapshotRows.map((r) => ({
+              minQuantity: r.minQuantity,
+              ratePerUnit: r.deliveryRate,
+            })),
+          ),
+        );
+        const deliveryResult = await updateProductOperationRateTiersAction(formData);
+        if (!deliveryResult.ok) {
+          setMessage("Не вдалося зберегти доставку");
+          return false;
+        }
+      }
+      const priceResult = await updateProductCommercialPricesAction({
+        productId,
+        isBaseModel: snapshotBaseModel,
+        tiers: snapshotRows.map((r) => ({
+          minQuantity: r.minQuantity,
+          pricePerUnit: r.pricePerUnit,
+          showOnCard: r.showOnCard,
+          sewingMultiplier: r.sewingMultiplier,
+        })),
+      });
+      if (!priceResult.ok) {
+        setMessage(priceResult.error);
+        return false;
+      }
+      markSaved(snapshotRows, snapshotOptimalQty, snapshotOptimalTotal, snapshotBaseModel);
+      setMessage(
+        hasDelivery ? "Крій, доставку і прайс збережено" : "Крій і прайс збережено",
+      );
+      // Soft refresh in background — do not block UI / wipe local rows.
+      void router.refresh();
+      return true;
+    } catch {
+      setMessage("Помилка збереження. Спробуйте ще раз.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
   }
 
   function discardAndLeave() {
@@ -1017,9 +1003,9 @@ export function ProductPriceCutPanel({
           onClick={() => {
             void persist();
           }}
-          disabled={pending || !isDirty}
+          disabled={saving || !isDirty}
         >
-          {pending
+          {saving
             ? "Збереження…"
             : hasDelivery
               ? "Зберегти крій, доставку і прайс"
@@ -1061,8 +1047,8 @@ export function ProductPriceCutPanel({
               <Button type="button" variant="secondary" size="sm" onClick={discardAndLeave}>
                 Вийти без змін
               </Button>
-              <Button type="button" size="sm" disabled={pending} onClick={() => void saveAndLeave()}>
-                {pending ? "Збереження…" : "Зберегти і вийти"}
+              <Button type="button" size="sm" disabled={saving} onClick={() => void saveAndLeave()}>
+                {saving ? "Збереження…" : "Зберегти і вийти"}
               </Button>
             </div>
           </div>

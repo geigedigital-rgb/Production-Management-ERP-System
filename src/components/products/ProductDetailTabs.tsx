@@ -34,7 +34,12 @@ export function ProductDetailTabs({
   price: {
     productId: string;
     isBaseModel: boolean;
-    tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard?: boolean }>;
+    tiers: Array<{
+      minQuantity: number;
+      pricePerUnit: number;
+      showOnCard?: boolean;
+      sewingMultiplier?: number | null;
+    }>;
     costHints?: TirageCostHint[];
   };
   showPricing?: boolean;
