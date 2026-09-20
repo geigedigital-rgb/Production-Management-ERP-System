@@ -15,8 +15,8 @@ function priceSourceSubtitle(quantity: number, price: ResolvedClientPrice | null
     return `Тираж ${quantity} шт · ціна з прайсу виробу (вкладка «Прайс і крій»)`;
   }
   if (price.source === "sewing_markup") {
-    const uplift = Math.round(price.sewingPerUnit * (price.sewingMultiplier - 1) * 100) / 100;
-    return `Тираж ${quantity} шт · націнка = пошив ${formatMoneyUah(price.sewingPerUnit)} × (×${price.sewingMultiplier} − 1) = +${formatMoneyUah(uplift)}`;
+    const uplift = Math.round(price.sewingPerUnit * price.sewingMultiplier * 100) / 100;
+    return `Тираж ${quantity} шт · націнка = пошив ${formatMoneyUah(price.sewingPerUnit)} × ${price.sewingMultiplier} = +${formatMoneyUah(uplift)}`;
   }
   return `Тираж ${quantity} шт · ціна = собівартість (прайсу немає, націнки немає)`;
 }
@@ -109,8 +109,8 @@ export function ProductEconomicsPanel({
                     </p>
                     <p className="mt-1 tabular-nums">
                       {formatMoneyUah(Number(calc.costPerUnit))} +{" "}
-                      {formatMoneyUah(priceSource.sewingPerUnit)} × (
-                      {priceSource.sewingMultiplier} − 1) ={" "}
+                      {formatMoneyUah(priceSource.sewingPerUnit)} ×{" "}
+                      {priceSource.sewingMultiplier} ={" "}
                       {formatMoneyUah(Number(calc.sellingPricePerUnit))}
                     </p>
                     <p className="mt-1">

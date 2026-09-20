@@ -15,6 +15,23 @@ import {
   upsertMaterialSupplierOfferAction,
 } from "@/server/domains/catalog/actions";
 import { deriveFabricPricing, type FabricPricingGlobals } from "@/lib/fabric-pricing";
+import {
+  FABRIC_DELIVERY_TYPES,
+  deliveryRateUsdPerKg,
+  fabricDeliveryTypeLabel,
+  normalizeFabricDeliveryType,
+  type FabricDeliveryTypeCode,
+} from "@/lib/fabric-delivery-types";
+import {
+  configuredSupplierDeliveryOptions,
+  resolveSupplierDeliveryRate,
+} from "@/lib/supplier-delivery-rates";
+import {
+  deriveTrimUnitPriceFromSupplier,
+  hasTrimPackQuote,
+  resolveTrimPackDeliveryUah,
+  trimConfiguredDeliveryOptions,
+} from "@/lib/trim-pack-pricing";
 import { SupplierPaletteEditor } from "@/components/catalog/SupplierPaletteEditor";
 import { formatMoneyUah, cn } from "@/lib/utils";
 import { swatchForColorLabel } from "@/lib/trim-colors";
@@ -24,7 +41,12 @@ type OfferRow = {
   isPrimary: boolean;
   supplierName: string;
   availableColors: string[];
+  deliveryType: FabricDeliveryTypeCode;
   cargoUsdPerKg: number | null;
+  npStandardUsdPerKg: number | null;
+  npVolumeUsdPerKg: number | null;
+  purchasePackPrice: number | null;
+  packDeliveryCostUah: number | null;
   priceKgUsd: number | null;
   priceKgUsdVat: number | null;
   priceMeterUahNoVat: number | null;
@@ -37,7 +59,12 @@ type OfferRow = {
 
 type OfferDraft = {
   supplierName: string;
+  deliveryType: FabricDeliveryTypeCode;
   cargoUsdPerKg: string;
+  npStandardUsdPerKg: string;
+  npVolumeUsdPerKg: string;
+  purchasePackPrice: string;
+  packDeliveryCostUah: string;
   priceKgUsd: string;
   priceKgUsdVat: string;
   priceMeterUahNoVat: string;
@@ -49,9 +76,17 @@ type OfferDraft = {
   asPrimary: boolean;
 };
 
-const emptyDraft = (asPrimary: boolean, defaultCargo: number): OfferDraft => ({
+const emptyDraft = (
+  asPrimary: boolean,
+  globals: FabricPricingGlobals,
+): OfferDraft => ({
   supplierName: "",
-  cargoUsdPerKg: String(defaultCargo),
+  deliveryType: "CARGO",
+  cargoUsdPerKg: String(deliveryRateUsdPerKg("CARGO", globals)),
+  npStandardUsdPerKg: "",
+  npVolumeUsdPerKg: "",
+  purchasePackPrice: "",
+  packDeliveryCostUah: "",
   priceKgUsd: "",
   priceKgUsdVat: "",
   priceMeterUahNoVat: "",
@@ -68,10 +103,21 @@ function numStr(value: number | null | undefined) {
   return String(value);
 }
 
-function draftFromOffer(row: OfferRow, defaultCargo: number): OfferDraft {
+function draftFromOffer(row: OfferRow): OfferDraft {
+  const hasTypedRates =
+    row.cargoUsdPerKg != null ||
+    row.npStandardUsdPerKg != null ||
+    row.npVolumeUsdPerKg != null;
   return {
     supplierName: row.supplierName,
-    cargoUsdPerKg: numStr(row.cargoUsdPerKg) || String(defaultCargo),
+    deliveryType: normalizeFabricDeliveryType(row.deliveryType),
+    cargoUsdPerKg:
+      numStr(row.cargoUsdPerKg) ||
+      (!hasTypedRates ? numStr(row.packDeliveryCostUah) : ""),
+    npStandardUsdPerKg: numStr(row.npStandardUsdPerKg),
+    npVolumeUsdPerKg: numStr(row.npVolumeUsdPerKg),
+    purchasePackPrice: numStr(row.purchasePackPrice),
+    packDeliveryCostUah: numStr(row.packDeliveryCostUah),
     priceKgUsd: numStr(row.priceKgUsd),
     priceKgUsdVat: numStr(row.priceKgUsdVat),
     priceMeterUahNoVat: numStr(row.priceMeterUahNoVat),
@@ -84,29 +130,40 @@ function draftFromOffer(row: OfferRow, defaultCargo: number): OfferDraft {
   };
 }
 
+function trimDraftRates(draft: OfferDraft) {
+  return {
+    deliveryType: draft.deliveryType,
+    cargoUsdPerKg: draft.cargoUsdPerKg ? Number(draft.cargoUsdPerKg) : null,
+    npStandardUsdPerKg: draft.npStandardUsdPerKg
+      ? Number(draft.npStandardUsdPerKg)
+      : null,
+    npVolumeUsdPerKg: draft.npVolumeUsdPerKg ? Number(draft.npVolumeUsdPerKg) : null,
+  };
+}
+
 export function MaterialSuppliersEditor({
   materialId,
   metersPerKg,
+  unitsPerPack = null,
   fabricGlobals,
   onPrimaryChanged,
   pricingKind = "fabric",
 }: {
   materialId: string;
   metersPerKg?: number | null;
+  /** Trim: шт в упаковці з картки матеріалу. */
+  unitsPerPack?: number | null;
   fabricGlobals: FabricPricingGlobals;
   onPrimaryChanged?: () => void;
   pricingKind?: "fabric" | "unit";
 }) {
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const [usdUahRate, setUsdUahRate] = useState(fabricGlobals.usdUahRate);
-  const [defaultCargo, setDefaultCargo] = useState(fabricGlobals.fabricCargoUsdPerKg);
   const [knownSuppliers, setKnownSuppliers] = useState<string[]>([]);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
-  const [draft, setDraft] = useState<OfferDraft>(() =>
-    emptyDraft(true, fabricGlobals.fabricCargoUsdPerKg),
-  );
+  const [draft, setDraft] = useState<OfferDraft>(() => emptyDraft(true, fabricGlobals));
 
   function reload() {
     startTransition(async () => {
@@ -115,14 +172,9 @@ export function MaterialSuppliersEditor({
         listSupplierNamesAction().catch(() => [] as string[]),
       ]);
       if (!result.ok) return;
-      setOffers(result.offers);
+      setOffers(result.offers as OfferRow[]);
       setUsdUahRate(result.usdUahRate);
-      setDefaultCargo(result.defaultCargoUsdPerKg);
       setKnownSuppliers(names);
-      const primary = result.offers.find((row) => row.isPrimary);
-      if (primary && editingId === null) {
-        // keep closed until user opens
-      }
     });
   }
 
@@ -131,15 +183,24 @@ export function MaterialSuppliersEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [materialId]);
 
-  const liveGlobals = useMemo<FabricPricingGlobals>(
-    () => ({
+  const liveGlobals = useMemo<FabricPricingGlobals>(() => {
+    const resolved = resolveSupplierDeliveryRate(
+      {
+        deliveryType: draft.deliveryType,
+        cargoUsdPerKg: draft.cargoUsdPerKg ? Number(draft.cargoUsdPerKg) : null,
+        npStandardUsdPerKg: draft.npStandardUsdPerKg
+          ? Number(draft.npStandardUsdPerKg)
+          : null,
+        npVolumeUsdPerKg: draft.npVolumeUsdPerKg ? Number(draft.npVolumeUsdPerKg) : null,
+      },
+      fabricGlobals,
+    );
+    return {
       ...fabricGlobals,
       usdUahRate,
-      fabricCargoUsdPerKg:
-        Number(draft.cargoUsdPerKg) >= 0 ? Number(draft.cargoUsdPerKg) : defaultCargo,
-    }),
-    [fabricGlobals, usdUahRate, draft.cargoUsdPerKg, defaultCargo],
-  );
+      fabricCargoUsdPerKg: resolved.rateUsdPerKg,
+    };
+  }, [fabricGlobals, usdUahRate, draft]);
 
   const derived = useMemo(
     () =>
@@ -164,13 +225,20 @@ export function MaterialSuppliersEditor({
   function openEdit(row: OfferRow) {
     setError(null);
     setEditingId(row.id);
-    setDraft(draftFromOffer(row, defaultCargo));
+    setDraft(draftFromOffer(row));
   }
 
   function openNew(asPrimary: boolean) {
     setError(null);
     setEditingId("new");
-    setDraft(emptyDraft(asPrimary || offers.length === 0, defaultCargo));
+    const next = emptyDraft(asPrimary || offers.length === 0, fabricGlobals);
+    if (pricingKind === "unit") {
+      next.cargoUsdPerKg = "";
+      next.npStandardUsdPerKg = "";
+      next.npVolumeUsdPerKg = "";
+      next.packDeliveryCostUah = "";
+    }
+    setDraft(next);
   }
 
   function saveDraft() {
@@ -183,8 +251,25 @@ export function MaterialSuppliersEditor({
     const threshold = draft.minWholesaleMeters.trim();
     const hasCut = cut !== "" && Number(cut) > 0;
     if (pricingKind === "unit") {
-      if (!draft.priceMeterUahNoVat.trim() || !(Number(draft.priceMeterUahNoVat) >= 0)) {
-        setError("Вкажіть ціну закупки (₴).");
+      const rates = trimDraftRates(draft);
+      const typed = resolveTrimPackDeliveryUah(rates);
+      const packQuote = {
+        unitsPerPack,
+        purchasePackPrice: draft.purchasePackPrice
+          ? Number(draft.purchasePackPrice)
+          : null,
+        packDeliveryCostUah: typed?.rateUah ?? null,
+      };
+      const fromPack = hasTrimPackQuote(packQuote)
+        ? deriveTrimUnitPriceFromSupplier({
+            unitsPerPack,
+            purchasePackPrice: packQuote.purchasePackPrice,
+            deliveryRates: rates,
+            fallbackUnitPrice: 0,
+          })
+        : null;
+      if (fromPack == null && (!draft.priceMeterUahNoVat.trim() || !(Number(draft.priceMeterUahNoVat) >= 0))) {
+        setError("Вкажіть ціну упаковки (і шт в упаковці на матеріалі) або ціну за 1 шт.");
         return;
       }
     } else {
@@ -201,16 +286,49 @@ export function MaterialSuppliersEditor({
     data.set("materialId", materialId);
     data.set("supplierNameUk", draft.supplierName.trim());
     data.set("isPrimary", draft.asPrimary || offers.length === 0 ? "1" : "0");
-    if (pricingKind === "fabric" && draft.cargoUsdPerKg) {
-      data.set("cargoUsdPerKg", draft.cargoUsdPerKg);
+    data.set("deliveryType", draft.deliveryType);
+    if (draft.cargoUsdPerKg) data.set("cargoUsdPerKg", draft.cargoUsdPerKg);
+    if (draft.npStandardUsdPerKg) {
+      data.set("npStandardUsdPerKg", draft.npStandardUsdPerKg);
+    }
+    if (draft.npVolumeUsdPerKg) data.set("npVolumeUsdPerKg", draft.npVolumeUsdPerKg);
+    if (pricingKind === "unit") {
+      if (draft.purchasePackPrice) data.set("purchasePackPrice", draft.purchasePackPrice);
+      const rates = trimDraftRates(draft);
+      const typed = resolveTrimPackDeliveryUah(rates);
+      if (typed) data.set("packDeliveryCostUah", String(typed.rateUah));
+      const unitPrice = deriveTrimUnitPriceFromSupplier({
+        unitsPerPack,
+        purchasePackPrice: draft.purchasePackPrice
+          ? Number(draft.purchasePackPrice)
+          : null,
+        deliveryRates: rates,
+        fallbackUnitPrice: draft.priceMeterUahNoVat
+          ? Number(draft.priceMeterUahNoVat)
+          : 0,
+      });
+      if (
+        hasTrimPackQuote({
+          unitsPerPack,
+          purchasePackPrice: draft.purchasePackPrice
+            ? Number(draft.purchasePackPrice)
+            : null,
+          packDeliveryCostUah: typed?.rateUah ?? null,
+        }) ||
+        draft.priceMeterUahNoVat
+      ) {
+        data.set("priceMeterUahNoVat", String(unitPrice));
+      }
     }
     if (pricingKind === "fabric" && draft.priceKgUsd) data.set("priceKgUsd", draft.priceKgUsd);
     if (pricingKind === "fabric" && draft.priceKgUsdVat) {
       data.set("priceKgUsdVat", draft.priceKgUsdVat);
     }
-    if (draft.priceMeterUahNoVat) data.set("priceMeterUahNoVat", draft.priceMeterUahNoVat);
-    else if (derived.priceMeterUahNoVat != null) {
-      data.set("priceMeterUahNoVat", String(derived.priceMeterUahNoVat));
+    if (pricingKind === "fabric") {
+      if (draft.priceMeterUahNoVat) data.set("priceMeterUahNoVat", draft.priceMeterUahNoVat);
+      else if (derived.priceMeterUahNoVat != null) {
+        data.set("priceMeterUahNoVat", String(derived.priceMeterUahNoVat));
+      }
     }
     if (draft.priceMeterUahVat) data.set("priceMeterUahVat", draft.priceMeterUahVat);
     else if (derived.priceMeterUahVat != null) {
@@ -279,13 +397,33 @@ export function MaterialSuppliersEditor({
           Постачальники та закупівля
         </h4>
         <p className="type-caption mt-0.5">
-          Собівартість у каталозі = умови <strong>основного</strong> постачальника. Тип доставки
-          матеріалу (CARGO / НП) задається в блоці вище — тут можна лише override $/кг для
-          конкретного постачальника. У кожного постачальника — своя палітра кольорів.
+          {pricingKind === "unit" ? (
+            <>
+              Собівартість у каталозі = умови <strong>основного</strong> постачальника. Ціна
+              упаковки й доставка упаковки — окремо по кожному постачальнику; у замовленні /
+              виробі оберете постачальника — підставляться його значення.
+            </>
+          ) : (
+            <>
+              Собівартість у каталозі = умови <strong>основного</strong> постачальника. Доставка
+              задається тут: пропишіть тарифи ($/кг) лише для тих типів, якими реально возите —
+              у замовленні будуть доступні тільки вони. У кожного постачальника — своя палітра
+              кольорів.
+            </>
+          )}
         </p>
-        <p className="type-caption mt-1 tabular">
-          Курс ₴/$: {usdUahRate} · з налаштувань ціноутворення (не змінюється тут)
-        </p>
+        {pricingKind === "fabric" ? (
+          <p className="type-caption mt-1 tabular">
+            Курс ₴/$: {usdUahRate} · з налаштувань ціноутворення (не змінюється тут)
+          </p>
+        ) : unitsPerPack != null && unitsPerPack > 0 ? (
+          <p className="type-caption mt-1 tabular">Упаковка матеріалу: {unitsPerPack} шт</p>
+        ) : (
+          <p className="type-caption mt-1 text-[var(--color-warning-text)]">
+            Спочатку збережіть «Шт в упаковці» в картці матеріалу — тоді ₴/од. порахується з
+            ціни упаковки та тарифів доставки (CARGO / НП).
+          </p>
+        )}
       </div>
 
       {error ? <Banner tone="danger">{error}</Banner> : null}
@@ -316,6 +454,27 @@ export function MaterialSuppliersEditor({
                     {pricingKind === "fabric" ? "/м" : ""}
                   </span>
                 ) : null}
+                {pricingKind === "fabric"
+                  ? configuredSupplierDeliveryOptions({
+                      deliveryType: row.deliveryType,
+                      cargoUsdPerKg: row.cargoUsdPerKg,
+                      npStandardUsdPerKg: row.npStandardUsdPerKg,
+                      npVolumeUsdPerKg: row.npVolumeUsdPerKg,
+                    }).map((opt) => (
+                      <span key={opt.type} className="type-caption ml-2 tabular">
+                        {opt.label} · {opt.rateUsdPerKg} $/кг
+                      </span>
+                    ))
+                  : trimConfiguredDeliveryOptions({
+                      deliveryType: row.deliveryType,
+                      cargoUsdPerKg: row.cargoUsdPerKg,
+                      npStandardUsdPerKg: row.npStandardUsdPerKg,
+                      npVolumeUsdPerKg: row.npVolumeUsdPerKg,
+                    }).map((opt) => (
+                      <span key={opt.type} className="type-caption ml-2 tabular">
+                        {opt.label} · {opt.rateUah} ₴/уп.
+                      </span>
+                    ))}
                 {(row.availableColors?.length ?? 0) > 0 ? (
                   <span className="type-caption ml-2 inline-flex flex-wrap items-center gap-1">
                     {row.availableColors.slice(0, 6).map((label) => {
@@ -474,21 +633,129 @@ export function MaterialSuppliersEditor({
           </FormGroup>
 
           {pricingKind === "unit" ? (
-            <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={2} compact>
+            <FormGroup label="Закупівля і доставка" icon={<IconPurchaseKg size={14} />} columns={3} compact>
               <Input
-                label="Ціна закупки"
+                label="Ціна упаковки"
                 type="number"
                 min={0}
                 step="0.01"
                 suffix="₴"
+                optional
+                value={draft.purchasePackPrice}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, purchasePackPrice: event.target.value }))
+                }
+                hint={
+                  unitsPerPack != null && unitsPerPack > 0
+                    ? `На ${unitsPerPack} шт`
+                    : "Спочатку збережіть шт в упаковці"
+                }
+              />
+              <Select
+                label="Тип для собівартості"
                 required
-                value={draft.priceMeterUahNoVat}
+                value={draft.deliveryType}
+                onChange={(event) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    deliveryType: normalizeFabricDeliveryType(event.target.value),
+                  }))
+                }
+                hint="Який тариф береться в ₴/од."
+              >
+                {FABRIC_DELIVERY_TYPES.map((code) => (
+                  <option key={code} value={code}>
+                    {fabricDeliveryTypeLabel(code)}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                label="CARGO"
+                type="number"
+                min={0}
+                step="0.01"
+                suffix="₴/уп."
+                optional
+                value={draft.cargoUsdPerKg}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, cargoUsdPerKg: event.target.value }))
+                }
+              />
+              <Input
+                label="НП стандарт"
+                type="number"
+                min={0}
+                step="0.01"
+                suffix="₴/уп."
+                optional
+                value={draft.npStandardUsdPerKg}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, npStandardUsdPerKg: event.target.value }))
+                }
+              />
+              <Input
+                label="НП обʼємні"
+                type="number"
+                min={0}
+                step="0.01"
+                suffix="₴/уп."
+                optional
+                value={draft.npVolumeUsdPerKg}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, npVolumeUsdPerKg: event.target.value }))
+                }
+                hint="Порожнє поле = тип недоступний у замовленні"
+              />
+              <Input
+                label="Собівартість / од."
+                type="number"
+                min={0}
+                step="0.01"
+                suffix="₴"
+                readOnly={hasTrimPackQuote({
+                  unitsPerPack,
+                  purchasePackPrice: draft.purchasePackPrice
+                    ? Number(draft.purchasePackPrice)
+                    : null,
+                  packDeliveryCostUah:
+                    resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ?? null,
+                })}
+                value={
+                  hasTrimPackQuote({
+                    unitsPerPack,
+                    purchasePackPrice: draft.purchasePackPrice
+                      ? Number(draft.purchasePackPrice)
+                      : null,
+                    packDeliveryCostUah:
+                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ?? null,
+                  })
+                    ? String(
+                        deriveTrimUnitPriceFromSupplier({
+                          unitsPerPack,
+                          purchasePackPrice: Number(draft.purchasePackPrice),
+                          deliveryRates: trimDraftRates(draft),
+                        }),
+                      )
+                    : draft.priceMeterUahNoVat
+                }
                 onChange={(event) =>
                   setDraft((prev) => ({
                     ...prev,
                     priceMeterUahNoVat: event.target.value,
                     priceMeterUahVat: event.target.value,
                   }))
+                }
+                hint={
+                  hasTrimPackQuote({
+                    unitsPerPack,
+                    purchasePackPrice: draft.purchasePackPrice
+                      ? Number(draft.purchasePackPrice)
+                      : null,
+                    packDeliveryCostUah:
+                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ?? null,
+                  })
+                    ? `(ціна + доставка) ÷ ${unitsPerPack} шт`
+                    : "Або вручну ₴ за 1 шт без упаковки"
                 }
               />
               <Input
@@ -502,23 +769,46 @@ export function MaterialSuppliersEditor({
               />
             </FormGroup>
           ) : (
-          <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
+          <FormGroup label="Доставка і закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
+            <Select
+              label="Тип для собівартості"
+              required
+              value={draft.deliveryType}
+              onChange={(event) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  deliveryType: normalizeFabricDeliveryType(event.target.value),
+                }))
+              }
+              hint="Який тариф береться в ₴/м каталогу"
+            >
+              {FABRIC_DELIVERY_TYPES.map((code) => (
+                <option key={code} value={code}>
+                  {fabricDeliveryTypeLabel(code)}
+                </option>
+              ))}
+            </Select>
             <Input
-              label="Доставка"
+              label="CARGO"
               type="number"
               min={0}
               step="0.01"
               suffix="$/кг"
+              optional
+              placeholder={String(deliveryRateUsdPerKg("CARGO", fabricGlobals))}
               value={draft.cargoUsdPerKg}
               onChange={(event) => {
                 const value = event.target.value;
-                setDraft((prev) => ({ ...prev, cargoUsdPerKg: value }));
-                if (draft.priceKgUsd) {
+                setDraft((prev) => {
+                  const next = { ...prev, cargoUsdPerKg: value };
+                  if (!draft.priceKgUsd || draft.deliveryType !== "CARGO") return next;
                   const auto = deriveFabricPricing(
                     {
                       metersPerKg: metersPerKg ?? null,
                       priceKgUsd: Number(draft.priceKgUsd),
-                      priceKgUsdVat: draft.priceKgUsdVat ? Number(draft.priceKgUsdVat) : null,
+                      priceKgUsdVat: draft.priceKgUsdVat
+                        ? Number(draft.priceKgUsdVat)
+                        : null,
                     },
                     {
                       ...liveGlobals,
@@ -526,20 +816,46 @@ export function MaterialSuppliersEditor({
                         Number(value) >= 0 ? Number(value) : liveGlobals.fabricCargoUsdPerKg,
                     },
                   );
-                  if (auto.priceMeterUahNoVat != null) {
-                    setDraft((prev) => ({
-                      ...prev,
-                      cargoUsdPerKg: value,
-                      priceMeterUahNoVat: String(auto.priceMeterUahNoVat),
-                      priceMeterUahVat:
-                        auto.priceMeterUahVat != null
-                          ? String(auto.priceMeterUahVat)
-                          : prev.priceMeterUahVat,
-                    }));
-                  }
-                }
+                  return {
+                    ...next,
+                    priceMeterUahNoVat:
+                      auto.priceMeterUahNoVat != null
+                        ? String(auto.priceMeterUahNoVat)
+                        : prev.priceMeterUahNoVat,
+                    priceMeterUahVat:
+                      auto.priceMeterUahVat != null
+                        ? String(auto.priceMeterUahVat)
+                        : prev.priceMeterUahVat,
+                  };
+                });
               }}
-              hint={`Override для цього постачальника · база компанії: ${defaultCargo}`}
+            />
+            <Input
+              label="НП стандарт"
+              type="number"
+              min={0}
+              step="0.01"
+              suffix="$/кг"
+              optional
+              placeholder={String(deliveryRateUsdPerKg("NP_STANDARD", fabricGlobals))}
+              value={draft.npStandardUsdPerKg}
+              onChange={(event) =>
+                setDraft((prev) => ({ ...prev, npStandardUsdPerKg: event.target.value }))
+              }
+            />
+            <Input
+              label="НП обʼємні"
+              type="number"
+              min={0}
+              step="0.01"
+              suffix="$/кг"
+              optional
+              placeholder={String(deliveryRateUsdPerKg("NP_VOLUME", fabricGlobals))}
+              value={draft.npVolumeUsdPerKg}
+              onChange={(event) =>
+                setDraft((prev) => ({ ...prev, npVolumeUsdPerKg: event.target.value }))
+              }
+              hint="Порожнє поле = тип недоступний у замовленні"
             />
             <Input
               label="Ціна"

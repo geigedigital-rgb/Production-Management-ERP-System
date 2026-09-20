@@ -2,8 +2,8 @@
  * Owner rule: commercial uplift is tied to sewing labor × tirage multiplier,
  * not a % of total product cost (fabric must not inflate selling proportionally).
  *
- * Suggested client price = costPerUnit + sewingPerUnit × (multiplier − 1)
- * i.e. replace sewing cost with sewing × multiplier, keep materials/cut/other.
+ * Suggested client price = costPerUnit + sewingPerUnit × multiplier
+ * (coefficient as entered — no “− 1”).
  */
 
 export function isSewOperationName(nameUk: string | null | undefined) {
@@ -19,7 +19,7 @@ export function suggestSellingFromSewingMarkup(args: {
   const cost = Number.isFinite(args.costPerUnit) ? args.costPerUnit : 0;
   const sewing = Number.isFinite(args.sewingPerUnit) ? Math.max(0, args.sewingPerUnit) : 0;
   const mult = Number.isFinite(args.multiplier) ? Math.max(0, args.multiplier) : 1;
-  const suggested = cost + sewing * (mult - 1);
+  const suggested = cost + sewing * mult;
   return Math.round(Math.max(0, suggested) * 100) / 100;
 }
 

@@ -154,7 +154,10 @@ export async function createMaterialAction(formData: FormData) {
       const drafts = JSON.parse(offersRaw) as Array<{
         isPrimary?: boolean;
         supplierName?: string;
+        deliveryType?: string;
         cargoUsdPerKg?: string;
+        npStandardUsdPerKg?: string;
+        npVolumeUsdPerKg?: string;
         priceKgUsd?: string;
         priceKgUsdVat?: string;
         priceMeterUahNoVat?: string;
@@ -180,7 +183,14 @@ export async function createMaterialAction(formData: FormData) {
             isPrimary: Boolean(draft.isPrimary),
             metersPerKg:
               metersPerKg != null && Number.isFinite(metersPerKg) ? metersPerKg : null,
+            deliveryType: draft.deliveryType || null,
             cargoUsdPerKg: draft.cargoUsdPerKg ? Number(draft.cargoUsdPerKg) : null,
+            npStandardUsdPerKg: draft.npStandardUsdPerKg
+              ? Number(draft.npStandardUsdPerKg)
+              : null,
+            npVolumeUsdPerKg: draft.npVolumeUsdPerKg
+              ? Number(draft.npVolumeUsdPerKg)
+              : null,
             priceKgUsd: draft.priceKgUsd ? Number(draft.priceKgUsd) : null,
             priceKgUsdVat: draft.priceKgUsdVat ? Number(draft.priceKgUsdVat) : null,
             priceMeterUahNoVat: draft.priceMeterUahNoVat
@@ -620,8 +630,21 @@ export async function upsertMaterialSupplierOfferAction(formData: FormData) {
     metersPerKg: formData.get("metersPerKg")
       ? Number(formData.get("metersPerKg"))
       : null,
+    deliveryType: String(formData.get("deliveryType") ?? "") || null,
     cargoUsdPerKg: formData.get("cargoUsdPerKg")
       ? Number(formData.get("cargoUsdPerKg"))
+      : null,
+    npStandardUsdPerKg: formData.get("npStandardUsdPerKg")
+      ? Number(formData.get("npStandardUsdPerKg"))
+      : null,
+    npVolumeUsdPerKg: formData.get("npVolumeUsdPerKg")
+      ? Number(formData.get("npVolumeUsdPerKg"))
+      : null,
+    purchasePackPrice: formData.get("purchasePackPrice")
+      ? Number(formData.get("purchasePackPrice"))
+      : null,
+    packDeliveryCostUah: formData.get("packDeliveryCostUah")
+      ? Number(formData.get("packDeliveryCostUah"))
       : null,
     priceKgUsd: formData.get("priceKgUsd") ? Number(formData.get("priceKgUsd")) : null,
     priceKgUsdVat: formData.get("priceKgUsdVat")
@@ -702,7 +725,16 @@ export async function listMaterialSupplierOffersAction(materialId: string) {
       isPrimary: row.isPrimary,
       supplierName: row.supplier.nameUk,
       availableColors: row.availableColors ?? [],
+      deliveryType: row.deliveryType,
       cargoUsdPerKg: row.cargoUsdPerKg != null ? Number(row.cargoUsdPerKg) : null,
+      npStandardUsdPerKg:
+        row.npStandardUsdPerKg != null ? Number(row.npStandardUsdPerKg) : null,
+      npVolumeUsdPerKg:
+        row.npVolumeUsdPerKg != null ? Number(row.npVolumeUsdPerKg) : null,
+      purchasePackPrice:
+        row.purchasePackPrice != null ? Number(row.purchasePackPrice) : null,
+      packDeliveryCostUah:
+        row.packDeliveryCostUah != null ? Number(row.packDeliveryCostUah) : null,
       priceKgUsd: row.priceKgUsd != null ? Number(row.priceKgUsd) : null,
       priceKgUsdVat: row.priceKgUsdVat != null ? Number(row.priceKgUsdVat) : null,
       priceMeterUahNoVat:

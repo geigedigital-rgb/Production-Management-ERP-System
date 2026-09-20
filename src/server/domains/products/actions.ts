@@ -603,7 +603,12 @@ export async function updateProductCommercialPricesAction(
     | {
         productId: string;
         isBaseModel?: boolean;
-        tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+        tiers: Array<{
+          minQuantity: number;
+          pricePerUnit: number;
+          showOnCard?: boolean;
+          sewingMultiplier?: number | null;
+        }>;
       },
 ) {
   const session = await auth();
@@ -612,20 +617,31 @@ export async function updateProductCommercialPricesAction(
 
   let productId: string;
   let isBaseModel: boolean;
-  let tiers: Array<{ minQuantity: number; pricePerUnit: number }>;
+  let tiers: Array<{
+    minQuantity: number;
+    pricePerUnit: number;
+    showOnCard?: boolean;
+    sewingMultiplier?: number | null;
+  }>;
 
   if (input instanceof FormData) {
     productId = String(input.get("productId") ?? "");
     isBaseModel = input.get("isBaseModel") === "1";
     const minQuantities = input.getAll("tierMinQuantity").map(String);
     const prices = input.getAll("tierPrice").map(String);
+    const multipliers = input.getAll("tierSewingMultiplier").map(String);
     tiers = [];
     for (let i = 0; i < minQuantities.length; i++) {
       const minQuantity = Number(minQuantities[i]);
       const pricePerUnit = Number(prices[i]);
+      const sewingRaw = multipliers[i];
+      const sewingMultiplier =
+        sewingRaw != null && sewingRaw !== "" && Number.isFinite(Number(sewingRaw))
+          ? Number(sewingRaw)
+          : null;
       if (!Number.isFinite(minQuantity) || !Number.isFinite(pricePerUnit)) continue;
       if (minQuantity <= 0 || pricePerUnit < 0) continue;
-      tiers.push({ minQuantity, pricePerUnit });
+      tiers.push({ minQuantity, pricePerUnit, sewingMultiplier });
     }
   } else {
     productId = input.productId;

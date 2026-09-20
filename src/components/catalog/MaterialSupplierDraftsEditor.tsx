@@ -15,6 +15,7 @@ import {
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
+import { resolveSupplierDeliveryRate } from "@/lib/supplier-delivery-rates";
 import { formatMoneyUah, cn } from "@/lib/utils";
 import { swatchForColorLabel } from "@/lib/trim-colors";
 import { getSupplierPaletteAction } from "@/server/domains/catalog/actions";
@@ -25,6 +26,8 @@ export type MaterialSupplierOfferDraft = {
   supplierName: string;
   deliveryType: FabricDeliveryTypeCode;
   cargoUsdPerKg: string;
+  npStandardUsdPerKg: string;
+  npVolumeUsdPerKg: string;
   priceKgUsd: string;
   priceKgUsdVat: string;
   priceMeterUahNoVat: string;
@@ -49,6 +52,8 @@ function emptyForm(
     supplierName: "",
     deliveryType,
     cargoUsdPerKg: String(deliveryRateUsdPerKg(deliveryType, fabricGlobals)),
+    npStandardUsdPerKg: "",
+    npVolumeUsdPerKg: "",
     priceKgUsd: "",
     priceKgUsdVat: "",
     priceMeterUahNoVat: "",
@@ -66,6 +71,8 @@ function formFromOffer(row: MaterialSupplierOfferDraft): DraftForm {
     supplierName: row.supplierName,
     deliveryType: row.deliveryType,
     cargoUsdPerKg: row.cargoUsdPerKg,
+    npStandardUsdPerKg: row.npStandardUsdPerKg ?? "",
+    npVolumeUsdPerKg: row.npVolumeUsdPerKg ?? "",
     priceKgUsd: row.priceKgUsd,
     priceKgUsdVat: row.priceKgUsdVat,
     priceMeterUahNoVat: row.priceMeterUahNoVat,
@@ -108,16 +115,20 @@ export function MaterialSupplierDraftsEditor({
     emptyForm(true, defaultDeliveryType, fabricGlobals),
   );
 
-  const liveGlobals = useMemo<FabricPricingGlobals>(
-    () => ({
-      ...fabricGlobals,
-      fabricCargoUsdPerKg:
-        Number(draft.cargoUsdPerKg) >= 0
-          ? Number(draft.cargoUsdPerKg)
-          : fabricGlobals.fabricCargoUsdPerKg,
-    }),
-    [fabricGlobals, draft.cargoUsdPerKg],
-  );
+  const liveGlobals = useMemo<FabricPricingGlobals>(() => {
+    const resolved = resolveSupplierDeliveryRate(
+      {
+        deliveryType: draft.deliveryType,
+        cargoUsdPerKg: draft.cargoUsdPerKg ? Number(draft.cargoUsdPerKg) : null,
+        npStandardUsdPerKg: draft.npStandardUsdPerKg
+          ? Number(draft.npStandardUsdPerKg)
+          : null,
+        npVolumeUsdPerKg: draft.npVolumeUsdPerKg ? Number(draft.npVolumeUsdPerKg) : null,
+      },
+      fabricGlobals,
+    );
+    return { ...fabricGlobals, fabricCargoUsdPerKg: resolved.rateUsdPerKg };
+  }, [fabricGlobals, draft]);
 
   const derived = useMemo(
     () =>
@@ -157,10 +168,18 @@ export function MaterialSupplierDraftsEditor({
   }
 
   function applyDeliveryType(code: FabricDeliveryTypeCode) {
-    const rate = deliveryRateUsdPerKg(code, fabricGlobals);
     setDraft((prev) => {
-      const nextCargo = String(rate);
-      const next = { ...prev, deliveryType: code, cargoUsdPerKg: nextCargo };
+      const fieldRate =
+        code === "NP_STANDARD"
+          ? prev.npStandardUsdPerKg
+          : code === "NP_VOLUME"
+            ? prev.npVolumeUsdPerKg
+            : prev.cargoUsdPerKg;
+      const rate =
+        fieldRate && Number(fieldRate) >= 0
+          ? Number(fieldRate)
+          : deliveryRateUsdPerKg(code, fabricGlobals);
+      const next = { ...prev, deliveryType: code };
       if (!prev.priceKgUsd) return next;
       const auto = deriveFabricPricing(
         {
@@ -217,6 +236,8 @@ export function MaterialSupplierDraftsEditor({
       supplierName: draft.supplierName.trim(),
       deliveryType: draft.deliveryType,
       cargoUsdPerKg: draft.cargoUsdPerKg,
+      npStandardUsdPerKg: draft.npStandardUsdPerKg,
+      npVolumeUsdPerKg: draft.npVolumeUsdPerKg,
       priceKgUsd: draft.priceKgUsd,
       priceKgUsdVat: draft.priceKgUsdVat,
       priceMeterUahNoVat:
@@ -482,12 +503,13 @@ export function MaterialSupplierDraftsEditor({
           ) : (
           <FormGroup label="Доставка і закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
             <Select
-              label="Тип доставки"
+              label="Тип для собівартості"
               required
               value={draft.deliveryType}
               onChange={(event) =>
                 applyDeliveryType(normalizeFabricDeliveryType(event.target.value))
               }
+              hint="Який тариф береться в ₴/м каталогу"
             >
               {FABRIC_DELIVERY_TYPES.map((code) => (
                 <option key={code} value={code}>
@@ -496,43 +518,44 @@ export function MaterialSupplierDraftsEditor({
               ))}
             </Select>
             <Input
-              label="Тариф"
+              label="CARGO"
               type="number"
               min={0}
               step="0.01"
               suffix="$/кг"
+              optional
+              placeholder={String(deliveryRateUsdPerKg("CARGO", fabricGlobals))}
               value={draft.cargoUsdPerKg}
-              onChange={(event) => {
-                const value = event.target.value;
-                setDraft((prev) => ({ ...prev, cargoUsdPerKg: value }));
-                if (draft.priceKgUsd) {
-                  const auto = deriveFabricPricing(
-                    {
-                      metersPerKg: metersPerKg ?? null,
-                      priceKgUsd: Number(draft.priceKgUsd),
-                      priceKgUsdVat: draft.priceKgUsdVat
-                        ? Number(draft.priceKgUsdVat)
-                        : null,
-                    },
-                    {
-                      ...liveGlobals,
-                      fabricCargoUsdPerKg:
-                        Number(value) >= 0 ? Number(value) : liveGlobals.fabricCargoUsdPerKg,
-                    },
-                  );
-                  if (auto.priceMeterUahNoVat != null) {
-                    setDraft((prev) => ({
-                      ...prev,
-                      cargoUsdPerKg: value,
-                      priceMeterUahNoVat: String(auto.priceMeterUahNoVat),
-                      priceMeterUahVat:
-                        auto.priceMeterUahVat != null
-                          ? String(auto.priceMeterUahVat)
-                          : prev.priceMeterUahVat,
-                    }));
-                  }
-                }
-              }}
+              onChange={(event) =>
+                setDraft((prev) => ({ ...prev, cargoUsdPerKg: event.target.value }))
+              }
+            />
+            <Input
+              label="НП стандарт"
+              type="number"
+              min={0}
+              step="0.01"
+              suffix="$/кг"
+              optional
+              placeholder={String(deliveryRateUsdPerKg("NP_STANDARD", fabricGlobals))}
+              value={draft.npStandardUsdPerKg}
+              onChange={(event) =>
+                setDraft((prev) => ({ ...prev, npStandardUsdPerKg: event.target.value }))
+              }
+            />
+            <Input
+              label="НП обʼємні"
+              type="number"
+              min={0}
+              step="0.01"
+              suffix="$/кг"
+              optional
+              placeholder={String(deliveryRateUsdPerKg("NP_VOLUME", fabricGlobals))}
+              value={draft.npVolumeUsdPerKg}
+              onChange={(event) =>
+                setDraft((prev) => ({ ...prev, npVolumeUsdPerKg: event.target.value }))
+              }
+              hint="Порожнє = тип недоступний у замовленні"
             />
             <Input
               label="Ціна"

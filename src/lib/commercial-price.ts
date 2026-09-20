@@ -7,6 +7,7 @@ export type CommercialPriceTier = {
   minQuantity: number;
   pricePerUnit: number;
   showOnCard?: boolean;
+  sewingMultiplier?: number | null;
 };
 
 export function resolveCommercialPricePerUnit(args: {
@@ -31,12 +32,38 @@ export function resolveCommercialPricePerUnit(args: {
   return price;
 }
 
+/** Ladder × for quantity — same step rule as price tiers. */
+export function resolveSewingMultiplierFromTiers(
+  quantity: number,
+  tiers: Array<{ minQuantity: number; sewingMultiplier?: number | null }>,
+): number | null {
+  const qty = Math.max(0, Math.floor(quantity));
+  if (qty <= 0) return null;
+  const sorted = [...tiers]
+    .filter(
+      (tier) =>
+        tier.minQuantity > 0 &&
+        tier.sewingMultiplier != null &&
+        Number.isFinite(Number(tier.sewingMultiplier)) &&
+        Number(tier.sewingMultiplier) > 0,
+    )
+    .sort((a, b) => a.minQuantity - b.minQuantity);
+  if (sorted.length === 0) return null;
+  let mult: number | null = null;
+  for (const tier of sorted) {
+    if (tier.minQuantity <= qty) mult = Number(tier.sewingMultiplier);
+    else break;
+  }
+  return mult;
+}
+
 export type CommercialPriceProduct = {
   isBaseModel?: boolean;
   commercialPriceTiers: Array<{
     minQuantity: number;
     pricePerUnit: unknown;
     showOnCard?: boolean | null;
+    sewingMultiplier?: unknown;
   }>;
 };
 
@@ -47,11 +74,19 @@ export function commercialPriceTiersFromProduct(
   // isBaseModel is only a catalog flag («базова модель»), not a gate for pricing.
   if (!product?.commercialPriceTiers?.length) return [];
   return product.commercialPriceTiers
-    .map((tier) => ({
-      minQuantity: tier.minQuantity,
-      pricePerUnit: Number(tier.pricePerUnit),
-      showOnCard: tier.showOnCard === true,
-    }))
+    .map((tier) => {
+      const sewingRaw = tier.sewingMultiplier;
+      const sewingMultiplier =
+        sewingRaw != null && Number.isFinite(Number(sewingRaw)) && Number(sewingRaw) > 0
+          ? Number(sewingRaw)
+          : null;
+      return {
+        minQuantity: tier.minQuantity,
+        pricePerUnit: Number(tier.pricePerUnit),
+        showOnCard: tier.showOnCard === true,
+        sewingMultiplier,
+      };
+    })
     .filter((tier) => tier.minQuantity > 0 && Number.isFinite(tier.pricePerUnit) && tier.pricePerUnit > 0);
 }
 

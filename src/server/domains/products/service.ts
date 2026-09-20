@@ -1067,7 +1067,12 @@ export function parseCommercialPriceTiersInput(input: {
   | {
       ok: true;
       isBaseModel: boolean;
-      tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard: boolean }>;
+      tiers: Array<{
+        minQuantity: number;
+        pricePerUnit: number;
+        showOnCard: boolean;
+        sewingMultiplier: number | null;
+      }>;
     }
   | { ok: false } {
   const isBaseModel =
@@ -1075,7 +1080,12 @@ export function parseCommercialPriceTiersInput(input: {
     input.isBaseModel === "1" ||
     input.isBaseModel === "true";
 
-  const tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard: boolean }> = [];
+  const tiers: Array<{
+    minQuantity: number;
+    pricePerUnit: number;
+    showOnCard: boolean;
+    sewingMultiplier: number | null;
+  }> = [];
   if (Array.isArray(input.tiers)) {
     for (const row of input.tiers) {
       if (!row || typeof row !== "object") continue;
@@ -1085,9 +1095,17 @@ export function parseCommercialPriceTiersInput(input: {
         (row as { showOnCard?: unknown }).showOnCard === true ||
         (row as { showOnCard?: unknown }).showOnCard === "1" ||
         (row as { showOnCard?: unknown }).showOnCard === "true";
+      const sewingRaw = (row as { sewingMultiplier?: unknown }).sewingMultiplier;
+      const sewingMultiplier =
+        sewingRaw != null &&
+        sewingRaw !== "" &&
+        Number.isFinite(Number(sewingRaw)) &&
+        Number(sewingRaw) > 0
+          ? Number(sewingRaw)
+          : null;
       if (!Number.isFinite(minQuantity) || !Number.isFinite(pricePerUnit)) continue;
       if (minQuantity <= 0 || pricePerUnit < 0) continue;
-      tiers.push({ minQuantity, pricePerUnit, showOnCard });
+      tiers.push({ minQuantity, pricePerUnit, showOnCard, sewingMultiplier });
     }
   }
 
@@ -1097,17 +1115,32 @@ export function parseCommercialPriceTiersInput(input: {
 export async function setProductCommercialPrices(input: {
   productId: string;
   isBaseModel: boolean;
-  tiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard?: boolean }>;
+  tiers: Array<{
+    minQuantity: number;
+    pricePerUnit: number;
+    showOnCard?: boolean;
+    sewingMultiplier?: number | null;
+  }>;
 }) {
   const tiers = input.tiers
     .filter((tier) => tier.minQuantity > 0 && tier.pricePerUnit >= 0)
     .sort((a, b) => a.minQuantity - b.minQuantity);
 
-  const unique = new Map<number, { pricePerUnit: number; showOnCard: boolean }>();
+  const unique = new Map<
+    number,
+    { pricePerUnit: number; showOnCard: boolean; sewingMultiplier: number | null }
+  >();
   for (const tier of tiers) {
+    const sewing =
+      tier.sewingMultiplier != null &&
+      Number.isFinite(Number(tier.sewingMultiplier)) &&
+      Number(tier.sewingMultiplier) > 0
+        ? Number(tier.sewingMultiplier)
+        : null;
     unique.set(tier.minQuantity, {
       pricePerUnit: tier.pricePerUnit,
       showOnCard: tier.showOnCard === true,
+      sewingMultiplier: sewing,
     });
   }
 
@@ -1124,6 +1157,7 @@ export async function setProductCommercialPrices(input: {
           minQuantity,
           pricePerUnit: row.pricePerUnit,
           showOnCard: row.showOnCard,
+          sewingMultiplier: row.sewingMultiplier,
         })),
       });
     }
@@ -1147,6 +1181,17 @@ export async function setProductCutRates(input: {
   const derivedOptimal = sortedQtys.length > 0 ? sortedQtys[sortedQtys.length - 1]! : null;
   const optimalQty =
     input.optimalQty != null && input.optimalQty > 0 ? input.optimalQty : derivedOptimal;
+
+  // Floor: above optimal tirage, ₴/шт must not fall below the optimal row rate.
+  if (optimalQty != null && unique.has(optimalQty)) {
+    const floorRate = unique.get(optimalQty)!;
+    for (const qty of sortedQtys) {
+      if (qty > optimalQty) {
+        const rate = unique.get(qty)!;
+        if (rate < floorRate) unique.set(qty, floorRate);
+      }
+    }
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.product.update({
@@ -1299,6 +1344,7 @@ export async function duplicateProduct(
           minQuantity: tier.minQuantity,
           pricePerUnit: tier.pricePerUnit,
           showOnCard: tier.showOnCard,
+          sewingMultiplier: tier.sewingMultiplier,
         })),
       },
     },

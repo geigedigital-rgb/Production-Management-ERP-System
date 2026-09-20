@@ -741,33 +741,42 @@ function MaterialFields({
               step="1"
               min="1"
               optional
-              hint="Напр. гудзики — 1000 шт"
+              hint="Напр. гудзики — 1000 шт (спільне для всіх постачальників)"
               value={unitsPerPack}
               onChange={(event) => setUnitsPerPack(event.target.value)}
             />
-            <Input
-              name="purchasePackPrice"
-              label="Ціна упаковки"
-              type="number"
-              step="0.01"
-              min="0"
-              optional
-              suffix="₴"
-              value={purchasePackPrice}
-              onChange={(event) => setPurchasePackPrice(event.target.value)}
-            />
-            <Input
-              name="packDeliveryCostUah"
-              label="Доставка упаковки"
-              type="number"
-              step="0.01"
-              min="0"
-              optional
-              suffix="₴"
-              hint="Теж на всю упаковку"
-              value={packDeliveryCostUah}
-              onChange={(event) => setPackDeliveryCostUah(event.target.value)}
-            />
+            {!managePricingSeparately ? (
+              <>
+                <Input
+                  name="purchasePackPrice"
+                  label="Ціна упаковки"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  optional
+                  suffix="₴"
+                  value={purchasePackPrice}
+                  onChange={(event) => setPurchasePackPrice(event.target.value)}
+                />
+                <Input
+                  name="packDeliveryCostUah"
+                  label="Доставка упаковки"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  optional
+                  suffix="₴"
+                  hint="Краще задавати в умовах постачальника"
+                  value={packDeliveryCostUah}
+                  onChange={(event) => setPackDeliveryCostUah(event.target.value)}
+                />
+              </>
+            ) : (
+              <>
+                <input type="hidden" name="purchasePackPrice" value={purchasePackPrice} />
+                <input type="hidden" name="packDeliveryCostUah" value={packDeliveryCostUah} />
+              </>
+            )}
           </>
         ) : null}
         <Input
@@ -779,9 +788,7 @@ function MaterialFields({
                 : "Собівартість"
               : type === "FABRIC"
                 ? "Собівартість"
-                : trimPackActive
-                  ? "Собівартість / од."
-                  : "Собівартість"
+                : "Собівартість / од."
           }
           type="number"
           step="0.01"
@@ -797,20 +804,27 @@ function MaterialFields({
                 : "₴"
           }
           value={purchaseDisplay}
-          readOnly={purchaseReadOnly}
-          tabIndex={purchaseReadOnly ? -1 : undefined}
+          readOnly={purchaseReadOnly || (type !== "FABRIC" && managePricingSeparately)}
+          tabIndex={
+            purchaseReadOnly || (type !== "FABRIC" && managePricingSeparately) ? -1 : undefined
+          }
           hint={
-            trimPackActive
-              ? `(ціна + доставка) ÷ ${Math.floor(Number(unitsPerPack))} шт`
-              : type !== "FABRIC"
-                ? "Або вкажіть упаковку вище — ₴/од. порахуємо самі"
-                : undefined
+            type !== "FABRIC" && managePricingSeparately
+              ? "З умов основного постачальника (ціна + доставка упаковки)"
+              : trimPackActive
+                ? `(ціна + доставка) ÷ ${Math.floor(Number(unitsPerPack))} шт`
+                : type !== "FABRIC"
+                  ? "Або вкажіть упаковку — ₴/од. порахуємо самі"
+                  : undefined
           }
           onChange={
-            purchaseReadOnly ? undefined : (event) => setPurchasePrice(event.target.value)
+            purchaseReadOnly || (type !== "FABRIC" && managePricingSeparately)
+              ? undefined
+              : (event) => setPurchasePrice(event.target.value)
           }
         />
-        {wizardMultiSuppliers && trimPackActive ? (
+        {(wizardMultiSuppliers && trimPackActive) ||
+        (type !== "FABRIC" && managePricingSeparately) ? (
           <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
         ) : null}
         <Input
@@ -1721,7 +1735,11 @@ export function MaterialEditPanel({
           setOpen(false);
         }}
         title="Змінити матеріал"
-        description="Параметри тканини зберігаються кнопкою «Зберегти». Ціни закупівлі — у блоці постачальників (окремо)."
+        description={
+          loaded?.type === "FABRIC"
+            ? "Параметри тканини зберігаються кнопкою «Зберегти». Ціни й доставка — у блоці постачальників."
+            : "Шт в упаковці — у картці. Ціна упаковки й доставка — в умовах кожного постачальника."
+        }
         width="lg"
         footer={
           <>
@@ -1755,6 +1773,7 @@ export function MaterialEditPanel({
               <MaterialSuppliersEditor
                 materialId={loaded.id}
                 metersPerKg={loaded.metersPerKg}
+                unitsPerPack={loaded.unitsPerPack ?? null}
                 fabricGlobals={globals}
                 pricingKind={loaded.type === "FABRIC" ? "fabric" : "unit"}
                 onPrimaryChanged={() => {

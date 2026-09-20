@@ -5,6 +5,18 @@ import {
 } from "@/lib/fabric-pricing";
 import { getFabricPricingGlobals } from "@/server/domains/catalog/materials";
 import { mergeColorLists } from "@/lib/trim-colors";
+import { normalizeFabricDeliveryType } from "@/lib/fabric-delivery-types";
+import { resolveSupplierDeliveryRate } from "@/lib/supplier-delivery-rates";
+import {
+  deriveTrimUnitPriceFromSupplier,
+  hasTrimPackQuote,
+  resolveTrimPackDeliveryUah,
+} from "@/lib/trim-pack-pricing";
+
+function optionalRate(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(Number(value)) || Number(value) < 0) return null;
+  return Number(value);
+}
 
 export async function listSuppliers(params?: { search?: string }) {
   const search = params?.search?.trim();
@@ -55,7 +67,13 @@ export type MaterialSupplierOfferInput = {
   supplierNameUk?: string | null;
   isPrimary?: boolean;
   metersPerKg?: number | null;
+  deliveryType?: string | null;
   cargoUsdPerKg?: number | null;
+  npStandardUsdPerKg?: number | null;
+  npVolumeUsdPerKg?: number | null;
+  /** Trim pack quote (₴) — with material.unitsPerPack derives unit price. */
+  purchasePackPrice?: number | null;
+  packDeliveryCostUah?: number | null;
   priceKgUsd?: number | null;
   priceKgUsdVat?: number | null;
   priceMeterUahNoVat?: number | null;
@@ -201,12 +219,117 @@ export async function upsertMaterialSupplierOffer(
       : await findOrCreateSupplier({ nameUk: offer.supplierNameUk ?? "" });
   if (!supplier) throw new Error("SUPPLIER_REQUIRED");
 
+  const material = await prisma.material.findUnique({ where: { id: materialId } });
+  if (!material) throw new Error("MATERIAL_NOT_FOUND");
+
   const globals = await getFabricPricingGlobals();
-  const cargo =
-    offer.cargoUsdPerKg ??
-    (supplier.defaultCargoUsdPerKg != null
-      ? Number(supplier.defaultCargoUsdPerKg)
-      : globals.fabricCargoUsdPerKg);
+  const isFabric = material.type === "FABRIC";
+
+  const purchasePackPrice = optionalRate(offer.purchasePackPrice);
+  const deliveryType = normalizeFabricDeliveryType(offer.deliveryType);
+  const cargoUsdPerKg = optionalRate(offer.cargoUsdPerKg);
+  const npStandardUsdPerKg = optionalRate(offer.npStandardUsdPerKg);
+  const npVolumeUsdPerKg = optionalRate(offer.npVolumeUsdPerKg);
+  const deliveryRates = {
+    deliveryType,
+    cargoUsdPerKg,
+    npStandardUsdPerKg,
+    npVolumeUsdPerKg,
+  };
+  const typedDelivery = resolveTrimPackDeliveryUah(deliveryRates);
+  const packDeliveryCostUah =
+    typedDelivery?.rateUah ?? optionalRate(offer.packDeliveryCostUah);
+
+  const unitsPerPack = material.unitsPerPack;
+  const unitPrice = deriveTrimUnitPriceFromSupplier({
+    unitsPerPack,
+    purchasePackPrice,
+    deliveryRates,
+    packDeliveryCostUah,
+    fallbackUnitPrice: optionalRate(offer.priceMeterUahNoVat) ?? 0,
+  });
+  const unitPriceOrNull =
+    hasTrimPackQuote({ unitsPerPack, purchasePackPrice, packDeliveryCostUah }) ||
+    optionalRate(offer.priceMeterUahNoVat) != null
+      ? unitPrice
+      : optionalRate(offer.priceMeterUahNoVat);
+
+  if (!isFabric) {
+    if (offer.isPrimary) {
+      await prisma.materialSupplier.updateMany({
+        where: { materialId, isPrimary: true },
+        data: { isPrimary: false },
+      });
+    }
+
+    const row = await prisma.materialSupplier.upsert({
+      where: {
+        materialId_supplierId: { materialId, supplierId: supplier.id },
+      },
+      create: {
+        materialId,
+        supplierId: supplier.id,
+        isPrimary: offer.isPrimary ?? false,
+        deliveryType,
+        cargoUsdPerKg,
+        npStandardUsdPerKg,
+        npVolumeUsdPerKg,
+        purchasePackPrice,
+        packDeliveryCostUah,
+        priceMeterUahNoVat: unitPriceOrNull,
+        priceMeterUahVat: unitPriceOrNull,
+        wholesaleNote: offer.wholesaleNote ?? null,
+        availableColors: offer.availableColors ?? [],
+      },
+      update: {
+        isPrimary: offer.isPrimary ?? false,
+        deliveryType,
+        cargoUsdPerKg,
+        npStandardUsdPerKg,
+        npVolumeUsdPerKg,
+        purchasePackPrice,
+        packDeliveryCostUah,
+        priceMeterUahNoVat: unitPriceOrNull,
+        priceMeterUahVat: unitPriceOrNull,
+        wholesaleNote: offer.wholesaleNote ?? null,
+        ...(offer.availableColors !== undefined
+          ? { availableColors: offer.availableColors ?? [] }
+          : {}),
+      },
+      include: { supplier: true },
+    });
+
+    if (row.isPrimary && unitPriceOrNull != null) {
+      await prisma.material.update({
+        where: { id: materialId },
+        data: {
+          supplierCode: supplier.nameUk,
+          purchasePrice: unitPriceOrNull,
+          purchasePackPrice,
+          packDeliveryCostUah,
+          ...(offer.availableColors !== undefined
+            ? { availableColors: mergeColorLists(offer.availableColors ?? []) }
+            : {}),
+        },
+      });
+    }
+
+    if (offer.availableColors !== undefined) {
+      await rememberSupplierPalette(supplier.id, offer.availableColors ?? []);
+    }
+
+    return row;
+  }
+
+  const resolved = resolveSupplierDeliveryRate(
+    {
+      deliveryType,
+      cargoUsdPerKg,
+      npStandardUsdPerKg,
+      npVolumeUsdPerKg,
+    },
+    globals,
+  );
 
   const derived = deriveFabricPricing(
     {
@@ -220,7 +343,7 @@ export async function upsertMaterialSupplierOffer(
       metersPerRoll: offer.metersPerRoll,
       minWholesaleMeters: offer.minWholesaleMeters,
     },
-    { ...globals, fabricCargoUsdPerKg: cargo },
+    { ...globals, fabricCargoUsdPerKg: resolved.rateUsdPerKg },
   );
 
   if (offer.isPrimary) {
@@ -253,7 +376,10 @@ export async function upsertMaterialSupplierOffer(
       supplierId: supplier.id,
       isPrimary: offer.isPrimary ?? false,
       metersPerKg: offer.metersPerKg ?? null,
-      cargoUsdPerKg: cargo,
+      deliveryType: resolved.type,
+      cargoUsdPerKg,
+      npStandardUsdPerKg,
+      npVolumeUsdPerKg,
       priceKgUsd: offer.priceKgUsd ?? null,
       priceKgUsdCargo: derived.priceKgUsdCargo,
       priceKgUsdVat: offer.priceKgUsdVat ?? null,
@@ -269,7 +395,10 @@ export async function upsertMaterialSupplierOffer(
     update: {
       isPrimary: offer.isPrimary ?? false,
       metersPerKg: offer.metersPerKg ?? null,
-      cargoUsdPerKg: cargo,
+      deliveryType: resolved.type,
+      cargoUsdPerKg,
+      npStandardUsdPerKg,
+      npVolumeUsdPerKg,
       priceKgUsd: offer.priceKgUsd ?? null,
       priceKgUsdCargo: derived.priceKgUsdCargo,
       priceKgUsdVat: offer.priceKgUsdVat ?? null,
@@ -292,6 +421,7 @@ export async function upsertMaterialSupplierOffer(
       where: { id: materialId },
       data: {
         supplierCode: supplier.nameUk,
+        deliveryType: resolved.type,
         purchasePrice: derived.purchasePrice,
         metersPerKg: offer.metersPerKg ?? undefined,
         priceKgUsd: offer.priceKgUsd ?? undefined,
@@ -376,10 +506,18 @@ export async function setPrimaryMaterialSupplierOffer(offerId: string) {
   });
 
   const globals = await getFabricPricingGlobals();
-  const cargo =
-    primary.cargoUsdPerKg != null
-      ? Number(primary.cargoUsdPerKg)
-      : globals.fabricCargoUsdPerKg;
+  const resolved = resolveSupplierDeliveryRate(
+    {
+      deliveryType: primary.deliveryType,
+      cargoUsdPerKg:
+        primary.cargoUsdPerKg != null ? Number(primary.cargoUsdPerKg) : null,
+      npStandardUsdPerKg:
+        primary.npStandardUsdPerKg != null ? Number(primary.npStandardUsdPerKg) : null,
+      npVolumeUsdPerKg:
+        primary.npVolumeUsdPerKg != null ? Number(primary.npVolumeUsdPerKg) : null,
+    },
+    globals,
+  );
   const derived = deriveFabricPricing(
     {
       metersPerKg: primary.metersPerKg != null ? Number(primary.metersPerKg) : null,
@@ -398,13 +536,14 @@ export async function setPrimaryMaterialSupplierOffer(offerId: string) {
       minWholesaleMeters:
         primary.minWholesaleMeters != null ? Number(primary.minWholesaleMeters) : null,
     },
-    { ...globals, fabricCargoUsdPerKg: cargo },
+    { ...globals, fabricCargoUsdPerKg: resolved.rateUsdPerKg },
   );
 
   await prisma.material.update({
     where: { id: row.materialId },
     data: {
       supplierCode: primary.supplier.nameUk,
+      deliveryType: resolved.type,
       purchasePrice: derived.purchasePrice > 0 ? derived.purchasePrice : undefined,
       metersPerKg: primary.metersPerKg ?? undefined,
       priceKgUsd: primary.priceKgUsd ?? undefined,

@@ -610,6 +610,10 @@ export default async function ProductDetailPage({
                 minQuantity: tier.minQuantity,
                 pricePerUnit: Number(tier.pricePerUnit),
                 showOnCard: Boolean((tier as { showOnCard?: boolean }).showOnCard),
+                sewingMultiplier:
+                  (tier as { sewingMultiplier?: unknown }).sewingMultiplier != null
+                    ? Number((tier as { sewingMultiplier?: unknown }).sewingMultiplier)
+                    : null,
               })),
               costHints: tirageCostHints,
             }}

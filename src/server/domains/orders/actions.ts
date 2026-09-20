@@ -528,6 +528,11 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
     : undefined;
   const cargoRaw = String(formData.get("cargoUsdPerKg") ?? "").trim();
   const cargoUsdPerKg = cargoRaw === "" ? null : Number(cargoRaw);
+  const hasDeliveryTypeField = formData.has("deliveryType");
+  const deliveryTypeRaw = String(formData.get("deliveryType") ?? "").trim();
+  const deliveryType = hasDeliveryTypeField
+    ? deliveryTypeRaw || null
+    : undefined;
   const rateRaw = String(formData.get("usdUahRate") ?? "").trim();
   const usdUahRate = rateRaw === "" ? null : Number(rateRaw);
   const deliveryRaw = String(formData.get("fabricDeliveryAmount") ?? "").trim();
@@ -589,6 +594,7 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
       hasSupplierField ||
       hasColorField ||
       formData.has("cargoUsdPerKg") ||
+      formData.has("deliveryType") ||
       formData.has("usdUahRate") ||
       formData.has("fabricDeliveryAmount") ||
       formData.has("fabricDeliveryManual") ||
@@ -611,6 +617,7 @@ export async function updateOrderMaterialTermsAction(formData: FormData) {
     ...(hasSupplierField ? { supplierId } : {}),
     ...(hasColorField ? { colorSnapshot } : {}),
     ...(formData.has("cargoUsdPerKg") ? { cargoUsdPerKg } : {}),
+    ...(hasDeliveryTypeField ? { deliveryType } : {}),
     ...(formData.has("usdUahRate") ? { usdUahRate } : {}),
     ...(costVatOverride !== undefined ? { costVatOverride } : {}),
     ...(consumptionPerUnit != null ? { consumptionPerUnit } : {}),

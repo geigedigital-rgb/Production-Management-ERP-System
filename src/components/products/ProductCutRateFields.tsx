@@ -3,7 +3,7 @@
 import { useMemo, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { resolveCutRatePerUnit, resolveOptimalCutQty } from "@/lib/cut-rate";
+import { resolveCutRatePerUnit, resolveOptimalCutQty, cutRateFromOptimalJobTotal } from "@/lib/cut-rate";
 import { cn, formatMoneyUah } from "@/lib/utils";
 
 export type CutRateTierDraft = { minQuantity: number; ratePerUnit: number };
@@ -37,11 +37,6 @@ function CompactInput({
   );
 }
 
-function cutRateFromOptimalTotal(optimalTotal: number, qty: number): number {
-  if (!(qty > 0) || !(optimalTotal >= 0) || !Number.isFinite(optimalTotal)) return 0;
-  return Math.round((optimalTotal / qty) * 100) / 100;
-}
-
 function ensureOptimalRow(
   tiers: CutRateTierDraft[],
   optimalQty: number,
@@ -62,10 +57,11 @@ function ensureOptimalRow(
 function spreadCutFromOptimal(
   tiers: CutRateTierDraft[],
   optimalTotal: number,
+  optimalQty: number,
 ): CutRateTierDraft[] {
   return tiers.map((tier) => ({
     ...tier,
-    ratePerUnit: cutRateFromOptimalTotal(optimalTotal, tier.minQuantity),
+    ratePerUnit: cutRateFromOptimalJobTotal(optimalTotal, tier.minQuantity, optimalQty),
   }));
 }
 
@@ -106,10 +102,10 @@ export function ProductCutRateFields({
   function applyOptimal(nextQty: number, nextTotal: number) {
     const qty = Math.max(1, Math.round(nextQty) || 1);
     const total = Math.max(0, Number.isFinite(nextTotal) ? nextTotal : 0);
-    const rate = cutRateFromOptimalTotal(total, qty);
+    const rate = cutRateFromOptimalJobTotal(total, qty, qty);
     onOptimalQtyChange?.(qty);
     onOptimalCutTotalChange?.(Math.round(total * 100) / 100);
-    onTiersChange(spreadCutFromOptimal(ensureOptimalRow(tiers, qty, rate), total));
+    onTiersChange(spreadCutFromOptimal(ensureOptimalRow(tiers, qty, rate), total, qty));
   }
 
   const previewRate = useMemo(
@@ -191,7 +187,11 @@ export function ProductCutRateFields({
                           next[index] = {
                             ...tier,
                             minQuantity,
-                            ratePerUnit: cutRateFromOptimalTotal(optimalCutTotal, minQuantity),
+                            ratePerUnit: cutRateFromOptimalJobTotal(
+                              optimalCutTotal,
+                              minQuantity,
+                              optimalQty,
+                            ),
                           };
                           onTiersChange(next);
                         }}
@@ -248,9 +248,10 @@ export function ProductCutRateFields({
               ...tiers,
               {
                 minQuantity: (tiers[tiers.length - 1]?.minQuantity ?? 0) + 50,
-                ratePerUnit: cutRateFromOptimalTotal(
+                ratePerUnit: cutRateFromOptimalJobTotal(
                   optimalCutTotal,
                   (tiers[tiers.length - 1]?.minQuantity ?? 0) + 50,
+                  optimalQty,
                 ),
               },
             ])

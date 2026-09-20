@@ -66,7 +66,7 @@ export function buildTirageFormulaTips(input: TirageFormulaTipInput) {
   } = input;
 
   const costPerUnit = qty > 0 ? Math.round((cost / qty) * 100) / 100 : 0;
-  const markupPerUnit = Math.round(sewingPerUnit * Math.max(0, multiplier - 1) * 100) / 100;
+  const markupPerUnit = Math.round(sewingPerUnit * Math.max(0, multiplier) * 100) / 100;
   const suggestedPrice = Math.round((costPerUnit + markupPerUnit) * 100) / 100;
 
   return {
@@ -113,14 +113,13 @@ export function buildTirageFormulaTips(input: TirageFormulaTipInput) {
     ].join("\n"),
 
     multiplier: [
-      `Націнка/шт = ${money(sewingPerUnit)} × (×${multiplier} − 1) = ${money(markupPerUnit)}`,
+      `Націнка/шт = ${money(sewingPerUnit)} × ${multiplier} = ${money(markupPerUnit)}`,
       `Ціна/шт = ${money(costPerUnit)} + ${money(markupPerUnit)} = ${money(suggestedPrice)}`,
-      "−1: у собівартості пошив уже є один раз.",
     ].join("\n"),
 
     price: [
       `У прайсі: ${money(pricePerUnit)}/шт`,
-      `З ×: ${money(costPerUnit)} + ${money(sewingPerUnit)} × (×${multiplier} − 1) = ${money(suggestedPrice)}/шт`,
+      `З ×: ${money(costPerUnit)} + ${money(sewingPerUnit)} × ${multiplier} = ${money(suggestedPrice)}/шт`,
       pricePerUnit !== suggestedPrice ? "У полі зараз інша збережена ціна." : null,
     ]
       .filter(Boolean)
@@ -197,7 +196,7 @@ export function buildTirageHeaderTips(args?: {
     multiplier: [
       "×",
       "Множник націнки на пошив.",
-      "Ціна/шт = собівартість/шт + пошив/шт × (× − 1).",
+      "Ціна/шт = собівартість/шт + пошив/шт × коефіцієнт.",
       "Малий тираж — більший ×, великий — менший (×7 … ×4).",
     ].join("\n"),
 

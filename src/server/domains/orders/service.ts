@@ -35,7 +35,14 @@ import {
   packsToOrder,
   trimPackSpend,
   hasTrimPackQuote,
+  resolveTrimPackDeliveryUah,
+  deriveTrimUnitPriceFromSupplier,
+  trimConfiguredDeliveryOptions,
 } from "@/lib/trim-pack-pricing";
+import {
+  configuredSupplierDeliveryOptions,
+  resolveSupplierDeliveryRate,
+} from "@/lib/supplier-delivery-rates";
 import {
   fabricFieldsForOrderLine,
   materialToSnapshot,
@@ -52,6 +59,7 @@ import {
 import { getFabricPricingGlobals } from "@/server/domains/catalog/materials";
 import {
   deliveryRateUsdPerKg,
+  normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
 
@@ -207,7 +215,23 @@ function previewFabricLineTerms(input: {
   const cargoUsdPerKg =
     input.cargoOverride ??
     numField(input.row.cargoUsdPerKg) ??
-    (input.offer ? numField(input.offer.cargoUsdPerKg) : null) ??
+    (input.offer
+      ? resolveSupplierDeliveryRate(
+          {
+            deliveryType: (input.offer as { deliveryType?: string | null }).deliveryType,
+            cargoUsdPerKg: numField(input.offer.cargoUsdPerKg),
+            npStandardUsdPerKg: numField(
+              (input.offer as { npStandardUsdPerKg?: { toString(): string } | number | null })
+                .npStandardUsdPerKg,
+            ),
+            npVolumeUsdPerKg: numField(
+              (input.offer as { npVolumeUsdPerKg?: { toString(): string } | number | null })
+                .npVolumeUsdPerKg,
+            ),
+          },
+          input.globals,
+        ).rateUsdPerKg
+      : null) ??
     deliveryRateUsdPerKg(input.material.deliveryType, input.globals);
   const usdUahRate =
     input.usdUahRateOverride ??
@@ -1310,16 +1334,55 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       : [];
     const consumption = Number(row.consumptionPerUnit);
     const waste = Number(row.wastePercent);
-    const purchasePrice = Number(row.purchasePrice);
     const unitsNeeded =
       Math.round(consumption * (1 + waste / 100) * totalQuantity * 10000) / 10000;
     const unitsPerPack = row.material?.unitsPerPack ?? null;
+    const selectedOffer =
+      row.supplierId
+        ? supplierRows.find((offer) => offer.supplierId === row.supplierId) ?? null
+        : supplierRows.find((offer) => offer.isPrimary) ?? null;
     const purchasePackPrice =
-      row.material?.purchasePackPrice != null ? Number(row.material.purchasePackPrice) : null;
+      selectedOffer?.purchasePackPrice != null
+        ? Number(selectedOffer.purchasePackPrice)
+        : row.material?.purchasePackPrice != null
+          ? Number(row.material.purchasePackPrice)
+          : null;
+    const deliveryRates = {
+      deliveryType:
+        row.deliveryType ??
+        selectedOffer?.deliveryType ??
+        null,
+      cargoUsdPerKg:
+        selectedOffer?.cargoUsdPerKg != null
+          ? Number(selectedOffer.cargoUsdPerKg)
+          : null,
+      npStandardUsdPerKg:
+        selectedOffer?.npStandardUsdPerKg != null
+          ? Number(selectedOffer.npStandardUsdPerKg)
+          : null,
+      npVolumeUsdPerKg:
+        selectedOffer?.npVolumeUsdPerKg != null
+          ? Number(selectedOffer.npVolumeUsdPerKg)
+          : null,
+    };
+    const typedDelivery = resolveTrimPackDeliveryUah(deliveryRates);
     const packDeliveryCostUah =
-      row.material?.packDeliveryCostUah != null
-        ? Number(row.material.packDeliveryCostUah)
-        : null;
+      typedDelivery?.rateUah ??
+      (selectedOffer?.packDeliveryCostUah != null
+        ? Number(selectedOffer.packDeliveryCostUah)
+        : row.material?.packDeliveryCostUah != null
+          ? Number(row.material.packDeliveryCostUah)
+          : null);
+    const purchasePrice = deriveTrimUnitPriceFromSupplier({
+      unitsPerPack,
+      purchasePackPrice,
+      deliveryRates,
+      packDeliveryCostUah,
+      fallbackUnitPrice:
+        selectedOffer?.priceMeterUahNoVat != null
+          ? Number(selectedOffer.priceMeterUahNoVat)
+          : Number(row.purchasePrice),
+    });
     const packs = packsToOrder(unitsNeeded, unitsPerPack);
     const packSpend = hasTrimPackQuote({
       unitsPerPack,
@@ -1348,13 +1411,43 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       colorSnapshot: row.colorSnapshot,
       supplierId: row.supplierId,
       materialAvailableColors: row.material?.availableColors ?? [],
-      offers: supplierRows.map((offer) => ({
-        offerId: offer.id,
-        supplierId: offer.supplierId,
-        supplierName: offer.supplier.nameUk,
-        isPrimary: offer.isPrimary,
-        availableColors: offer.availableColors ?? [],
-      })),
+      deliveryType: typedDelivery?.type ?? row.deliveryType ?? selectedOffer?.deliveryType ?? null,
+      offers: supplierRows.map((offer) => {
+        const rates = {
+          deliveryType: offer.deliveryType,
+          cargoUsdPerKg:
+            offer.cargoUsdPerKg != null ? Number(offer.cargoUsdPerKg) : null,
+          npStandardUsdPerKg:
+            offer.npStandardUsdPerKg != null ? Number(offer.npStandardUsdPerKg) : null,
+          npVolumeUsdPerKg:
+            offer.npVolumeUsdPerKg != null ? Number(offer.npVolumeUsdPerKg) : null,
+        };
+        const deliveryOptions = trimConfiguredDeliveryOptions(rates);
+        const active = resolveTrimPackDeliveryUah(rates);
+        return {
+          offerId: offer.id,
+          supplierId: offer.supplierId,
+          supplierName: offer.supplier.nameUk,
+          isPrimary: offer.isPrimary,
+          availableColors: offer.availableColors ?? [],
+          deliveryType: offer.deliveryType,
+          deliveryOptions,
+          purchasePackPrice:
+            offer.purchasePackPrice != null ? Number(offer.purchasePackPrice) : null,
+          packDeliveryCostUah: active?.rateUah ??
+            (offer.packDeliveryCostUah != null ? Number(offer.packDeliveryCostUah) : null),
+          purchasePricePerUnit: deriveTrimUnitPriceFromSupplier({
+            unitsPerPack,
+            purchasePackPrice:
+              offer.purchasePackPrice != null ? Number(offer.purchasePackPrice) : null,
+            deliveryRates: rates,
+            packDeliveryCostUah:
+              offer.packDeliveryCostUah != null ? Number(offer.packDeliveryCostUah) : null,
+            fallbackUnitPrice:
+              offer.priceMeterUahNoVat != null ? Number(offer.priceMeterUahNoVat) : 0,
+          }),
+        };
+      }),
       materialPartyCost,
       unitsNeeded,
       unitsPerPack,
@@ -1393,12 +1486,20 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       globals,
       costVatOverride,
     });
+    const deliveryOptions = configuredSupplierDeliveryOptions({
+      deliveryType: offer.deliveryType,
+      cargoUsdPerKg: numField(offer.cargoUsdPerKg),
+      npStandardUsdPerKg: numField(offer.npStandardUsdPerKg),
+      npVolumeUsdPerKg: numField(offer.npVolumeUsdPerKg),
+    });
     return {
       offerId: offer.id,
       supplierId: offer.supplierId,
       supplierName: offer.supplier.nameUk,
       isPrimary: offer.isPrimary,
       availableColors: offer.availableColors ?? [],
+      deliveryType: offer.deliveryType,
+      deliveryOptions,
       ...preview,
     };
   });
@@ -1468,6 +1569,24 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       numField(row.cargoUsdPerKg) ??
       activePreview?.cargoUsdPerKg ??
       deliveryRateUsdPerKg(row.material.deliveryType, globals),
+    deliveryType:
+      row.deliveryType ??
+      selectedOffer?.deliveryType ??
+      row.material.deliveryType ??
+      null,
+    deliveryOptions:
+      (offers.find((o) => o.supplierId === (row.supplierId ?? selectedOffer?.supplierId))
+        ?.deliveryOptions as
+        | Array<{ type: string; rateUsdPerKg: number; label: string }>
+        | undefined) ??
+      (selectedOffer
+        ? configuredSupplierDeliveryOptions({
+            deliveryType: selectedOffer.deliveryType,
+            cargoUsdPerKg: numField(selectedOffer.cargoUsdPerKg),
+            npStandardUsdPerKg: numField(selectedOffer.npStandardUsdPerKg),
+            npVolumeUsdPerKg: numField(selectedOffer.npVolumeUsdPerKg),
+          })
+        : []),
     fabricDeliveryAmount: Number(row.fabricDeliveryAmount),
     fabricDeliveryComputed: Number(
       row.fabricDeliveryComputed ?? activePreview?.deliveryAmount ?? 0,
@@ -1501,6 +1620,7 @@ export async function updateOrderItemMaterialTerms(input: {
   id: string;
   supplierId?: string | null;
   colorSnapshot?: string | null;
+  deliveryType?: string | null;
   cargoUsdPerKg?: number | null;
   usdUahRate?: number | null;
   costVatOverride?: MaterialCostVatMode | null;
@@ -1557,6 +1677,13 @@ export async function updateOrderItemMaterialTerms(input: {
   const cargoUsdPerKg =
     input.cargoUsdPerKg !== undefined ? input.cargoUsdPerKg : numField(row.cargoUsdPerKg);
 
+  const deliveryType =
+    input.deliveryType !== undefined
+      ? input.deliveryType
+        ? normalizeFabricDeliveryType(input.deliveryType)
+        : null
+      : row.deliveryType;
+
   const usdUahRate =
     input.usdUahRate !== undefined ? input.usdUahRate : numField(row.usdUahRate);
 
@@ -1602,6 +1729,23 @@ export async function updateOrderItemMaterialTerms(input: {
         })
       : null;
 
+  const trimPurchasePrice =
+    row.material && row.material.type !== "FABRIC" && offer
+      ? deriveTrimUnitPriceFromSupplier({
+          unitsPerPack: row.material.unitsPerPack,
+          purchasePackPrice: numField(offer.purchasePackPrice),
+          deliveryRates: {
+            deliveryType: deliveryType ?? offer.deliveryType,
+            cargoUsdPerKg: numField(offer.cargoUsdPerKg),
+            npStandardUsdPerKg: numField(offer.npStandardUsdPerKg),
+            npVolumeUsdPerKg: numField(offer.npVolumeUsdPerKg),
+          },
+          packDeliveryCostUah: numField(offer.packDeliveryCostUah),
+          fallbackUnitPrice:
+            numField(offer.priceMeterUahNoVat) ?? Number(row.purchasePrice),
+        })
+      : null;
+
   const fabricDeliveryManual = input.fabricDeliveryManual ?? row.fabricDeliveryManual;
   const fabricDeliveryAmount = fabricDeliveryManual
     ? Math.max(0, input.fabricDeliveryAmount ?? Number(row.fabricDeliveryAmount))
@@ -1613,13 +1757,19 @@ export async function updateOrderItemMaterialTerms(input: {
       supplierId,
       supplierNameSnapshot,
       colorSnapshot,
+      deliveryType,
       cargoUsdPerKg,
       usdUahRate,
       costVatOverride,
       consumptionPerUnit,
       wastePercent,
       minWholesaleMetersOverride,
-      purchasePrice: preview?.purchasePricePerMeter ?? Number(row.purchasePrice),
+      purchasePrice:
+        preview?.purchasePricePerMeter ??
+        trimPurchasePrice ??
+        (offer?.priceMeterUahNoVat != null
+          ? Number(offer.priceMeterUahNoVat)
+          : Number(row.purchasePrice)),
       fabricDeliveryComputed: preview?.deliveryAmount ?? 0,
       fabricDeliveryAmount,
       fabricDeliveryManual,

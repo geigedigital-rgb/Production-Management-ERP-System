@@ -102,6 +102,12 @@ assert.equal(resolveCutRatePerUnit({ quantity: 40, optimalQty: 250, tiers: cutTi
 assert.equal(resolveCutRatePerUnit({ quantity: 50, optimalQty: 250, tiers: cutTiers, fallbackRate: 5 }), 24);
 assert.equal(resolveCutRatePerUnit({ quantity: 250, optimalQty: 250, tiers: cutTiers, fallbackRate: 5 }), 5);
 assert.equal(resolveCutRatePerUnit({ quantity: 1000, optimalQty: 250, tiers: cutTiers, fallbackRate: 5 }), 5);
+
+import { cutRateFromOptimalJobTotal } from "../src/lib/cut-rate";
+assert.equal(cutRateFromOptimalJobTotal(1500, 100, 250), 15);
+assert.equal(cutRateFromOptimalJobTotal(1500, 250, 250), 6);
+assert.equal(cutRateFromOptimalJobTotal(1500, 500, 250), 6);
+assert.equal(cutRateFromOptimalJobTotal(1500, 1000, 250), 6);
 console.log("cut-rate owner rule smoke test passed");
 
 import { buildCalcFromOrderItem } from "../src/server/domains/calculation/from-entities";

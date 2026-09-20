@@ -22,7 +22,7 @@ import {
   hydrateCommercialPriceTiers,
   type TirageCostHint,
 } from "@/components/products/ProductPriceFields";
-import { resolveCutRatePerUnit, resolveOptimalCutQty } from "@/lib/cut-rate";
+import { resolveCutRatePerUnit, resolveOptimalCutQty, cutRateFromOptimalJobTotal } from "@/lib/cut-rate";
 import { resolveCommercialPricePerUnit } from "@/lib/commercial-price";
 import { resolveQuantityTierRate } from "@/lib/quantity-tiers";
 import { defaultSewingMultiplierForQty, suggestSellingFromSewingMarkup } from "@/lib/sewing-markup";
@@ -188,11 +188,6 @@ function rowsEqual(a: Row[], b: Row[]) {
   });
 }
 
-function cutRateFromOptimalTotal(optimalTotal: number, qty: number): number {
-  if (!(qty > 0) || !(optimalTotal >= 0) || !Number.isFinite(optimalTotal)) return 0;
-  return Math.round((optimalTotal / qty) * 100) / 100;
-}
-
 function ensureOptimalRow(rows: Row[], optimalQty: number, cutRate: number): Row[] {
   if (!(optimalQty > 0)) return rows;
   const idx = rows.findIndex((row) => row.minQuantity === optimalQty);
@@ -215,11 +210,15 @@ function ensureOptimalRow(rows: Row[], optimalQty: number, cutRate: number): Row
   ].sort((a, b) => a.minQuantity - b.minQuantity);
 }
 
-/** Розкладає крій по всіх сходинках від вартості оптимуму: ₴/шт = вартість_оптимуму ÷ тираж_сходинки. */
-function spreadCutFromOptimal(rows: Row[], optimalTotal: number): Row[] {
+/** Розкладає крій: нижче оптимуму — total÷тираж; від оптимуму й вище — мінімум = ставка оптимуму. */
+function spreadCutFromOptimal(
+  rows: Row[],
+  optimalTotal: number,
+  optimalQty: number,
+): Row[] {
   return rows.map((row) => ({
     ...row,
-    cutRate: cutRateFromOptimalTotal(optimalTotal, row.minQuantity),
+    cutRate: cutRateFromOptimalJobTotal(optimalTotal, row.minQuantity, optimalQty),
   }));
 }
 
@@ -256,7 +255,12 @@ export function ProductPriceCutPanel({
   cutTiers: Array<{ minQuantity: number; ratePerUnit: number }>;
   deliveryOp?: DeliveryOp | null;
   isBaseModel: boolean;
-  priceTiers: Array<{ minQuantity: number; pricePerUnit: number; showOnCard?: boolean }>;
+  priceTiers: Array<{
+    minQuantity: number;
+    pricePerUnit: number;
+    showOnCard?: boolean;
+    sewingMultiplier?: number | null;
+  }>;
   costHints?: TirageCostHint[];
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -284,6 +288,14 @@ export function ProductPriceCutPanel({
     const cutMap = new Map(cutTiers.map((t) => [t.minQuantity, t.ratePerUnit]));
     const priceMap = new Map(priceTiers.map((t) => [t.minQuantity, t.pricePerUnit]));
     const cardMap = new Map(priceTiers.map((t) => [t.minQuantity, t.showOnCard === true]));
+    const multMap = new Map(
+      priceTiers.map((t) => [
+        t.minQuantity,
+        t.sewingMultiplier != null && Number(t.sewingMultiplier) > 0
+          ? Number(t.sewingMultiplier)
+          : null,
+      ]),
+    );
     const deliveryFallback = deliveryTiers[0]?.ratePerUnit ?? 0;
 
     const base = qtys.map((q) => ({
@@ -295,7 +307,7 @@ export function ProductPriceCutPanel({
         fallbackRate: deliveryFallback,
       }),
       pricePerUnit: priceMap.get(q) ?? 0,
-      sewingMultiplier: defaultSewingMultiplierForQty(q),
+      sewingMultiplier: multMap.get(q) ?? defaultSewingMultiplierForQty(q),
       showOnCard: cardMap.get(q) ?? false,
     }));
 
@@ -354,6 +366,26 @@ export function ProductPriceCutPanel({
     dirtyRef.current = isDirty;
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
+
+  // After save + router.refresh, reload × / prices from server when panel is clean.
+  useEffect(() => {
+    if (dirtyRef.current) return;
+    setRows(cloneRows(initialMerged));
+    setBaseline({
+      rows: cloneRows(initialMerged),
+      optimalQty: resolvedInitialOptimal,
+      optimalCutTotal: initialOptimalTotal,
+      isBaseModel: initialIsBaseModel,
+    });
+    setOptimalQty(resolvedInitialOptimal);
+    setOptimalCutTotal(initialOptimalTotal);
+    setIsBaseModel(initialIsBaseModel);
+  }, [
+    initialMerged,
+    resolvedInitialOptimal,
+    initialOptimalTotal,
+    initialIsBaseModel,
+  ]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -419,12 +451,12 @@ export function ProductPriceCutPanel({
   function applyOptimal(nextQty: number, nextTotal: number, spreadAll: boolean) {
     const qty = Math.max(1, Math.round(nextQty) || 1);
     const total = Math.max(0, Number.isFinite(nextTotal) ? nextTotal : 0);
-    const rate = cutRateFromOptimalTotal(total, qty);
+    const rate = cutRateFromOptimalJobTotal(total, qty, qty);
     setOptimalQty(qty);
     setOptimalCutTotal(Math.round(total * 100) / 100);
     setRows((prev) => {
       const withRow = ensureOptimalRow(prev, qty, rate);
-      return spreadAll ? spreadCutFromOptimal(withRow, total) : withRow;
+      return spreadAll ? spreadCutFromOptimal(withRow, total, qty) : withRow;
     });
   }
 
@@ -434,7 +466,7 @@ export function ProductPriceCutPanel({
       const nextQty = last ? last.minQuantity * 2 : 50;
       const next: Row = {
         minQuantity: nextQty,
-        cutRate: cutRateFromOptimalTotal(optimalCutTotal, nextQty),
+        cutRate: cutRateFromOptimalJobTotal(optimalCutTotal, nextQty, optimalQty),
         deliveryRate: last?.deliveryRate ?? 0,
         pricePerUnit: last?.pricePerUnit ?? 0,
         sewingMultiplier: last?.sewingMultiplier ?? defaultSewingMultiplierForQty(nextQty),
@@ -513,6 +545,7 @@ export function ProductPriceCutPanel({
             minQuantity: r.minQuantity,
             pricePerUnit: r.pricePerUnit,
             showOnCard: r.showOnCard,
+            sewingMultiplier: r.sewingMultiplier,
           })),
         });
         if (!priceResult.ok) {
@@ -597,7 +630,7 @@ export function ProductPriceCutPanel({
         <div className="flex flex-col gap-1">
           <span className="type-caption text-[var(--color-text-quiet)]">₴/шт</span>
           <p className="flex h-8 items-center type-mono text-[13px] font-semibold tabular-nums text-[var(--color-text)]">
-            {formatMoneyUah(cutRateFromOptimalTotal(optimalCutTotal, optimalQty))}
+            {formatMoneyUah(cutRateFromOptimalJobTotal(optimalCutTotal, optimalQty, optimalQty))}
           </p>
         </div>
       </div>
@@ -759,7 +792,11 @@ export function ProductPriceCutPanel({
                             next[index] = {
                               ...row,
                               minQuantity,
-                              cutRate: cutRateFromOptimalTotal(optimalCutTotal, minQuantity),
+                              cutRate: cutRateFromOptimalJobTotal(
+                                optimalCutTotal,
+                                minQuantity,
+                                optimalQty,
+                              ),
                             };
                             return next.sort((a, b) => a.minQuantity - b.minQuantity);
                           });
@@ -940,9 +977,10 @@ export function ProductPriceCutPanel({
                 ensureOptimalRow(
                   prev,
                   optimalQty,
-                  cutRateFromOptimalTotal(optimalCutTotal, optimalQty),
+                  cutRateFromOptimalJobTotal(optimalCutTotal, optimalQty, optimalQty),
                 ),
                 optimalCutTotal,
+                optimalQty,
               ),
             )
           }

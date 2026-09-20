@@ -194,6 +194,7 @@ export function OrderMaterialDetailPanel({
   const [colorSnapshot, setColorSnapshot] = useState<string | null>(null);
   const [vatMode, setVatMode] = useState<VatMode>("NET");
   const [cargoUsdPerKg, setCargoUsdPerKg] = useState("");
+  const [deliveryType, setDeliveryType] = useState("");
   const [usdUahRate, setUsdUahRate] = useState("");
   const [deliveryManual, setDeliveryManual] = useState(false);
   const [deliveryAmount, setDeliveryAmount] = useState("");
@@ -222,6 +223,11 @@ export function OrderMaterialDetailPanel({
       }
       setCargoUsdPerKg(
         loaded.cargoUsdPerKg != null ? String(loaded.cargoUsdPerKg) : "",
+      );
+      setDeliveryType(
+        "deliveryType" in loaded && loaded.deliveryType
+          ? String(loaded.deliveryType)
+          : "",
       );
       const hasRateOverride =
         loaded.defaultUsdUahRate != null &&
@@ -332,10 +338,29 @@ export function OrderMaterialDetailPanel({
         }),
       );
     }
-    if (!detail?.isFabric) return;
-    const preview = previewForSupplier(detail, nextSupplierId);
-    if (preview?.cargoUsdPerKg != null) {
-      setCargoUsdPerKg(String(preview.cargoUsdPerKg));
+    const offer = (detail?.offers ?? []).find((row) => row.supplierId === nextSupplierId) as
+      | {
+          deliveryType?: string;
+          deliveryOptions?: Array<{ type: string; rateUsdPerKg?: number; rateUah?: number; label: string }>;
+          purchasePricePerUnit?: number | null;
+        }
+      | undefined;
+    const options = offer?.deliveryOptions ?? [];
+    if (options.length > 0) {
+      const preferred =
+        options.find((opt) => opt.type === offer?.deliveryType) ?? options[0]!;
+      setDeliveryType(preferred.type);
+      if (detail?.isFabric && preferred.rateUsdPerKg != null) {
+        setCargoUsdPerKg(String(preferred.rateUsdPerKg));
+      }
+    } else if (detail?.isFabric) {
+      const preview = previewForSupplier(detail, nextSupplierId);
+      if (preview?.cargoUsdPerKg != null) {
+        setCargoUsdPerKg(String(preview.cargoUsdPerKg));
+      }
+      setDeliveryType("");
+    } else {
+      setDeliveryType("");
     }
   }
 
@@ -347,6 +372,7 @@ export function OrderMaterialDetailPanel({
     formData.set("supplierId", supplierId);
     formData.set("colorSnapshot", colorSnapshot ?? "");
     if (!detail.isFabric) {
+      if (deliveryType) formData.set("deliveryType", deliveryType);
       startTransition(async () => {
         const result = await updateOrderMaterialTermsAction(formData);
         if (!result.ok) {
@@ -359,6 +385,7 @@ export function OrderMaterialDetailPanel({
       return;
     }
     formData.set("cargoUsdPerKg", cargoUsdPerKg);
+    formData.set("deliveryType", deliveryType);
     formData.set("usdUahRate", usdUahRate);
     formData.set(
       "costVatOverride",
@@ -690,9 +717,50 @@ export function OrderMaterialDetailPanel({
                       </div>
                     ) : (
                       <>
+                        {(() => {
+                          const offer = (detail.offers ?? []).find(
+                            (row) => row.supplierId === supplierId,
+                          ) as
+                            | {
+                                deliveryOptions?: Array<{
+                                  type: string;
+                                  rateUsdPerKg: number;
+                                  label: string;
+                                }>;
+                              }
+                            | undefined;
+                          const options = offer?.deliveryOptions ?? [];
+                          if (options.length === 0) {
+                            return (
+                              <p className="type-caption text-[var(--color-warning-text)]">
+                                У цього постачальника не задано тарифів доставки — пропишіть
+                                CARGO / НП у картці матеріалу.
+                              </p>
+                            );
+                          }
+                          return (
+                            <Select
+                              label="Тип доставки"
+                              value={deliveryType || options[0]!.type}
+                              onChange={(event) => {
+                                const next = event.target.value;
+                                setDeliveryType(next);
+                                const match = options.find((opt) => opt.type === next);
+                                if (match) setCargoUsdPerKg(String(match.rateUsdPerKg));
+                              }}
+                              disabled={locked || pending}
+                            >
+                              {options.map((opt) => (
+                                <option key={opt.type} value={opt.type}>
+                                  {opt.label} · {opt.rateUsdPerKg} $/кг
+                                </option>
+                              ))}
+                            </Select>
+                          );
+                        })()}
                         <div className="flex flex-wrap gap-4">
                           <NumberField
-                            label="Cargo"
+                            label="Тариф"
                             prefix="$"
                             suffix="/кг"
                             value={cargoUsdPerKg}
@@ -736,10 +804,86 @@ export function OrderMaterialDetailPanel({
                 onSupplierChange={(next) => handleSupplierChange(next ?? "")}
                 onColorChange={setColorSnapshot}
               />
+              {(() => {
+                const offer = (detail.offers ?? []).find(
+                  (row) => row.supplierId === supplierId,
+                ) as
+                  | {
+                      deliveryOptions?: Array<{
+                        type: string;
+                        rateUah: number;
+                        label: string;
+                      }>;
+                      purchasePricePerUnit?: number | null;
+                    }
+                  | undefined;
+                const options = offer?.deliveryOptions ?? [];
+                if (options.length === 0) return null;
+                const active =
+                  options.find((opt) => opt.type === deliveryType) ?? options[0]!;
+                return (
+                  <div className="mt-3 space-y-2">
+                    <Select
+                      label="Тип доставки"
+                      value={deliveryType || active.type}
+                      onChange={(event) => setDeliveryType(event.target.value)}
+                      disabled={locked || pending}
+                    >
+                      {options.map((opt) => (
+                        <option key={opt.type} value={opt.type}>
+                          {opt.label} · {opt.rateUah} ₴/уп.
+                        </option>
+                      ))}
+                    </Select>
+                    <p className="type-caption">
+                      Доставка {formatMoneyUah(active.rateUah)} за упаковку · в ₴/од. вже
+                      враховано.
+                    </p>
+                  </div>
+                );
+              })()}
               <dl className="mt-3 grid gap-2 text-[13px] sm:grid-cols-2">
                 <div>
                   <dt className="text-[var(--color-text-tertiary)]">Ціна закупівлі / од.</dt>
-                  <dd className="tabular font-semibold">{formatMoneyUah(detail.purchasePrice)}</dd>
+                  <dd className="tabular font-semibold">
+                    {formatMoneyUah(
+                      (() => {
+                        const offer = (detail.offers ?? []).find(
+                          (row) => row.supplierId === supplierId,
+                        ) as
+                          | {
+                              deliveryOptions?: Array<{
+                                type: string;
+                                rateUah: number;
+                              }>;
+                              purchasePackPrice?: number | null;
+                              purchasePricePerUnit?: number | null;
+                            }
+                          | undefined;
+                        const options = offer?.deliveryOptions ?? [];
+                        const active =
+                          options.find((opt) => opt.type === deliveryType) ?? options[0];
+                        const pack = detail as MaterialDetail & {
+                          unitsPerPack?: number | null;
+                          purchasePackPrice?: number | null;
+                        };
+                        if (
+                          offer?.purchasePackPrice != null &&
+                          pack.unitsPerPack != null &&
+                          pack.unitsPerPack > 0
+                        ) {
+                          const n = Math.floor(pack.unitsPerPack);
+                          const delivery = active?.rateUah ?? 0;
+                          return (
+                            Math.round(
+                              ((Number(offer.purchasePackPrice) + delivery) / n) * 10000,
+                            ) / 10000
+                          );
+                        }
+                        return offer?.purchasePricePerUnit ?? detail.purchasePrice;
+                      })(),
+                    )}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-[var(--color-text-tertiary)]">У собівартість партії</dt>
@@ -808,10 +952,9 @@ export function OrderMaterialDetailPanel({
                 })()}
               </dl>
               <Banner tone="info">
-                {(detail as { unitsPerPack?: number | null }).unitsPerPack != null &&
-                ((detail as { unitsPerPack?: number | null }).unitsPerPack ?? 0) > 0
-                  ? "Собівартість виробу рахує ₴/од. (упаковка + доставка ÷ шт). Закупівля — цілими упаковками."
-                  : "Для фурнітури вкажіть у каталозі «шт в упаковці», ціну й доставку упаковки — тоді ₴/од. і замовлення порахуються правильно."}
+                {detail.unitsPerPack != null && detail.unitsPerPack > 0
+                  ? "Оберіть постачальника — підставляться його ціна й доставка упаковки. Собівартість виробу = ₴/од."
+                  : "У картці матеріалу задайте «шт в упаковці», а в умовах постачальника — ціну й доставку упаковки."}
               </Banner>
             </Section>
           ) : null}

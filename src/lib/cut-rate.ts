@@ -1,7 +1,7 @@
 /**
  * Owner rule (CRM sheet comment 1):
  * Cut cost per unit decreases as run size grows until the explicit optimal tirage.
- * Above that quantity the per-unit cut rate stays frozen.
+ * Above that quantity the per-unit cut rate stays frozen (minimum).
  * Prefer this logic over copying every Google Sheet cell blindly.
  */
 
@@ -9,6 +9,22 @@ export type CutRateTier = {
   minQuantity: number;
   ratePerUnit: number;
 };
+
+/**
+ * ₴/шт from optimal job total.
+ * Below optimal: total ÷ this tirage (higher ₴/шт).
+ * At/above optimal: total ÷ optimalQty — rate does not fall further.
+ */
+export function cutRateFromOptimalJobTotal(
+  optimalTotal: number,
+  qty: number,
+  optimalQty?: number | null,
+): number {
+  if (!(qty > 0) || !(optimalTotal >= 0) || !Number.isFinite(optimalTotal)) return 0;
+  const floorAt =
+    optimalQty != null && optimalQty > 0 && qty >= optimalQty ? optimalQty : qty;
+  return Math.round((optimalTotal / floorAt) * 100) / 100;
+}
 
 /** Optimal run = explicit value, else last tier minQuantity. */
 export function resolveOptimalCutQty(args: {
@@ -41,6 +57,7 @@ export function resolveCutRatePerUnit(args: {
   if (tiers.length === 0) return args.fallbackRate;
 
   const optimal = resolveOptimalCutQty({ optimalQty: args.optimalQty, tiers });
+  // Freeze at optimal: larger runs keep the same ₴/шт as the optimal row.
   const effectiveQty = optimal != null && qty > optimal ? optimal : qty;
 
   let rate = args.fallbackRate;

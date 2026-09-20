@@ -214,8 +214,12 @@ model MaterialSupplier {
   supplierId           String
   isPrimary            Boolean  @default(false)
   metersPerKg          Decimal? @db.Decimal(14, 4)
-  /// Override company/supplier default cargo; null = use supplier then company.
+  /// Which configured tariff feeds catalog COGS for this offer.
+  deliveryType         FabricDeliveryType @default(CARGO) @map("delivery_type")
+  /// $/кг when deliveryType = CARGO (also used as legacy override).
   cargoUsdPerKg        Decimal? @db.Decimal(14, 4)
+  npStandardUsdPerKg   Decimal? @db.Decimal(14, 4) @map("np_standard_usd_per_kg")
+  npVolumeUsdPerKg     Decimal? @db.Decimal(14, 4) @map("np_volume_usd_per_kg")
   priceKgUsd           Decimal? @db.Decimal(14, 4)
   priceKgUsdCargo      Decimal? @db.Decimal(14, 4)
   priceKgUsdVat        Decimal? @db.Decimal(14, 4)
@@ -228,6 +232,10 @@ model MaterialSupplier {
   wholesaleNote        String?
   /// Colors available when this supplier is selected (product + order).
   availableColors      String[] @default([]) @map("available_colors")
+  /// Trim: supplier quote for one pack (₴, goods only).
+  purchasePackPrice    Decimal? @db.Decimal(14, 4) @map("purchase_pack_price")
+  /// Trim: delivery quoted per pack for this supplier (₴).
+  packDeliveryCostUah  Decimal? @db.Decimal(14, 4) @map("pack_delivery_cost_uah")
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -384,6 +392,8 @@ model ProductCommercialPriceTier {
   pricePerUnit Decimal @db.Decimal(14, 4)
   /// Show this tier on product cards in «Вироби» (base price for managers).
   showOnCard   Boolean @default(false) @map("show_on_card")
+  /// Sewing markup multiplier for this tirage (× column in «Прайс і крій»).
+  sewingMultiplier Decimal? @db.Decimal(8, 4) @map("sewing_multiplier")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -636,6 +646,8 @@ model OrderItemMaterial {
   supplierNameSnapshot   String?
   /// Color chosen for this order line (from the selected supplier's palette).
   colorSnapshot          String?
+  /// Delivery tariff mode used on this line (from supplier configured options).
+  deliveryType           FabricDeliveryType? @map("delivery_type")
   /// Override cargo $/kg for delivery on this line only.
   cargoUsdPerKg          Decimal? @db.Decimal(14, 4)
   /// Override USD/UAH rate for delivery on this line only.

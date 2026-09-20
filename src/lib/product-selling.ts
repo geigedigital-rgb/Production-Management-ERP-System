@@ -2,6 +2,7 @@ import type { CalculationResult } from "@/server/domains/calculation/engine";
 import {
   commercialPriceTiersFromProduct,
   resolveCommercialPricePerUnit,
+  resolveSewingMultiplierFromTiers,
   type CommercialPriceProduct,
 } from "@/lib/commercial-price";
 import { isCutOperationName } from "@/lib/cut-rate";
@@ -65,10 +66,12 @@ export function resolveClientUnitPrice(args: {
   const quantity = Math.max(1, Math.floor(args.quantity));
   const costPerUnit = Number.isFinite(args.costPerUnit) ? args.costPerUnit : 0;
   const sewingPerUnit = Math.max(0, args.sewingPerUnit);
-  const sewingMultiplier =
-    args.sewingMultiplier ?? defaultSewingMultiplierForQty(quantity);
-
   const tiers = commercialPriceTiersFromProduct(args.product);
+  const sewingMultiplier =
+    args.sewingMultiplier ??
+    resolveSewingMultiplierFromTiers(quantity, tiers) ??
+    defaultSewingMultiplierForQty(quantity);
+
   if (tiers.length > 0) {
     const fromList = resolveCommercialPricePerUnit({
       quantity,
@@ -85,7 +88,7 @@ export function resolveClientUnitPrice(args: {
     }
   }
 
-  if (sewingPerUnit > 0 && sewingMultiplier > 1) {
+  if (sewingPerUnit > 0 && sewingMultiplier > 0) {
     return {
       sellingPricePerUnit: suggestSellingFromSewingMarkup({
         costPerUnit,
