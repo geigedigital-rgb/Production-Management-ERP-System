@@ -396,7 +396,9 @@ export default async function ProductDetailPage({
             Створити замовлення
           </QuickAction>
         ) : null}
-        {canDuplicate ? <DuplicateProductButton productId={product.id} /> : null}
+        {canDuplicate ? (
+          <DuplicateProductButton productId={product.id} productNameUk={product.nameUk} />
+        ) : null}
       </QuickActions>
 
       <div className="grid gap-4 md:grid-cols-3">

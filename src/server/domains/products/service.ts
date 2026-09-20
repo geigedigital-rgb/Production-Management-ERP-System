@@ -1180,12 +1180,14 @@ export async function setProductCutRates(input: {
   });
 }
 
-async function uniqueProductNameUk(baseName: string) {
-  const trimmed = baseName.replace(/\s+/g, " ").trim();
+async function uniqueProductNameUk(preferredName: string, fallbackBase?: string) {
+  const preferred = preferredName.replace(/\s+/g, " ").trim();
+  const base = (fallbackBase ?? preferred).replace(/\s+/g, " ").trim();
   const candidates = [
-    `${trimmed} (копія)`,
-    ...Array.from({ length: 20 }, (_, index) => `${trimmed} (копія ${index + 2})`),
-  ];
+    preferred,
+    `${base} (копія)`,
+    ...Array.from({ length: 20 }, (_, index) => `${base} (копія ${index + 2})`),
+  ].filter(Boolean);
   for (const nameUk of candidates) {
     const existing = await prisma.product.findFirst({
       where: { nameUk: { equals: nameUk, mode: "insensitive" } },
@@ -1193,15 +1195,23 @@ async function uniqueProductNameUk(baseName: string) {
     });
     if (!existing) return nameUk;
   }
-  return `${trimmed} (копія ${Date.now()})`;
+  return `${base} (копія ${Date.now()})`;
 }
 
-/** Full BOM clone into a new catalog product with a unique name. */
-export async function duplicateProduct(sourceId: string) {
+/**
+ * Quick catalog clone: full BOM + cut/price ladders under a new name.
+ * Orders stay on the source; clone is never `isBaseModel`.
+ */
+export async function duplicateProduct(
+  sourceId: string,
+  options?: { nameUk?: string },
+) {
   const source = await getProduct(sourceId);
   if (!source) throw new Error("PRODUCT_NOT_FOUND");
 
-  const nameUk = await uniqueProductNameUk(source.nameUk);
+  const preferred =
+    options?.nameUk?.replace(/\s+/g, " ").trim() || `${source.nameUk} (копія)`;
+  const nameUk = await uniqueProductNameUk(preferred, source.nameUk);
   let internalCode: string | null = null;
   if (source.internalCode?.trim()) {
     const codeBase = `${source.internalCode.trim()}-COPY`;
@@ -1230,6 +1240,7 @@ export async function duplicateProduct(sourceId: string) {
           materialId: row.materialId,
           consumptionPerUnit: row.consumptionPerUnit,
           wastePercent: row.wastePercent,
+          note: row.note,
           sortOrder: row.sortOrder,
           supplierId: row.supplierId,
           colorSnapshot: row.colorSnapshot,
@@ -1250,6 +1261,7 @@ export async function duplicateProduct(sourceId: string) {
           operationId: row.operationId,
           rateOverride: row.rateOverride,
           standardOverride: row.standardOverride,
+          note: row.note,
           sortOrder: row.sortOrder,
           sizeScopes: {
             create: row.sizeScopes.map((scope) => ({ sizeId: scope.sizeId })),
@@ -1266,6 +1278,7 @@ export async function duplicateProduct(sourceId: string) {
         create: source.decorations.map((row) => ({
           decorationMethodId: row.decorationMethodId,
           setupCostOverride: row.setupCostOverride,
+          note: row.note,
         })),
       },
       additionalCosts: {

@@ -712,10 +712,12 @@ export async function duplicateProductAction(formData: FormData) {
   await assertSessionPermission("saveAsStandardProduct");
 
   const productId = String(formData.get("productId") ?? "");
+  const nameUk = String(formData.get("nameUk") ?? "").trim();
   if (!productId) return { ok: false as const, error: "INVALID" as const };
+  if (!nameUk) return { ok: false as const, error: "NAME_REQUIRED" as const };
 
   try {
-    const copy = await duplicateProduct(productId);
+    const copy = await duplicateProduct(productId, { nameUk });
     revalidatePath("/products");
     revalidatePath("/orders/new");
     revalidatePath(`/products/${copy.id}`);
