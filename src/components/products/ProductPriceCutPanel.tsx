@@ -65,11 +65,13 @@ function CompactInput({ className, ...props }: ComponentProps<"input">) {
 
 /** Dense table cell — no ₴ (unit shown once in the table caption). */
 function MoneyCell({
-  value,
+  perUnit,
+  total,
   tone,
   tip,
 }: {
-  value: number;
+  perUnit: number;
+  total: number;
   tone?: "quiet" | "strong";
   tip?: string;
 }) {
@@ -78,9 +80,14 @@ function MoneyCell({
       ? "font-medium text-[var(--color-text)]"
       : "text-[var(--color-text-secondary)]";
   const body = (
-    <span className={`type-mono text-[12px] tabular-nums ${color}`}>
-      {Number.isFinite(value) ? formatAmount(value) : "—"}
-    </span>
+    <div className="flex flex-col items-end gap-0.5">
+      <span className={`type-mono text-[12px] tabular-nums ${color}`}>
+        {Number.isFinite(perUnit) ? formatAmount(perUnit) : "—"}
+      </span>
+      <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
+        {Number.isFinite(total) ? formatAmount(total) : "—"}
+      </span>
+    </div>
   );
   return tip ? <FormulaTip tip={tip}>{body}</FormulaTip> : body;
 }
@@ -629,10 +636,11 @@ export function ProductPriceCutPanel({
       <div className="w-full overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
         <div className="flex items-center justify-between gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/40 px-2.5 py-1.5">
           <p className="type-caption text-[var(--color-text-quiet)]">
-            Мат + Крій×тираж + Пошив + Достав×тираж + Пакування + ПВ = Собів · суми в ₴
+            Основне — ₴/шт · сіре під ним — сума на тираж · Мат + Крій + Пошив + Достав + Пакування +
+            ПВ = Собів
           </p>
         </div>
-        <table className="w-full min-w-[64rem] table-fixed border-collapse text-left">
+        <table className="w-full min-w-[58rem] table-fixed border-collapse text-left">
           <colgroup>
             <col className="w-[3.25rem]" />
             <col className="w-[5.5rem]" />
@@ -645,7 +653,6 @@ export function ProductPriceCutPanel({
             <col />
             <col className="w-[4.5rem]" />
             <col className="w-[6.75rem]" />
-            <col />
             <col />
             <col className="w-[3.75rem]" />
             <col className="w-[2.25rem]" />
@@ -685,10 +692,7 @@ export function ProductPriceCutPanel({
                 <HeaderTip tip={headerTips.multiplier}>×</HeaderTip>
               </th>
               <th className={thClass}>
-                <HeaderTip tip={headerTips.price}>Ціна/шт</HeaderTip>
-              </th>
-              <th className={`${thClass} text-right`}>
-                <HeaderTip tip={headerTips.selling}>Продаж</HeaderTip>
+                <HeaderTip tip={headerTips.price}>Ціна</HeaderTip>
               </th>
               <th className={`${thClass} text-right`}>
                 <HeaderTip tip={headerTips.profit}>Прибуток</HeaderTip>
@@ -713,6 +717,14 @@ export function ProductPriceCutPanel({
               const selling = roundMoney(row.pricePerUnit * qty);
               const profit = roundMoney(selling - sheet.cost);
               const marginPercent = selling > 0 ? (profit / selling) * 100 : 0;
+              const perUnit = {
+                materials: hint?.materialsPerUnit ?? 0,
+                sewing: sewingPerUnit,
+                other: hint?.otherOpsPerUnit ?? 0,
+                pv: hint?.additionalPerUnit ?? 0,
+                cost: qty > 0 ? roundMoney(sheet.cost / qty) : 0,
+                profit: qty > 0 ? roundMoney(profit / qty) : 0,
+              };
               const tips = buildTirageFormulaTips({
                 qty,
                 cutRate: row.cutRate,
@@ -853,19 +865,28 @@ export function ProductPriceCutPanel({
                     </td>
                   ) : null}
                   <td className={tdNum}>
-                    <MoneyCell value={sheet.materials} tip={tips.materials} />
+                    <MoneyCell
+                      perUnit={perUnit.materials}
+                      total={sheet.materials}
+                      tip={tips.materials}
+                    />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={sheet.sewing} tip={tips.sewing} />
+                    <MoneyCell perUnit={perUnit.sewing} total={sheet.sewing} tip={tips.sewing} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={sheet.other} tip={tips.other} />
+                    <MoneyCell perUnit={perUnit.other} total={sheet.other} tip={tips.other} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={sheet.pv} tip={tips.pv} />
+                    <MoneyCell perUnit={perUnit.pv} total={sheet.pv} tip={tips.pv} />
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={sheet.cost} tip={tips.cost} tone="strong" />
+                    <MoneyCell
+                      perUnit={perUnit.cost}
+                      total={sheet.cost}
+                      tip={tips.cost}
+                      tone="strong"
+                    />
                   </td>
                   <td className={tdClass}>
                     <FormulaTip tip={tips.multiplier} className="w-full">
@@ -898,31 +919,40 @@ export function ProductPriceCutPanel({
                     </FormulaTip>
                   </td>
                   <td className={tdClass}>
-                    <FormulaTip tip={tips.price} className="w-full">
-                      <CompactInput
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        inputMode="decimal"
-                        className="w-full font-semibold"
-                        value={row.pricePerUnit}
-                        title={tips.price}
-                        onChange={(event) => {
-                          const pricePerUnit = Number(event.target.value);
-                          setRows((prev) => {
-                            const next = [...prev];
-                            next[index] = { ...row, pricePerUnit };
-                            return next;
-                          });
-                        }}
-                      />
-                    </FormulaTip>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <FormulaTip tip={tips.price} className="w-full">
+                        <CompactInput
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          className="w-full font-semibold"
+                          value={row.pricePerUnit}
+                          title={tips.price}
+                          onChange={(event) => {
+                            const pricePerUnit = Number(event.target.value);
+                            setRows((prev) => {
+                              const next = [...prev];
+                              next[index] = { ...row, pricePerUnit };
+                              return next;
+                            });
+                          }}
+                        />
+                      </FormulaTip>
+                      <FormulaTip tip={tips.selling}>
+                        <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
+                          {formatAmount(selling)}
+                        </span>
+                      </FormulaTip>
+                    </div>
                   </td>
                   <td className={tdNum}>
-                    <MoneyCell value={selling} tip={tips.selling} />
-                  </td>
-                  <td className={tdNum}>
-                    <MoneyCell value={profit} tip={tips.profit} tone="strong" />
+                    <MoneyCell
+                      perUnit={perUnit.profit}
+                      total={profit}
+                      tip={tips.profit}
+                      tone="strong"
+                    />
                   </td>
                   <td className={tdNum}>
                     <FormulaTip tip={tips.margin}>
