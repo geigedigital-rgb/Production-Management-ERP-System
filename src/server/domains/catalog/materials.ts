@@ -11,6 +11,7 @@ import {
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
+import { deriveUnitPriceFromPack, hasTrimPackQuote } from "@/lib/trim-pack-pricing";
 
 export async function getFabricPricingGlobals(): Promise<FabricPricingGlobals> {
   const pricing = await prisma.pricingSettings.findFirst();
@@ -47,6 +48,24 @@ function fabricDataFromForm(
   const deliveryType = normalizeFabricDeliveryType(data.deliveryType);
 
   if (data.type !== "FABRIC") {
+    const unitsPerPack =
+      data.unitsPerPack != null && data.unitsPerPack > 0 ? Math.floor(data.unitsPerPack) : null;
+    const purchasePackPrice =
+      unitsPerPack != null && data.purchasePackPrice != null ? data.purchasePackPrice : null;
+    const packDeliveryCostUah =
+      unitsPerPack != null && data.packDeliveryCostUah != null ? data.packDeliveryCostUah : null;
+    const purchasePrice = hasTrimPackQuote({
+      unitsPerPack,
+      purchasePackPrice,
+      packDeliveryCostUah,
+    })
+      ? deriveUnitPriceFromPack({
+          unitsPerPack,
+          purchasePackPrice,
+          packDeliveryCostUah,
+        })
+      : data.purchasePrice;
+
     return {
       densityGsm: null,
       composition: null,
@@ -65,7 +84,10 @@ function fabricDataFromForm(
       minWholesaleMeters: null,
       costVatOverride: null,
       deliveryType: "CARGO" as FabricDeliveryTypeCode,
-      purchasePrice: data.purchasePrice,
+      unitsPerPack,
+      purchasePackPrice,
+      packDeliveryCostUah,
+      purchasePrice,
     };
   }
 
@@ -108,6 +130,9 @@ function fabricDataFromForm(
     minWholesaleMeters: data.minWholesaleMeters ?? derived.minWholesaleMeters,
     costVatOverride: data.costVatOverride ?? null,
     deliveryType,
+    unitsPerPack: null,
+    purchasePackPrice: null,
+    packDeliveryCostUah: null,
     purchasePrice,
   };
 }
@@ -197,6 +222,9 @@ export async function createMaterial(raw: MaterialFormValues) {
       minWholesaleMeters: fabric.minWholesaleMeters,
       costVatOverride: fabric.costVatOverride,
       deliveryType: fabric.deliveryType,
+      unitsPerPack: fabric.unitsPerPack,
+      purchasePackPrice: fabric.purchasePackPrice,
+      packDeliveryCostUah: fabric.packDeliveryCostUah,
     },
     include: {
       unitOfMeasure: true,
@@ -221,7 +249,7 @@ export async function createMaterial(raw: MaterialFormValues) {
         fabric.priceMeterUahNoVat != null
           ? Number(fabric.priceMeterUahNoVat)
           : data.type !== "FABRIC"
-            ? Number(data.purchasePrice)
+            ? Number(fabric.purchasePrice)
             : null,
       priceMeterUahVat:
         fabric.priceMeterUahVat != null ? Number(fabric.priceMeterUahVat) : null,
@@ -277,6 +305,9 @@ export async function updateMaterial(
       minWholesaleMeters: fabric.minWholesaleMeters,
       costVatOverride: fabric.costVatOverride,
       deliveryType: fabric.deliveryType,
+      unitsPerPack: fabric.unitsPerPack,
+      purchasePackPrice: fabric.purchasePackPrice,
+      packDeliveryCostUah: fabric.packDeliveryCostUah,
       ...(preserve
         ? {}
         : {

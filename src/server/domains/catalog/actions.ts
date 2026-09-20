@@ -120,6 +120,11 @@ export async function getMaterialForEditAction(id: string) {
         row.minWholesaleMeters != null ? Number(row.minWholesaleMeters) : null,
       costVatOverride: row.costVatOverride,
       deliveryType: row.deliveryType,
+      unitsPerPack: row.unitsPerPack,
+      purchasePackPrice:
+        row.purchasePackPrice != null ? Number(row.purchasePackPrice) : null,
+      packDeliveryCostUah:
+        row.packDeliveryCostUah != null ? Number(row.packDeliveryCostUah) : null,
     },
   };
 }
@@ -365,6 +370,9 @@ function materialFormData(formData: FormData) {
     minWholesaleMeters: formData.get("minWholesaleMeters"),
     costVatOverride: formData.get("costVatOverride") || null,
     deliveryType: formData.get("deliveryType") || "CARGO",
+    unitsPerPack: formData.get("unitsPerPack"),
+    purchasePackPrice: formData.get("purchasePackPrice"),
+    packDeliveryCostUah: formData.get("packDeliveryCostUah"),
   };
 }
 

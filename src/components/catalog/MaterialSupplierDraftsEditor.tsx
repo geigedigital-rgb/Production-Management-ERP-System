@@ -453,12 +453,13 @@ export function MaterialSupplierDraftsEditor({
           {pricingKind === "unit" ? (
             <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={2} compact>
               <Input
-                label="Ціна закупки"
-                type="number"
-                min={0}
-                step="0.01"
-                suffix="₴"
-                required
+                    label="Ціна закупки / од."
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    suffix="₴"
+                    required
+                    hint="Якщо купуєте упаковкою — задайте упаковку в картці матеріалу"
                 value={draft.priceMeterUahNoVat}
                 onChange={(event) =>
                   setDraft((prev) => ({

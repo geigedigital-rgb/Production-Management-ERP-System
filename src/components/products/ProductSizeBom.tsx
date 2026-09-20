@@ -59,7 +59,7 @@ import {
   summarizeCutOperationDisplay,
   type CutRateTier,
 } from "@/lib/cut-rate";
-import { isDeliveryOperationName } from "@/lib/quantity-tiers";
+import { isDeliveryOperationName, resolveQuantityTierRate } from "@/lib/quantity-tiers";
 import { isFixedCostOperationName } from "@/lib/fixed-costs";
 
 function moveIdRelative(
@@ -193,10 +193,18 @@ function formatCutCostCell(row: OperationView, previewQty: number, cutRateContex
         : null;
 
   return {
-    primary: range ?? "—",
-    secondary: "₴/од. · сума на тираж у «Прайс і крій»",
-    title: `${CUT_RATES_TAB_HINT}. Крій залежить від тиражу, не фіксована ставка.`,
+    primary: range ?? formatMoneyUah(cut.previewRate),
+    secondary: "₴/од. залежно від тиражу",
+    title: CUT_RATES_TAB_HINT,
   };
+}
+
+function deliveryUnitRate(row: OperationView, previewQty: number) {
+  return resolveQuantityTierRate({
+    quantity: previewQty,
+    tiers: row.rateTiers,
+    fallbackRate: row.unitCost,
+  });
 }
 
 const inputClass =
@@ -306,6 +314,8 @@ export function ProductSizeBom({
       ? orderedOperations
       : orderedOperations.filter((row) => appliesToSize(row.sizeCodes, sizeScope));
   const hasDeliveryOp = operations.some((row) => isDeliveryOperationName(row.name));
+  const deliveryOpRow = operations.find((row) => isDeliveryOperationName(row.name));
+  const deliveryPerUnit = deliveryOpRow ? deliveryUnitRate(deliveryOpRow, previewQty) : 0;
   const customized = customizedSizeCodes({
     allCodes: sizes.map((size) => size.code),
     materials,
@@ -915,12 +925,14 @@ export function ProductSizeBom({
                         </div>
                       ) : row.methodCode === "QUANTITY_TIER" && isDeliveryOperationName(row.name) ? (
                         <span className="inline-flex flex-col items-end gap-0.5">
-                          <span className="type-caption">за тиражем</span>
+                          <span className="tabular">
+                            {formatMoneyUah(deliveryUnitRate(row, previewQty))}
+                          </span>
                           <Link
                             href={`/products/${productId}?tab=pricing`}
                             className="type-caption text-[var(--color-primary-700)] hover:underline"
                           >
-                            Прайс і крій →
+                            сітка в «Прайс і крій» →
                           </Link>
                         </span>
                       ) : isFixedCostOperationName(row.name) ? (
@@ -1024,7 +1036,11 @@ export function ProductSizeBom({
                         : "Доставка"}
                   </TD>
                   <TD numeric className="type-caption">
-                    за тиражем →
+                    {hasDeliveryOp && !hasCutOperation
+                      ? formatMoneyUah(deliveryPerUnit)
+                      : hasDeliveryOp && hasCutOperation
+                        ? `доставка ${formatMoneyUah(deliveryPerUnit)}/од. · крій за тиражем`
+                        : "за тиражем →"}
                   </TD>
                   {!readOnly ? <TD /> : null}
                 </tr>
@@ -1086,7 +1102,8 @@ export function ProductSizeBom({
           row.methodCode === "QUANTITY_TIER" && isDeliveryOperationName(row.name),
       ) ? (
         <p className="type-caption rounded-[10px] border border-dashed border-[var(--color-border)] px-3 py-2.5">
-          Ставки доставки за тиражем — у вкладці «Прайс і крій» (колонка «Достав.»).
+          Доставка в комплектації — ₴ на 1 шт. На тираж: ставка × кількість (напр. 1,50 × 100 = 150).
+          Сітку ставок редагуйте в «Прайс і крій» (колонка «Достав.»).
         </p>
       ) : null}
 

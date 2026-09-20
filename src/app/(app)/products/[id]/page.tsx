@@ -124,8 +124,10 @@ function mapOperationRow(
     };
   }
 
-  const method =
-    row.operation.calculationMethod === "QUANTITY_TIER"
+  const isDelivery = isDeliveryOperationName(row.operation.nameUk);
+  const method = isDelivery
+    ? "₴/од. × тираж"
+    : row.operation.calculationMethod === "QUANTITY_TIER"
       ? `${operationMethodLabel(row.operation.calculationMethod)} · приклад ${TIER_PREVIEW_QTY} шт`
       : operationMethodLabel(row.operation.calculationMethod);
 

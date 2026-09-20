@@ -50,6 +50,10 @@ import {
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
+import {
+  deriveUnitPriceFromPack,
+  hasTrimPackQuote,
+} from "@/lib/trim-pack-pricing";
 import { formatMoneyUah } from "@/lib/utils";
 
 type UnitOption = { id: string; label: string; code?: string };
@@ -120,6 +124,9 @@ export type MaterialFormDefaults = {
   minWholesaleMeters?: number | null;
   costVatOverride?: "NET" | "GROSS" | null;
   deliveryType?: FabricDeliveryTypeCode | null;
+  unitsPerPack?: number | null;
+  purchasePackPrice?: number | null;
+  packDeliveryCostUah?: number | null;
 };
 
 function numStr(value: number | null | undefined) {
@@ -296,6 +303,11 @@ function MaterialFields({
   );
 
   const [purchasePrice, setPurchasePrice] = useState(String(defaults?.purchasePrice ?? 0));
+  const [unitsPerPack, setUnitsPerPack] = useState(numStr(defaults?.unitsPerPack));
+  const [purchasePackPrice, setPurchasePackPrice] = useState(numStr(defaults?.purchasePackPrice));
+  const [packDeliveryCostUah, setPackDeliveryCostUah] = useState(
+    numStr(defaults?.packDeliveryCostUah),
+  );
 
   const selectedUnit = units.find((unit) => unit.id === unitOfMeasureId) ?? units[0];
   const fabricUnitMode = resolveFabricUnitMode(resolveUnitCode(selectedUnit));
@@ -467,6 +479,17 @@ function MaterialFields({
   const supplierValue =
     supplierSelect === SUPPLIER_OTHER ? supplierOther.trim() : supplierSelect;
 
+  const trimPackQuote = {
+    unitsPerPack: unitsPerPack ? Number(unitsPerPack) : null,
+    purchasePackPrice: purchasePackPrice !== "" ? Number(purchasePackPrice) : null,
+    packDeliveryCostUah: packDeliveryCostUah !== "" ? Number(packDeliveryCostUah) : null,
+  };
+  const trimPackActive = type !== "FABRIC" && hasTrimPackQuote(trimPackQuote);
+  const trimUnitFromPack = deriveUnitPriceFromPack(
+    trimPackQuote,
+    Number(purchasePrice) || 0,
+  );
+
   const purchaseDisplay =
     type === "FABRIC"
       ? fabricEachPricing
@@ -476,15 +499,18 @@ function MaterialFields({
           : derived.purchasePrice > 0
             ? String(derived.purchasePrice)
             : purchasePrice
-      : purchasePrice;
+      : trimPackActive
+        ? String(trimUnitFromPack)
+        : purchasePrice;
 
   const policyLabel =
     liveGlobals.materialCostVatMode === "GROSS" ? "GROSS" : "NET";
-  const purchaseReadOnly = type === "FABRIC" && !fabricEachPricing;
+  const purchaseReadOnly =
+    (type === "FABRIC" && !fabricEachPricing) || trimPackActive;
 
   const wizardSteps = useMemo(() => {
     if (type !== "FABRIC") {
-      if (wizard) return ["Основне", "Постачальник", "Готово"];
+      if (wizard) return ["Основне", "Ціна", "Постачальник", "Готово"];
       return ["Основне", "Постачальник", "Ціна", "Готово"];
     }
     if (managePricingSeparately) {
@@ -706,8 +732,46 @@ function MaterialFields({
         columns={2}
         compact
       >
+        {type !== "FABRIC" ? (
+          <>
+            <Input
+              name="unitsPerPack"
+              label="Шт в упаковці"
+              type="number"
+              step="1"
+              min="1"
+              optional
+              hint="Напр. гудзики — 1000 шт"
+              value={unitsPerPack}
+              onChange={(event) => setUnitsPerPack(event.target.value)}
+            />
+            <Input
+              name="purchasePackPrice"
+              label="Ціна упаковки"
+              type="number"
+              step="0.01"
+              min="0"
+              optional
+              suffix="₴"
+              value={purchasePackPrice}
+              onChange={(event) => setPurchasePackPrice(event.target.value)}
+            />
+            <Input
+              name="packDeliveryCostUah"
+              label="Доставка упаковки"
+              type="number"
+              step="0.01"
+              min="0"
+              optional
+              suffix="₴"
+              hint="Теж на всю упаковку"
+              value={packDeliveryCostUah}
+              onChange={(event) => setPackDeliveryCostUah(event.target.value)}
+            />
+          </>
+        ) : null}
         <Input
-          name={wizardMultiSuppliers ? undefined : "purchasePrice"}
+          name={wizardMultiSuppliers && !trimPackActive ? undefined : "purchasePrice"}
           label={
             fabricEachPricing
               ? fabricUnitMode === "cone"
@@ -715,7 +779,9 @@ function MaterialFields({
                 : "Собівартість"
               : type === "FABRIC"
                 ? "Собівартість"
-                : "Собівартість"
+                : trimPackActive
+                  ? "Собівартість / од."
+                  : "Собівартість"
           }
           type="number"
           step="0.01"
@@ -733,10 +799,20 @@ function MaterialFields({
           value={purchaseDisplay}
           readOnly={purchaseReadOnly}
           tabIndex={purchaseReadOnly ? -1 : undefined}
+          hint={
+            trimPackActive
+              ? `(ціна + доставка) ÷ ${Math.floor(Number(unitsPerPack))} шт`
+              : type !== "FABRIC"
+                ? "Або вкажіть упаковку вище — ₴/од. порахуємо самі"
+                : undefined
+          }
           onChange={
             purchaseReadOnly ? undefined : (event) => setPurchasePrice(event.target.value)
           }
         />
+        {wizardMultiSuppliers && trimPackActive ? (
+          <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
+        ) : null}
         <Input
           name="defaultWastePercent"
           label="Відходи"

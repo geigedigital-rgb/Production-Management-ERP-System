@@ -738,18 +738,80 @@ export function OrderMaterialDetailPanel({
               />
               <dl className="mt-3 grid gap-2 text-[13px] sm:grid-cols-2">
                 <div>
-                  <dt className="text-[var(--color-text-tertiary)]">Ціна закупівлі</dt>
+                  <dt className="text-[var(--color-text-tertiary)]">Ціна закупівлі / од.</dt>
                   <dd className="tabular font-semibold">{formatMoneyUah(detail.purchasePrice)}</dd>
                 </div>
                 <div>
-                  <dt className="text-[var(--color-text-tertiary)]">Партія</dt>
+                  <dt className="text-[var(--color-text-tertiary)]">У собівартість партії</dt>
                   <dd className="tabular font-medium">
                     {lineQuantity(detail)} шт · {formatMoneyUah(detail.materialPartyCost ?? 0)}
                   </dd>
                 </div>
+                {(() => {
+                  const pack = detail as MaterialDetail & {
+                    unitsNeeded?: number;
+                    unitsPerPack?: number | null;
+                    packsToOrder?: number;
+                    purchasePackPrice?: number | null;
+                    packGoodsCost?: number | null;
+                    packDeliveryCost?: number | null;
+                    packOrderTotal?: number | null;
+                  };
+                  return (
+                    <>
+                      {pack.unitsNeeded != null ? (
+                        <div>
+                          <dt className="text-[var(--color-text-tertiary)]">Потрібно</dt>
+                          <dd className="tabular font-medium">
+                            {pack.unitsNeeded} {detail.unit || "од."}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {pack.unitsPerPack != null && pack.unitsPerPack > 0 ? (
+                        <>
+                          <div>
+                            <dt className="text-[var(--color-text-tertiary)]">Замовити упаковок</dt>
+                            <dd className="tabular font-semibold">
+                              {pack.packsToOrder ?? 0} × {pack.unitsPerPack} шт
+                            </dd>
+                          </div>
+                          {pack.purchasePackPrice != null ? (
+                            <div>
+                              <dt className="text-[var(--color-text-tertiary)]">Товар (упаковки)</dt>
+                              <dd className="tabular font-medium">
+                                {formatMoneyUah(pack.packGoodsCost ?? 0)}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {pack.packDeliveryCost != null && pack.packDeliveryCost > 0 ? (
+                            <div>
+                              <dt className="text-[var(--color-text-tertiary)]">Доставка упаковок</dt>
+                              <dd className="tabular font-medium">
+                                {formatMoneyUah(pack.packDeliveryCost)}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {pack.packOrderTotal != null ? (
+                            <div className="sm:col-span-2">
+                              <dt className="text-[var(--color-text-tertiary)]">
+                                Сума закупівлі фурнітури
+                              </dt>
+                              <dd className="tabular font-semibold">
+                                {formatMoneyUah(pack.packOrderTotal)}
+                              </dd>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </dl>
               <Banner tone="info">
-                Для фурнітури та інших матеріалів доставка cargo не застосовується.
+                {(detail as { unitsPerPack?: number | null }).unitsPerPack != null &&
+                ((detail as { unitsPerPack?: number | null }).unitsPerPack ?? 0) > 0
+                  ? "Собівартість виробу рахує ₴/од. (упаковка + доставка ÷ шт). Закупівля — цілими упаковками."
+                  : "Для фурнітури вкажіть у каталозі «шт в упаковці», ціну й доставку упаковки — тоді ₴/од. і замовлення порахуються правильно."}
               </Banner>
             </Section>
           ) : null}

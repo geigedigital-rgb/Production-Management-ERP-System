@@ -167,6 +167,13 @@ model Material {
   /// Delivery tariff for fabric kg → ₴ (rates in PricingSettings).
   deliveryType         FabricDeliveryType @default(CARGO)
 
+  /// Trim / hardware: buy by pack, consume by unit (шт). Null = manual purchasePrice only.
+  unitsPerPack         Int?      @map("units_per_pack")
+  /// Supplier quote for one pack (goods only, ₴).
+  purchasePackPrice    Decimal?  @db.Decimal(14, 4) @map("purchase_pack_price")
+  /// Delivery quoted per pack (₴); folded into purchasePrice / unitsPerPack.
+  packDeliveryCostUah  Decimal?  @db.Decimal(14, 4) @map("pack_delivery_cost_uah")
+
   category      Category?      @relation(fields: [categoryId], references: [id])
   unitOfMeasure UnitOfMeasure  @relation(fields: [unitOfMeasureId], references: [id])
   productMaterials ProductMaterial[]

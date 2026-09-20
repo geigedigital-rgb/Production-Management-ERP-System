@@ -56,6 +56,10 @@ export const materialFormSchema = z.object({
     emptyToNull,
     fabricDeliveryTypeSchema.optional().default("CARGO"),
   ),
+  /** Trim pack size (e.g. 1000 buttons). */
+  unitsPerPack: z.preprocess(emptyToNull, z.coerce.number().int().positive().nullable().optional()),
+  purchasePackPrice: optionalNonNeg,
+  packDeliveryCostUah: optionalNonNeg,
 });
 
 export type MaterialFormValues = z.infer<typeof materialFormSchema>;

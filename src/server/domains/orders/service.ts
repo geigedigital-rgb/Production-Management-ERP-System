@@ -32,6 +32,11 @@ import {
 } from "@/lib/quantity-tiers";
 import { computeFabricDeliveryLine } from "@/lib/fabric-delivery";
 import {
+  packsToOrder,
+  trimPackSpend,
+  hasTrimPackQuote,
+} from "@/lib/trim-pack-pricing";
+import {
   fabricFieldsForOrderLine,
   materialToSnapshot,
   offerToSnapshot,
@@ -1303,20 +1308,43 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
           orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
         })
       : [];
+    const consumption = Number(row.consumptionPerUnit);
+    const waste = Number(row.wastePercent);
+    const purchasePrice = Number(row.purchasePrice);
+    const unitsNeeded =
+      Math.round(consumption * (1 + waste / 100) * totalQuantity * 10000) / 10000;
+    const unitsPerPack = row.material?.unitsPerPack ?? null;
+    const purchasePackPrice =
+      row.material?.purchasePackPrice != null ? Number(row.material.purchasePackPrice) : null;
+    const packDeliveryCostUah =
+      row.material?.packDeliveryCostUah != null
+        ? Number(row.material.packDeliveryCostUah)
+        : null;
+    const packs = packsToOrder(unitsNeeded, unitsPerPack);
+    const packSpend = hasTrimPackQuote({
+      unitsPerPack,
+      purchasePackPrice,
+      packDeliveryCostUah,
+    })
+      ? trimPackSpend({ packs, purchasePackPrice, packDeliveryCostUah })
+      : null;
+    const materialPartyCost =
+      Math.round(purchasePrice * consumption * (1 + waste / 100) * totalQuantity * 100) / 100;
+
     return {
       id: row.id,
       orderId: row.orderItem.orderId,
       orderItemId: row.orderItemId,
       name: row.nameSnapshot,
       unit: row.unitCodeSnapshot,
-      consumption: Number(row.consumptionPerUnit),
-      waste: Number(row.wastePercent),
+      consumption,
+      waste,
       sizeCode: row.sizeCode,
       totalQuantity,
       quantitiesBySize,
       isFabric: false,
       materialId: row.materialId,
-      purchasePrice: Number(row.purchasePrice),
+      purchasePrice,
       colorSnapshot: row.colorSnapshot,
       supplierId: row.supplierId,
       materialAvailableColors: row.material?.availableColors ?? [],
@@ -1327,14 +1355,15 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
         isPrimary: offer.isPrimary,
         availableColors: offer.availableColors ?? [],
       })),
-      materialPartyCost:
-        Math.round(
-          Number(row.purchasePrice) *
-            Number(row.consumptionPerUnit) *
-            (1 + Number(row.wastePercent) / 100) *
-            totalQuantity *
-            100,
-        ) / 100,
+      materialPartyCost,
+      unitsNeeded,
+      unitsPerPack,
+      purchasePackPrice,
+      packDeliveryCostUah,
+      packsToOrder: packs,
+      packGoodsCost: packSpend?.goods ?? null,
+      packDeliveryCost: packSpend?.delivery ?? null,
+      packOrderTotal: packSpend?.total ?? null,
     };
   }
 
