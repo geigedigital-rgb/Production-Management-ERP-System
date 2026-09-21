@@ -15,7 +15,7 @@ export default async function SizeChartsSettingsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Розмірна сітка"
-        description="Зліва — список варіантів. Справа — таблиця підбору або редагування розмірів."
+        description="Розміри — те, що вибирають у виробі й замовленні. Підказка — окремі таблиці обхватів / зросту."
       />
       <SizeChartsAdminPanel
         variants={catalog.map((row) => ({

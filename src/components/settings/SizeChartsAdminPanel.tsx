@@ -22,6 +22,7 @@ import {
   saveSizeChartVariantAction,
   saveVariantSizesAction,
 } from "@/server/domains/size-charts/actions";
+import { getSizeGuideForVariant } from "@/server/domains/size-charts/size-instructions";
 import { cn } from "@/lib/utils";
 
 export type SizeChartSizeRow = {
@@ -43,6 +44,8 @@ export type SizeChartVariantRow = {
   sizes: SizeChartSizeRow[];
   productCount: number;
 };
+
+type PanelTab = "sizes" | "hint";
 
 function emptySize(sortOrder: number): SizeChartSizeRow {
   return { code: "", nameUk: "", descriptionUk: "", sortOrder };
@@ -71,12 +74,12 @@ export function SizeChartsAdminPanel({
   const [selectedId, setSelectedId] = useState(initialVariants[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [panel, setPanel] = useState<"guide" | "edit">("guide");
+  /** «Розміри» = реальні розміри для виробу/замовлення; «Підказка» = обхвати / довідка. */
+  const [panel, setPanel] = useState<PanelTab>("sizes");
   const [createOpen, setCreateOpen] = useState(false);
   const [variantDraft, setVariantDraft] = useState({
     nameUk: "",
     code: "",
-    description: "",
   });
 
   const selected = useMemo(
@@ -84,13 +87,15 @@ export function SizeChartsAdminPanel({
     [variants, selectedId],
   );
 
+  const hasHint = Boolean(selected && getSizeGuideForVariant(selected.code));
+
   const [sizeDrafts, setSizeDrafts] = useState<SizeChartSizeRow[]>(() =>
     initialVariants[0] ? sizesFromVariant(initialVariants[0]) : [],
   );
 
-  function selectVariant(row: SizeChartVariantRow) {
+  function selectVariant(row: SizeChartVariantRow, tab: PanelTab = "sizes") {
     setSelectedId(row.id);
-    setPanel("guide");
+    setPanel(tab);
     setSizeDrafts(sizesFromVariant(row));
     setError(null);
     setMessage(null);
@@ -100,13 +105,11 @@ export function SizeChartsAdminPanel({
     setVariants(initialVariants);
     const stillThere = initialVariants.some((row) => row.id === selectedId);
     if (!stillThere && initialVariants[0]) {
-      selectVariant(initialVariants[0]);
+      selectVariant(initialVariants[0], "sizes");
       return;
     }
     const current = initialVariants.find((row) => row.id === selectedId);
-    if (current && panel === "guide") {
-      setSizeDrafts(sizesFromVariant(current));
-    }
+    if (current) setSizeDrafts(sizesFromVariant(current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialVariants]);
 
@@ -119,9 +122,6 @@ export function SizeChartsAdminPanel({
     const formData = new FormData();
     formData.set("nameUk", variantDraft.nameUk.trim());
     if (variantDraft.code.trim()) formData.set("code", variantDraft.code.trim());
-    if (variantDraft.description.trim()) {
-      formData.set("description", variantDraft.description.trim());
-    }
     formData.set("sortOrder", String(variants.length + 1));
     startTransition(async () => {
       const result = await saveSizeChartVariantAction(formData);
@@ -135,9 +135,12 @@ export function SizeChartsAdminPanel({
         );
         return;
       }
-      setVariantDraft({ nameUk: "", code: "", description: "" });
+      setVariantDraft({ nameUk: "", code: "" });
       setCreateOpen(false);
-      setMessage("Варіант додано.");
+      setSelectedId(result.id);
+      setPanel("sizes");
+      setSizeDrafts([]);
+      setMessage("Варіант створено — додайте реальні розміри і збережіть.");
       router.refresh();
     });
   }
@@ -155,6 +158,7 @@ export function SizeChartsAdminPanel({
           .map((row, index) => ({
             code: row.code.trim(),
             nameUk: row.nameUk.trim() || row.code.trim(),
+            // Keep existing hint text if any; sizes editor no longer edits it.
             descriptionUk: row.descriptionUk.trim() || null,
             sortOrder: index + 1,
           })),
@@ -179,7 +183,6 @@ export function SizeChartsAdminPanel({
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(14rem,17rem)_minmax(0,1fr)] lg:items-start">
-      {/* Left: variant list only */}
       <TableCard className="overflow-visible">
         <TableToolbar
           left={<span className="type-label">Варіанти сітки</span>}
@@ -189,7 +192,7 @@ export function SizeChartsAdminPanel({
             </Button>
           }
         />
-        <ul className="max-h-[min(70vh,36rem)] space-y-0.5 overflow-y-auto p-2">
+        <ul className="max-h-[min(70vh,36rem)] overflow-y-auto p-1.5">
           {activeVariants.map((row) => {
             const active = row.id === selectedId;
             const count = row.sizes.filter((s) => s.status !== "ARCHIVED").length;
@@ -197,29 +200,28 @@ export function SizeChartsAdminPanel({
               <li key={row.id}>
                 <button
                   type="button"
-                  onClick={() => selectVariant(row)}
+                  onClick={() => selectVariant(row, "sizes")}
                   className={cn(
-                    "flex w-full flex-col rounded-[8px] px-2.5 py-2 text-left transition-colors",
+                    "flex w-full items-baseline justify-between gap-2 rounded-[6px] px-2 py-1.5 text-left transition-colors",
                     active
                       ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
                       : "hover:bg-[var(--color-surface-subtle)]",
                   )}
                 >
-                  <span className="text-[13px] font-medium leading-snug">{row.nameUk}</span>
-                  <span className="mt-0.5 type-caption text-[var(--color-text-quiet)]">
-                    {count} розм. · {row.productCount} вир.
+                  <span className="truncate text-[13px] font-medium leading-snug">{row.nameUk}</span>
+                  <span className="shrink-0 type-caption tabular-nums text-[var(--color-text-quiet)]">
+                    {count}
                   </span>
                 </button>
               </li>
             );
           })}
           {activeVariants.length === 0 ? (
-            <li className="px-2.5 py-4 type-caption">Ще немає варіантів.</li>
+            <li className="px-2 py-3 type-caption">Ще немає варіантів.</li>
           ) : null}
         </ul>
       </TableCard>
 
-      {/* Right: guide / editor */}
       <SoftBusy busy={pending} className="min-w-0">
         <TableCard>
           {!selected ? (
@@ -230,72 +232,75 @@ export function SizeChartsAdminPanel({
             <>
               <TableToolbar
                 left={
-                  <div className="min-w-0">
-                    <p className="truncate text-[15px] font-semibold text-[var(--color-text)]">
-                      {selected.nameUk}
-                    </p>
-                  </div>
+                  <p className="truncate text-[15px] font-semibold text-[var(--color-text)]">
+                    {selected.nameUk}
+                  </p>
                 }
                 right={
                   <div className="inline-flex rounded-[8px] border border-[var(--color-border)] p-0.5">
                     <button
                       type="button"
-                      onClick={() => setPanel("guide")}
+                      onClick={() => setPanel("sizes")}
                       className={cn(
                         "rounded-[6px] px-2.5 py-1 text-[12.5px] font-medium",
-                        panel === "guide"
+                        panel === "sizes"
                           ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
                           : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]",
                       )}
                     >
-                      Підбір
+                      Розміри
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPanel("edit")}
+                      onClick={() => setPanel("hint")}
                       className={cn(
                         "rounded-[6px] px-2.5 py-1 text-[12.5px] font-medium",
-                        panel === "edit"
+                        panel === "hint"
                           ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
                           : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]",
                       )}
                     >
-                      Редагувати
+                      Підказка
                     </button>
                   </div>
                 }
               />
 
-              <div className="space-y-3 p-3.5">
-                {error ? <Banner tone="danger">{error}</Banner> : null}
-                {message ? <Banner tone="success">{message}</Banner> : null}
+              <div className={cn(panel === "sizes" ? "p-0" : "space-y-3 p-3.5")}>
+                {error ? (
+                  <div className={panel === "sizes" ? "px-3.5 pt-2.5" : undefined}>
+                    <Banner tone="danger">{error}</Banner>
+                  </div>
+                ) : null}
+                {message ? (
+                  <div className={panel === "sizes" ? "px-3.5 pt-2.5" : undefined}>
+                    <Banner tone="success">{message}</Banner>
+                  </div>
+                ) : null}
 
-                {panel === "guide" ? (
-                  <SizeGuideInline
-                    variantCode={selected.code}
-                    fallbackNote="Немає готової таблиці підбору — перейдіть у «Редагувати» і додайте розміри."
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    <p className="type-caption">
-                      Код і назва показуються у виробі. Опис — текстова підказка, якщо немає
-                      стандартної таблиці підбору.
-                    </p>
-                    <div className="overflow-hidden rounded-[8px] border border-[var(--color-border)]">
-                      <Table>
-                        <THead>
-                          <TH className="w-[6.5rem]">Код</TH>
-                          <TH className="w-[8rem]">Назва</TH>
-                          <TH>Опис / інструкція</TH>
-                          <TH className="w-10" />
-                        </THead>
-                        <TBody>
-                          {sizeDrafts.map((row, index) => (
+                {panel === "sizes" ? (
+                  <div>
+                    <Table>
+                      <THead>
+                        <TH className="w-[7rem] !py-1.5">Код</TH>
+                        <TH className="!py-1.5">Назва</TH>
+                        <TH className="w-9 !py-1.5" />
+                      </THead>
+                      <TBody>
+                        {sizeDrafts.length === 0 ? (
+                          <TR>
+                            <TD colSpan={3} className="!py-4 text-center type-caption">
+                              Немає розмірів — натисніть «+ Розмір».
+                            </TD>
+                          </TR>
+                        ) : (
+                          sizeDrafts.map((row, index) => (
                             <TR key={`${row.id ?? "new"}-${index}`}>
-                              <TD className="py-1.5 align-top">
+                              <TD className="!py-0.5">
                                 <input
-                                  className="h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[13px] outline-none focus:border-[var(--color-primary-500)]"
+                                  className="h-7 w-full rounded-[5px] border border-transparent bg-transparent px-1.5 text-[13px] outline-none hover:border-[var(--color-border)] focus:border-[var(--color-primary-500)] focus:bg-[var(--color-surface)]"
                                   value={row.code}
+                                  placeholder="S"
                                   onChange={(event) => {
                                     const code = event.target.value;
                                     setSizeDrafts((prev) => {
@@ -310,10 +315,11 @@ export function SizeChartsAdminPanel({
                                   }}
                                 />
                               </TD>
-                              <TD className="py-1.5 align-top">
+                              <TD className="!py-0.5">
                                 <input
-                                  className="h-8 w-full rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[13px] outline-none focus:border-[var(--color-primary-500)]"
+                                  className="h-7 w-full rounded-[5px] border border-transparent bg-transparent px-1.5 text-[13px] outline-none hover:border-[var(--color-border)] focus:border-[var(--color-primary-500)] focus:bg-[var(--color-surface)]"
                                   value={row.nameUk}
+                                  placeholder="S · 42–44"
                                   onChange={(event) => {
                                     const nameUk = event.target.value;
                                     setSizeDrafts((prev) => {
@@ -324,42 +330,26 @@ export function SizeChartsAdminPanel({
                                   }}
                                 />
                               </TD>
-                              <TD className="py-1.5 align-top">
-                                <textarea
-                                  rows={2}
-                                  className="w-full resize-y rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-[12.5px] leading-snug outline-none focus:border-[var(--color-primary-500)]"
-                                  value={row.descriptionUk}
-                                  placeholder="Обхвати / підказка"
-                                  onChange={(event) => {
-                                    const descriptionUk = event.target.value;
-                                    setSizeDrafts((prev) => {
-                                      const next = [...prev];
-                                      next[index] = { ...row, descriptionUk };
-                                      return next;
-                                    });
-                                  }}
-                                />
-                              </TD>
-                              <TD className="py-1.5 text-center align-top">
+                              <TD className="!py-0.5 text-center">
                                 <button
                                   type="button"
-                                  className="text-[13px] text-[var(--color-text-quiet)] hover:text-[var(--color-danger)]"
+                                  className="text-[12px] leading-none text-[var(--color-text-quiet)] hover:text-[var(--color-danger)]"
                                   onClick={() =>
                                     setSizeDrafts((prev) =>
                                       prev.filter((_, i) => i !== index),
                                     )
                                   }
-                                  aria-label="Прибрати рядок"
+                                  aria-label="Прибрати розмір"
                                 >
                                   ×
                                 </button>
                               </TD>
                             </TR>
-                          ))}
-                        </TBody>
-                      </Table>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
+                          ))
+                        )}
+                      </TBody>
+                    </Table>
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--color-border)] px-3 py-2">
                       <Button
                         type="button"
                         size="sm"
@@ -372,9 +362,22 @@ export function SizeChartsAdminPanel({
                         + Розмір
                       </Button>
                       <Button type="button" size="sm" disabled={pending} onClick={saveSizes}>
-                        {pending ? "Збереження…" : "Зберегти розміри"}
+                        {pending ? "Збереження…" : "Зберегти"}
                       </Button>
                     </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="type-caption">
+                      Підказка для підбору (обхвати, зріст) — не розміри сітки.
+                    </p>
+                    {hasHint ? (
+                      <SizeGuideInline variantCode={selected.code} />
+                    ) : (
+                      <div className="rounded-[8px] border border-dashed border-[var(--color-border)] px-3 py-4 text-center type-caption">
+                        Немає таблиці-підказки. Розміри — у вкладці «Розміри».
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -390,7 +393,7 @@ export function SizeChartsAdminPanel({
           setError(null);
         }}
         title="Новий варіант сітки"
-        description="Після створення додайте розміри в режимі «Редагувати»."
+        description="Після створення відкриється вкладка «Розміри» — додайте коди/назви і збережіть."
         width="sm"
         footer={
           <>
@@ -404,7 +407,7 @@ export function SizeChartsAdminPanel({
               Скасувати
             </Button>
             <Button type="button" size="sm" disabled={pending} onClick={addVariant}>
-              {pending ? "Збереження…" : "Додати варіант"}
+              {pending ? "Збереження…" : "Створити"}
             </Button>
           </>
         }
@@ -428,14 +431,6 @@ export function SizeChartsAdminPanel({
               setVariantDraft((prev) => ({ ...prev, code: event.target.value }))
             }
             placeholder="Авто з назви"
-          />
-          <Input
-            label="Короткий опис"
-            optional
-            value={variantDraft.description}
-            onChange={(event) =>
-              setVariantDraft((prev) => ({ ...prev, description: event.target.value }))
-            }
           />
         </div>
       </Modal>

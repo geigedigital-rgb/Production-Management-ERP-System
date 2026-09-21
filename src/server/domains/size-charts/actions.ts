@@ -30,7 +30,10 @@ export async function saveSizeChartVariantAction(formData: FormData) {
   const sortOrder = Number(formData.get("sortOrder") ?? 0);
 
   try {
-    await upsertSizeChartVariant({ id, nameUk, code, description, sortOrder });
+    const row = await upsertSizeChartVariant({ id, nameUk, code, description, sortOrder });
+    revalidatePath("/settings/size-charts");
+    revalidatePath("/products");
+    return { ok: true as const, id: row.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : "ERROR";
     if (message.includes("Unique") || message.includes("unique")) {
@@ -39,10 +42,6 @@ export async function saveSizeChartVariantAction(formData: FormData) {
     if (message === "NAME_REQUIRED") return { ok: false as const, error: "NAME_REQUIRED" as const };
     return { ok: false as const, error: "ERROR" as const };
   }
-
-  revalidatePath("/settings/size-charts");
-  revalidatePath("/products");
-  return { ok: true as const };
 }
 
 export async function archiveSizeChartVariantAction(formData: FormData) {
