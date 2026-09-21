@@ -4,6 +4,7 @@ import {
   listProductsByIds,
   listProductsSummary,
   listSizes,
+  listSizeChartVariantsForProduct,
 } from "@/server/domains/products/service";
 import { listMaterials, listUnits } from "@/server/domains/catalog/materials";
 import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
@@ -45,7 +46,8 @@ export default async function ProductsPage({
   let dbError = false;
   let loadError: string | null = null;
 
-  const [pricing, sizes, materials, operations, decorations, units, health] = await Promise.all([
+  const [pricing, sizes, sizeVariants, materials, operations, decorations, units, health] =
+    await Promise.all([
     getPricingDefaults().catch(() => ({
       pricingMethod: "MARKUP" as const,
       targetRatePercent: 0,
@@ -54,6 +56,7 @@ export default async function ProductsPage({
       sizeRules: [],
     })),
     listSizes().catch(() => []),
+    listSizeChartVariantsForProduct().catch(() => []),
     listMaterials().catch(() => []),
     listOperations().catch(() => []),
     listDecorations().catch(() => []),
@@ -103,6 +106,11 @@ export default async function ProductsPage({
     id: size.id,
     label: size.nameUk,
     code: size.code,
+    variantId: size.variantId,
+  }));
+  const sizeVariantOptions = sizeVariants.map((row) => ({
+    id: row.id,
+    nameUk: row.nameUk,
   }));
   const unitOptions = units.map((unit) => ({
     id: unit.id,
@@ -190,6 +198,7 @@ export default async function ProductsPage({
   const createPanel = canCreate ? (
     <ProductCreatePanel
       sizes={sizeOptions}
+      sizeVariants={sizeVariantOptions}
       materialCatalog={materialCatalog}
       operationCatalog={operationCatalog}
       decorationCatalog={decorationCatalog}
@@ -229,6 +238,7 @@ export default async function ProductsPage({
           canCreate ? (
             <ProductCreatePanel
               sizes={sizeOptions}
+              sizeVariants={sizeVariantOptions}
               materialCatalog={materialCatalog}
               operationCatalog={operationCatalog}
               decorationCatalog={decorationCatalog}

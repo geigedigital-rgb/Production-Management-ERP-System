@@ -42,6 +42,7 @@ export async function createProductAction(formData: FormData) {
   await assertSessionPermission("createInlineCatalog");
 
   const sizeIds = formData.getAll("sizeIds").map(String).filter(Boolean);
+  const sizeChartVariantId = String(formData.get("sizeChartVariantId") ?? "").trim() || null;
   let composition: {
     materials: Array<{ materialId: string; consumptionPerUnit: number; wastePercent?: number | null }>;
     operations: Array<{ operationId: string }>;
@@ -65,6 +66,7 @@ export async function createProductAction(formData: FormData) {
     description: formData.get("description") || null,
     imageUrl: imageUrlRaw || null,
     sizeIds,
+    sizeChartVariantId,
     materials: Array.isArray(composition.materials) ? composition.materials : [],
     operations: Array.isArray(composition.operations) ? composition.operations : [],
     decorations: Array.isArray(composition.decorations) ? composition.decorations : [],
@@ -754,10 +756,14 @@ export async function updateProductSizesAction(formData: FormData) {
 
   const productId = String(formData.get("productId") ?? "");
   const sizeIds = formData.getAll("sizeIds").map(String).filter(Boolean);
+  const sizeChartVariantIdRaw = String(formData.get("sizeChartVariantId") ?? "").trim();
+  const sizeChartVariantId = formData.has("sizeChartVariantId")
+    ? sizeChartVariantIdRaw || null
+    : undefined;
   if (!productId) return { ok: false as const, error: "INVALID" as const };
 
   try {
-    await setProductSizes({ productId, sizeIds });
+    await setProductSizes({ productId, sizeIds, sizeChartVariantId });
     revalidatePath(`/products/${productId}`);
     revalidatePath("/orders/new");
     return { ok: true as const };
@@ -766,7 +772,11 @@ export async function updateProductSizesAction(formData: FormData) {
     if (message === "PRODUCT_NOT_FOUND" || message === "PRODUCT_ARCHIVED") {
       return { ok: false as const, error: message as "PRODUCT_NOT_FOUND" | "PRODUCT_ARCHIVED" };
     }
-    if (message === "SIZE_NOT_FOUND") {
+    if (
+      message === "SIZE_NOT_FOUND" ||
+      message === "SIZE_VARIANT_MIXED" ||
+      message === "SIZE_VARIANT_MISMATCH"
+    ) {
       return { ok: false as const, error: "SIZE_NOT_FOUND" as const };
     }
     return { ok: false as const, error: "ERROR" as const };

@@ -1,5 +1,5 @@
 import { listClients } from "@/server/domains/clients/service";
-import { listProducts, listSizes, toCompositionTemplate } from "@/server/domains/products/service";
+import { listProducts, listSizes, listSizeChartVariantsForProduct, toCompositionTemplate } from "@/server/domains/products/service";
 import { getFabricPricingGlobals, listMaterials, listUnits } from "@/server/domains/catalog/materials";
 import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
 import { buildCalcFromProduct, getPricingDefaults } from "@/server/domains/calculation/from-entities";
@@ -21,6 +21,7 @@ export default async function NewOrderPage({
     products,
     pricing,
     sizes,
+    sizeVariants,
     materials,
     operations,
     decorations,
@@ -32,6 +33,7 @@ export default async function NewOrderPage({
     listProducts(),
     getPricingDefaults(),
     listSizes(),
+    listSizeChartVariantsForProduct(),
     listMaterials(),
     listOperations(),
     listDecorations(),
@@ -59,6 +61,11 @@ export default async function NewOrderPage({
           id: size.id,
           label: size.nameUk,
           code: size.code,
+          variantId: size.variantId,
+        }))}
+        sizeVariants={sizeVariants.map((row) => ({
+          id: row.id,
+          nameUk: row.nameUk,
         }))}
         unitOptions={units.map((unit) => ({
           id: unit.id,

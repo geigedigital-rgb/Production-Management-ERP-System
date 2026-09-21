@@ -44,7 +44,7 @@ type ClientOption = {
   phone?: string | null;
   email?: string | null;
 };
-type SizeOption = { id: string; label: string; code?: string };
+type SizeOption = { id: string; label: string; code?: string; variantId?: string };
 
 type DraftLine = {
   key: string;
@@ -80,6 +80,7 @@ export function OrderCreateForm({
   clients: initialClients,
   products: initialProducts,
   sizeOptions,
+  sizeVariants = [],
   unitOptions = [],
   materialCatalog: initialMaterialCatalog,
   operationCatalog: initialOperationCatalog,
@@ -93,6 +94,7 @@ export function OrderCreateForm({
   clients: ClientOption[];
   products: CatalogProduct[];
   sizeOptions: SizeOption[];
+  sizeVariants?: Array<{ id: string; nameUk: string }>;
   unitOptions?: Array<{ id: string; label: string }>;
   materialCatalog: MaterialCatalogOption[];
   operationCatalog: OperationCatalogOption[];
@@ -676,6 +678,7 @@ export function OrderCreateForm({
             headerAction={
               <ProductCreatePanel
                 sizes={sizeOptions}
+                sizeVariants={sizeVariants}
                 materialCatalog={materialCatalog}
                 operationCatalog={operationCatalog}
                 decorationCatalog={decorationCatalog}

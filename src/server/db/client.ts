@@ -12,7 +12,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump when Prisma schema changes so dev HMR does not keep a stale client.
  * Also bump after `prisma generate` if a previous bump raced ahead of generation.
  */
-const PRISMA_CLIENT_VERSION = "20260915201300_material_delivery_type";
+const PRISMA_CLIENT_VERSION = "20260921110000_size_chart_variants";
 
 function clientHasCurrentDelegates(client: PrismaClient | undefined): boolean {
   if (!client) return false;
@@ -20,7 +20,8 @@ function clientHasCurrentDelegates(client: PrismaClient | undefined): boolean {
     "fixedCostSettings" in client &&
     "fixedCostArticle" in client &&
     "screenPrintPriceCell" in client &&
-    "screenPrintCoefficient" in client
+    "screenPrintCoefficient" in client &&
+    "sizeChartVariant" in client
   );
 }
 

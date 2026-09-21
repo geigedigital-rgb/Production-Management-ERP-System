@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useId, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, useTransition, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { FormGroup, Textarea } from "@/components/ui/Field";
+import { FormGroup, Textarea, Select } from "@/components/ui/Field";
 import { Banner } from "@/components/ui/Banner";
 import { SidePanel } from "@/components/ui/Overlay";
 import { IconCheckCircle, IconPlus, IconProducts } from "@/components/ui/Icons";
@@ -83,6 +83,7 @@ export type CreatedCatalogProduct = {
  */
 export function ProductCreatePanel({
   sizes,
+  sizeVariants = [],
   materialCatalog: initialMaterials = [],
   operationCatalog: initialOperations = [],
   decorationCatalog: initialDecorations = [],
@@ -92,7 +93,8 @@ export function ProductCreatePanel({
   variant = "secondary",
   size = "sm",
 }: {
-  sizes: Array<{ id: string; label: string; code?: string }>;
+  sizes: Array<{ id: string; label: string; code?: string; variantId?: string }>;
+  sizeVariants?: Array<{ id: string; nameUk: string }>;
   materialCatalog?: MaterialCatalogOption[];
   operationCatalog?: OperationCatalogOption[];
   decorationCatalog?: DecorationCatalogOption[];
@@ -113,7 +115,9 @@ export function ProductCreatePanel({
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
+  const [sizeVariantId, setSizeVariantId] = useState(sizeVariants[0]?.id ?? "");
+  const [sizesByVariant, setSizesByVariant] = useState<Record<string, string[]>>({});
+  const selectedSizes = sizesByVariant[sizeVariantId] ?? [];
   const [composition, setComposition] = useState<DraftComposition>(emptyComposition);
   const [materialCatalog, setMaterialCatalog] = useState(initialMaterials);
   const [operationCatalog, setOperationCatalog] = useState(initialOperations);
@@ -140,6 +144,15 @@ export function ProductCreatePanel({
     return () => clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    if (!sizeVariantId && sizeVariants[0]?.id) setSizeVariantId(sizeVariants[0].id);
+  }, [sizeVariants, sizeVariantId]);
+
+  const sizesForVariant = useMemo(() => {
+    if (!sizeVariantId) return sizes;
+    return sizes.filter((row) => !row.variantId || row.variantId === sizeVariantId);
+  }, [sizes, sizeVariantId]);
+
   const hasCutOperation = composition.operations.some((row) => isCutOperationName(row.name));
 
   useEffect(() => {
@@ -152,7 +165,8 @@ export function ProductCreatePanel({
     setName("");
     setImageUrl("");
     setPreviewUrl(null);
-    setSelectedSizes([]);
+    setSizesByVariant({});
+    setSizeVariantId(sizeVariants[0]?.id ?? "");
     setComposition(emptyComposition());
     setCutTiers([]);
     setCutOptimalQty(100);
@@ -163,9 +177,13 @@ export function ProductCreatePanel({
   }
 
   function toggleSize(id: string) {
-    setSelectedSizes((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
-    );
+    setSizesByVariant((prev) => {
+      const current = prev[sizeVariantId] ?? [];
+      const next = current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id];
+      return { ...prev, [sizeVariantId]: next };
+    });
   }
 
   async function onPickImage(file: File | null) {
@@ -403,13 +421,34 @@ export function ProductCreatePanel({
           <section className="space-y-3">
             <SectionTitle>Розмірна сітка</SectionTitle>
             <p className="type-caption">
-              Можна залишити порожньою — у замовленні буде одна позиція «Без розміру».
+              Спочатку варіант сітки, потім розміри. Можна залишити порожньою — у замовленні буде
+              «Без розміру».
             </p>
+            {sizeVariants.length > 0 ? (
+              <Select
+                label="Варіант сітки"
+                name="sizeChartVariantId"
+                value={sizeVariantId}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSizeVariantId(next);
+                  setSizesByVariant((prev) =>
+                    prev[next] !== undefined ? prev : { ...prev, [next]: [] },
+                  );
+                }}
+              >
+                {sizeVariants.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.nameUk}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
             <div className="flex flex-wrap gap-1.5">
-              {sizes.length === 0 ? (
+              {sizesForVariant.length === 0 ? (
                 <p className="type-body-secondary">Розміри ще не заведені в довіднику.</p>
               ) : (
-                sizes.map((row) => {
+                sizesForVariant.map((row) => {
                   const active = selectedSizes.includes(row.id);
                   return (
                     <label

@@ -316,6 +316,17 @@ async function main() {
     });
   }
 
+  const intlVariant = await prisma.sizeChartVariant.upsert({
+    where: { code: "INTL_UNISEX" },
+    update: { nameUk: "Міжнародна унісекс", sortOrder: 1, status: "ACTIVE" },
+    create: {
+      code: "INTL_UNISEX",
+      nameUk: "Міжнародна унісекс",
+      sortOrder: 1,
+      status: "ACTIVE",
+    },
+  });
+
   for (const size of [
     { code: "XS", nameUk: "XS", sortOrder: 1 },
     { code: "S", nameUk: "S", sortOrder: 2 },
@@ -329,9 +340,14 @@ async function main() {
     { code: "6XL", nameUk: "6XL", sortOrder: 10 },
   ]) {
     await prisma.size.upsert({
-      where: { code: size.code },
+      where: {
+        variantId_code: { variantId: intlVariant.id, code: size.code },
+      },
       update: { nameUk: size.nameUk, sortOrder: size.sortOrder, status: "ACTIVE" },
-      create: size,
+      create: {
+        ...size,
+        variantId: intlVariant.id,
+      },
     });
   }
 

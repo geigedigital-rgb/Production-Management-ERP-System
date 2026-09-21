@@ -105,20 +105,43 @@ model Category {
   @@map("categories")
 }
 
-model Size {
-  id        String       @id @default(cuid())
-  code      String       @unique
-  nameUk    String
-  sortOrder Int          @default(0)
-  status    RecordStatus @default(ACTIVE)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+model SizeChartVariant {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  nameUk      String
+  /// Short note about this grid (who it is for).
+  description String?
+  sortOrder   Int          @default(0)
+  status      RecordStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
-  productSizes ProductSize[]
-  materialSizeNorms ProductMaterialSizeNorm[]
-  materialSizeScopes ProductMaterialSizeScope[]
+  sizes    Size[]
+  products Product[]
+
+  @@map("size_chart_variants")
+}
+
+model Size {
+  id            String       @id @default(cuid())
+  variantId     String
+  code          String
+  nameUk        String
+  /// Size instruction / measurement guide (filled later per size).
+  descriptionUk String?
+  sortOrder     Int          @default(0)
+  status        RecordStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  variant             SizeChartVariant           @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  productSizes        ProductSize[]
+  materialSizeNorms   ProductMaterialSizeNorm[]
+  materialSizeScopes  ProductMaterialSizeScope[]
   operationSizeScopes ProductOperationSizeScope[]
 
+  @@unique([variantId, code])
+  @@index([variantId])
   @@map("sizes")
 }
 
@@ -351,21 +374,25 @@ model Product {
   optimalQty  Int?
   /// Base catalog model with fixed commercial price tiers (comment 2).
   isBaseModel Boolean      @default(false) @map("is_base_model")
+  /// Which size-chart variant this product uses (sizes come from that variant).
+  sizeChartVariantId String? @map("size_chart_variant_id")
   status      RecordStatus @default(ACTIVE)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  category  Category? @relation(fields: [categoryId], references: [id])
-  sizes     ProductSize[]
-  materials ProductMaterial[]
-  operations ProductOperation[]
-  decorations ProductDecoration[]
-  additionalCosts ProductAdditionalCost[]
-  cutRateTiers ProductCutRateTier[]
+  category         Category?         @relation(fields: [categoryId], references: [id])
+  sizeChartVariant SizeChartVariant? @relation(fields: [sizeChartVariantId], references: [id], onDelete: SetNull)
+  sizes            ProductSize[]
+  materials        ProductMaterial[]
+  operations       ProductOperation[]
+  decorations      ProductDecoration[]
+  additionalCosts  ProductAdditionalCost[]
+  cutRateTiers     ProductCutRateTier[]
   commercialPriceTiers ProductCommercialPriceTier[]
-  orderItems OrderItem[]
+  orderItems       OrderItem[]
 
   @@index([nameUk])
+  @@index([sizeChartVariantId])
   @@map("products")
 }
 

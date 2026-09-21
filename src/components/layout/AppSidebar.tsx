@@ -20,6 +20,7 @@ import {
   IconPlus,
   IconPricing,
   IconProducts,
+  IconSizes,
   IconUsers,
 } from "@/components/ui/Icons";
 import type { Permission } from "@/lib/permissions";
@@ -34,6 +35,7 @@ type NavItem = {
     | "materials"
     | "operations"
     | "screenPrint"
+    | "sizeCharts"
     | "fixedCosts"
     | "pricing"
     | "users"
@@ -62,6 +64,12 @@ const catalogs: NavItem[] = [
     href: "/settings/operations",
     labelKey: "operations",
     icon: IconOperations,
+    requiredPermission: "manageCatalogs",
+  },
+  {
+    href: "/settings/size-charts",
+    labelKey: "sizeCharts",
+    icon: IconSizes,
     requiredPermission: "manageCatalogs",
   },
   {

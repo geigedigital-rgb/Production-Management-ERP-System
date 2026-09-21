@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getProduct, listSizes } from "@/server/domains/products/service";
+import { getProduct, listSizes, listSizeChartVariantsForProduct } from "@/server/domains/products/service";
 import { listMaterials } from "@/server/domains/catalog/materials";
 import { listUnits } from "@/server/domains/catalog/materials";
 import { listDecorations, listOperations } from "@/server/domains/catalog/operations";
@@ -162,8 +162,18 @@ export default async function ProductDetailPage({
   const product = await getProduct(id);
   if (!product) notFound();
 
-  const [materials, units, operations, decorations, pricing, usedIn, access, sizeCatalog, fixedCosts] =
-    await Promise.all([
+  const [
+    materials,
+    units,
+    operations,
+    decorations,
+    pricing,
+    usedIn,
+    access,
+    sizeCatalog,
+    sizeVariants,
+    fixedCosts,
+  ] = await Promise.all([
       listMaterials(),
       listUnits(),
       listOperations(),
@@ -188,6 +198,7 @@ export default async function ProductDetailPage({
       }),
       getCurrentUserAccess(),
       listSizes(),
+      listSizeChartVariantsForProduct(),
       fixedCostOptionsFromDb(),
     ]);
   const pricingWithFixed = { ...pricing, fixedCosts };
@@ -407,13 +418,17 @@ export default async function ProductDetailPage({
         <HeaderBlock title="Розміри" icon={<IconSizes size={16} />}>
           {canEditSizes && !isArchived ? (
             <ProductSizesEditor
-              key={product.sizes.map((row) => row.sizeId).join("|")}
+              key={`${product.sizeChartVariantId ?? ""}|${product.sizes.map((row) => row.sizeId).join("|")}`}
               productId={product.id}
               selectedSizeIds={product.sizes.map((row) => row.sizeId)}
+              selectedVariantId={product.sizeChartVariantId}
+              variants={sizeVariants}
               catalog={sizeCatalog.map((size) => ({
                 id: size.id,
                 code: size.code,
                 nameUk: size.nameUk,
+                variantId: size.variantId,
+                descriptionUk: size.descriptionUk,
               }))}
             />
           ) : product.sizes.length === 0 ? (

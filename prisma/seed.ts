@@ -5,6 +5,19 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { calculateCosting } from "../src/server/domains/calculation/engine";
+import {
+  INTL_MEN_VARIANT_DESCRIPTION,
+  INTL_UNISEX_VARIANT_DESCRIPTION,
+  INTL_WOMEN_VARIANT_DESCRIPTION,
+  KIDS_HEIGHT_VARIANT_DESCRIPTION,
+  UA_CHEST_VARIANT_DESCRIPTION,
+  UA_HEIGHT_GUIDE,
+  intlMenDescriptionUk,
+  intlUnisexDescriptionUk,
+  intlWomenDescriptionUk,
+  kidsHeightDescriptionUk,
+  uaChestDescriptionUk,
+} from "../src/server/domains/size-charts/size-instructions";
 import { seedCrmCatalog } from "./catalog/seed-catalog";
 import { testNameVariants, withTestMarker } from "./catalog/test-marker";
 
@@ -461,26 +474,153 @@ async function main() {
     (await prisma.unitOfMeasure.findMany()).map((u) => [u.code, u]),
   );
 
-  const sizes = [
-    { code: "XS", nameUk: "XS", sortOrder: 1 },
-    { code: "S", nameUk: "S", sortOrder: 2 },
-    { code: "M", nameUk: "M", sortOrder: 3 },
-    { code: "L", nameUk: "L", sortOrder: 4 },
-    { code: "XL", nameUk: "XL", sortOrder: 5 },
-    { code: "XXL", nameUk: "XXL", sortOrder: 6 },
-    { code: "3XL", nameUk: "3XL", sortOrder: 7 },
-    { code: "4XL", nameUk: "4XL", sortOrder: 8 },
-    { code: "5XL", nameUk: "5XL", sortOrder: 9 },
-    { code: "6XL", nameUk: "6XL", sortOrder: 10 },
+  const sizeVariants = [
+    {
+      id: "scv_intl_unisex",
+      code: "INTL_UNISEX",
+      nameUk: "Міжнародна унісекс",
+      description: INTL_UNISEX_VARIANT_DESCRIPTION,
+      sortOrder: 1,
+    },
+    {
+      id: "scv_ua_chest",
+      code: "UA_CHEST_HALF",
+      nameUk: "Українська 1/2 обхв. грудей",
+      description: `${UA_CHEST_VARIANT_DESCRIPTION} ${UA_HEIGHT_GUIDE}`,
+      sortOrder: 2,
+    },
+    {
+      id: "scv_kids_height",
+      code: "KIDS_HEIGHT",
+      nameUk: "Дитяча · зріст",
+      description: KIDS_HEIGHT_VARIANT_DESCRIPTION,
+      sortOrder: 3,
+    },
+    {
+      id: "scv_intl_men_ua",
+      code: "INTL_MEN_UA",
+      nameUk: "Міжнар / Чол. укр.",
+      description: INTL_MEN_VARIANT_DESCRIPTION,
+      sortOrder: 4,
+    },
+    {
+      id: "scv_intl_women_ua",
+      code: "INTL_WOMEN_UA",
+      nameUk: "Міжнар / Жін. укр.",
+      description: INTL_WOMEN_VARIANT_DESCRIPTION,
+      sortOrder: 5,
+    },
   ];
-  for (const size of sizes) {
-    await prisma.size.upsert({
-      where: { code: size.code },
-      update: { nameUk: size.nameUk, sortOrder: size.sortOrder, status: "ACTIVE" },
-      create: size,
+  for (const variant of sizeVariants) {
+    await prisma.sizeChartVariant.upsert({
+      where: { code: variant.code },
+      update: {
+        nameUk: variant.nameUk,
+        description: variant.description,
+        sortOrder: variant.sortOrder,
+        status: "ACTIVE",
+      },
+      create: variant,
     });
   }
-  const sizeByCode = Object.fromEntries((await prisma.size.findMany()).map((s) => [s.code, s]));
+  const variantByCode = Object.fromEntries(
+    (await prisma.sizeChartVariant.findMany()).map((row) => [row.code, row]),
+  );
+  const sizes = [
+    // Міжнародна унісекс
+    { variant: "INTL_UNISEX", code: "2XS", nameUk: "2XS", sortOrder: 0 },
+    { variant: "INTL_UNISEX", code: "XS", nameUk: "XS", sortOrder: 1 },
+    { variant: "INTL_UNISEX", code: "S", nameUk: "S", sortOrder: 2 },
+    { variant: "INTL_UNISEX", code: "M", nameUk: "M", sortOrder: 3 },
+    { variant: "INTL_UNISEX", code: "L", nameUk: "L", sortOrder: 4 },
+    { variant: "INTL_UNISEX", code: "XL", nameUk: "XL", sortOrder: 5 },
+    { variant: "INTL_UNISEX", code: "XXL", nameUk: "2XL", sortOrder: 6 },
+    { variant: "INTL_UNISEX", code: "3XL", nameUk: "3XL", sortOrder: 7 },
+    { variant: "INTL_UNISEX", code: "4XL", nameUk: "4XL", sortOrder: 8 },
+    { variant: "INTL_UNISEX", code: "5XL", nameUk: "5XL", sortOrder: 9 },
+    { variant: "INTL_UNISEX", code: "6XL", nameUk: "6XL", sortOrder: 10 },
+    // Українська 1/2 обхв. грудей
+    ...Array.from({ length: 18 }, (_, i) => {
+      const n = 36 + i * 2;
+      return {
+        variant: "UA_CHEST_HALF",
+        code: String(n),
+        nameUk: String(n),
+        sortOrder: i + 1,
+      };
+    }),
+    // Дитяча · зріст
+    ...Array.from({ length: 10 }, (_, i) => {
+      const n = 110 + i * 6;
+      return {
+        variant: "KIDS_HEIGHT",
+        code: String(n),
+        nameUk: String(n),
+        sortOrder: i + 1,
+      };
+    }),
+    // Міжнар / Чол. укр.
+    { variant: "INTL_MEN_UA", code: "2XS", nameUk: "2XS · 38", sortOrder: 1 },
+    { variant: "INTL_MEN_UA", code: "XS", nameUk: "XS · 40", sortOrder: 2 },
+    { variant: "INTL_MEN_UA", code: "S", nameUk: "S · 42–44", sortOrder: 3 },
+    { variant: "INTL_MEN_UA", code: "M", nameUk: "M · 46–48", sortOrder: 4 },
+    { variant: "INTL_MEN_UA", code: "L", nameUk: "L · 50–52", sortOrder: 5 },
+    { variant: "INTL_MEN_UA", code: "XL", nameUk: "XL · 54–56", sortOrder: 6 },
+    { variant: "INTL_MEN_UA", code: "2XL", nameUk: "2XL · 58–60", sortOrder: 7 },
+    { variant: "INTL_MEN_UA", code: "3XL", nameUk: "3XL · 62–64", sortOrder: 8 },
+    { variant: "INTL_MEN_UA", code: "4XL", nameUk: "4XL · 66–68", sortOrder: 9 },
+    { variant: "INTL_MEN_UA", code: "5XL", nameUk: "5XL · 70–72", sortOrder: 10 },
+    // Міжнар / Жін. укр.
+    { variant: "INTL_WOMEN_UA", code: "2XS", nameUk: "2XS · 36", sortOrder: 1 },
+    { variant: "INTL_WOMEN_UA", code: "XS", nameUk: "XS · 38", sortOrder: 2 },
+    { variant: "INTL_WOMEN_UA", code: "S", nameUk: "S · 40–42", sortOrder: 3 },
+    { variant: "INTL_WOMEN_UA", code: "M", nameUk: "M · 44–46", sortOrder: 4 },
+    { variant: "INTL_WOMEN_UA", code: "L", nameUk: "L · 48–50", sortOrder: 5 },
+    { variant: "INTL_WOMEN_UA", code: "XL", nameUk: "XL · 52–54", sortOrder: 6 },
+    { variant: "INTL_WOMEN_UA", code: "2XL", nameUk: "2XL · 56–58", sortOrder: 7 },
+    { variant: "INTL_WOMEN_UA", code: "3XL", nameUk: "3XL · 60–62", sortOrder: 8 },
+    { variant: "INTL_WOMEN_UA", code: "4XL", nameUk: "4XL · 64–66", sortOrder: 9 },
+    { variant: "INTL_WOMEN_UA", code: "5XL", nameUk: "5XL · 68–70", sortOrder: 10 },
+  ];
+  for (const size of sizes) {
+    const variantId = variantByCode[size.variant]!.id;
+    const descriptionUk =
+      size.variant === "UA_CHEST_HALF"
+        ? uaChestDescriptionUk(size.code)
+        : size.variant === "INTL_MEN_UA"
+          ? intlMenDescriptionUk(size.code)
+          : size.variant === "INTL_WOMEN_UA"
+            ? intlWomenDescriptionUk(size.code)
+            : size.variant === "INTL_UNISEX"
+              ? intlUnisexDescriptionUk(size.code)
+              : size.variant === "KIDS_HEIGHT"
+                ? kidsHeightDescriptionUk(size.code)
+                : null;
+    await prisma.size.upsert({
+      where: {
+        variantId_code: { variantId, code: size.code },
+      },
+      update: {
+        nameUk: size.nameUk,
+        sortOrder: size.sortOrder,
+        status: "ACTIVE",
+        descriptionUk,
+      },
+      create: {
+        code: size.code,
+        nameUk: size.nameUk,
+        sortOrder: size.sortOrder,
+        variantId,
+        descriptionUk,
+      },
+    });
+  }
+  const intlVariantId = variantByCode.INTL_UNISEX!.id;
+  const sizeByCode = Object.fromEntries(
+    (
+      await prisma.size.findMany({ where: { variantId: intlVariantId } })
+    ).map((s) => [s.code, s]),
+  );
 
   await prisma.pricingSettings.deleteMany();
   await prisma.pricingSettings.create({

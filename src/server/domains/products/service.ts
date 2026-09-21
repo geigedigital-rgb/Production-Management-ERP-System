@@ -43,6 +43,7 @@ export const productFormSchema = z.object({
       .optional(),
   ),
   sizeIds: z.array(z.string()).default([]),
+  sizeChartVariantId: z.string().trim().optional().nullable(),
   materials: z
     .array(
       z.object({
@@ -96,6 +97,7 @@ const productOperationInclude = {
 
 const productDetailInclude = {
   category: true,
+  sizeChartVariant: true,
   sizes: { include: { size: true }, orderBy: { size: { sortOrder: "asc" as const } } },
   materials: { include: productMaterialInclude, orderBy: { sortOrder: "asc" as const } },
   operations: { include: productOperationInclude, orderBy: { sortOrder: "asc" as const } },
@@ -184,26 +186,50 @@ export async function listProductsByIds(ids: string[]) {
   });
 }
 
-export async function listSizes() {
+export async function listSizes(variantId?: string | null) {
   return prisma.size.findMany({
+    where: {
+      status: "ACTIVE",
+      ...(variantId ? { variantId } : {}),
+    },
+    orderBy: [{ sortOrder: "asc" }],
+  });
+}
+
+export async function listSizeChartVariantsForProduct() {
+  return prisma.sizeChartVariant.findMany({
     where: { status: "ACTIVE" },
-    orderBy: { sortOrder: "asc" },
+    orderBy: [{ sortOrder: "asc" }, { nameUk: "asc" }],
+    select: { id: true, code: true, nameUk: true },
   });
 }
 
 /** Replace product size grid. Removing a size also clears size-specific norms/scopes. */
-export async function setProductSizes(input: { productId: string; sizeIds: string[] }) {
+export async function setProductSizes(input: {
+  productId: string;
+  sizeIds: string[];
+  sizeChartVariantId?: string | null;
+}) {
   const product = await getProduct(input.productId);
   if (!product) throw new Error("PRODUCT_NOT_FOUND");
   if (product.status === "ARCHIVED") throw new Error("PRODUCT_ARCHIVED");
 
   const uniqueIds = [...new Set(input.sizeIds.filter(Boolean))];
+  let variantId =
+    input.sizeChartVariantId !== undefined
+      ? input.sizeChartVariantId
+      : product.sizeChartVariantId;
+
   if (uniqueIds.length > 0) {
     const found = await prisma.size.findMany({
       where: { id: { in: uniqueIds }, status: "ACTIVE" },
-      select: { id: true },
+      select: { id: true, variantId: true },
     });
     if (found.length !== uniqueIds.length) throw new Error("SIZE_NOT_FOUND");
+    const variantIds = [...new Set(found.map((row) => row.variantId))];
+    if (variantIds.length > 1) throw new Error("SIZE_VARIANT_MIXED");
+    if (variantId && variantIds[0] !== variantId) throw new Error("SIZE_VARIANT_MISMATCH");
+    variantId = variantIds[0] ?? variantId;
   }
 
   const currentIds = new Set(product.sizes.map((row) => row.sizeId));
@@ -237,6 +263,10 @@ export async function setProductSizes(input: { productId: string; sizeIds: strin
         data: toAdd.map((sizeId) => ({ productId: input.productId, sizeId })),
       });
     }
+    await tx.product.update({
+      where: { id: input.productId },
+      data: { sizeChartVariantId: variantId ?? null },
+    });
   });
 
   return getProduct(input.productId);
@@ -264,9 +294,19 @@ export async function createProductDraft(raw: ProductFormValues) {
   const operationById = new Map(catalogOperations.map((row) => [row.id, row]));
 
   const sizeRecords = data.sizeIds.length
-    ? await prisma.size.findMany({ where: { id: { in: data.sizeIds } } })
-    : await prisma.size.findMany({ where: { status: "ACTIVE" } });
+    ? await prisma.size.findMany({ where: { id: { in: data.sizeIds }, status: "ACTIVE" } })
+    : [];
   const sizeIdByCode = new Map(sizeRecords.map((row) => [row.code, row.id]));
+  const inferredVariantId =
+    data.sizeChartVariantId ||
+    sizeRecords[0]?.variantId ||
+    (
+      await prisma.sizeChartVariant.findFirst({
+        where: { code: "INTL_UNISEX", status: "ACTIVE" },
+        select: { id: true },
+      })
+    )?.id ||
+    null;
 
   return prisma.product.create({
     data: {
@@ -275,6 +315,7 @@ export async function createProductDraft(raw: ProductFormValues) {
       description: data.description || null,
       imageUrl,
       status: "ACTIVE",
+      sizeChartVariantId: inferredVariantId,
       sizes: {
         create: data.sizeIds.map((sizeId) => ({ sizeId })),
       },
@@ -1277,6 +1318,7 @@ export async function duplicateProduct(
       status: "ACTIVE",
       isBaseModel: false,
       optimalQty: source.optimalQty,
+      sizeChartVariantId: source.sizeChartVariantId,
       sizes: {
         create: source.sizes.map((row) => ({ sizeId: row.sizeId })),
       },
