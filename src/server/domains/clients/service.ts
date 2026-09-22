@@ -12,6 +12,12 @@ export const clientFormSchema = z.object({
     .nullable()
     .transform((v) => (v ? v : null))
     .pipe(z.union([z.string().email(), z.null()])),
+  website: z
+    .string()
+    .trim()
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : null)),
   legalDetails: z.string().trim().optional().nullable(),
   note: z.string().trim().optional().nullable(),
 });
@@ -77,6 +83,7 @@ export async function createClient(raw: ClientFormValues) {
       contactPerson: data.contactPerson || null,
       phone: data.phone || null,
       email: data.email || null,
+      website: data.website || null,
       legalDetails: data.legalDetails || null,
       note: data.note || null,
     },
@@ -92,6 +99,7 @@ export async function updateClient(id: string, raw: ClientFormValues) {
       contactPerson: data.contactPerson || null,
       phone: data.phone || null,
       email: data.email || null,
+      website: data.website || null,
       legalDetails: data.legalDetails || null,
       note: data.note || null,
     },

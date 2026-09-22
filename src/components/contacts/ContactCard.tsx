@@ -11,7 +11,7 @@ export type ContactField = {
   key: string;
   label: string;
   value: string;
-  kind?: "text" | "tel" | "email" | "number";
+  kind?: "text" | "tel" | "email" | "url" | "number";
   placeholder?: string;
   required?: boolean;
   wide?: boolean;
@@ -35,6 +35,7 @@ export function ContactCard({
   titleKey,
   meta,
   href,
+  detailLabel = "Детальніше",
   fields,
   disabled,
   onSave,
@@ -44,6 +45,7 @@ export function ContactCard({
   titleKey?: string;
   meta?: React.ReactNode;
   href?: string;
+  detailLabel?: string;
   fields: ContactField[];
   disabled?: boolean;
   onSave: (values: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
@@ -140,19 +142,24 @@ export function ContactCard({
             ) : (
               <h3 className="type-subsection truncate">{displayTitle}</h3>
             )}
-            {href && titleKey && !disabled ? (
-              <Link
-                href={href}
-                className="type-caption mt-0.5 inline-block text-[var(--color-text-quiet)] hover:text-[var(--color-primary-700)]"
-              >
-                Картка →
-              </Link>
+            {meta != null && meta !== "" ? (
+              <p className="type-caption mt-0.5 tabular text-[var(--color-text-tertiary)]">
+                {meta}
+              </p>
             ) : null}
           </div>
-          {meta != null && meta !== "" ? (
-            <span className="type-caption shrink-0 tabular text-[var(--color-text-tertiary)]">
-              {meta}
-            </span>
+          {href ? (
+            <Link
+              href={href}
+              className={cn(
+                "inline-flex h-8 shrink-0 items-center justify-center rounded-[var(--radius-control)]",
+                "border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2.5",
+                "text-[12px] font-semibold text-[var(--color-text-primary)] transition-colors",
+                "hover:bg-[var(--color-surface-subtle)]",
+              )}
+            >
+              {detailLabel}
+            </Link>
           ) : null}
         </header>
 
@@ -169,7 +176,13 @@ export function ContactCard({
                 ) : null}
               </span>
               <input
-                type={field.kind === "number" ? "number" : field.kind ?? "text"}
+                type={
+                  field.kind === "number"
+                    ? "number"
+                    : field.kind === "url"
+                      ? "url"
+                      : field.kind ?? "text"
+                }
                 disabled={disabled || pending}
                 className={controlCompact}
                 value={draft[field.key] ?? ""}

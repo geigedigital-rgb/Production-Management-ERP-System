@@ -53,12 +53,13 @@ export function ClientCreatePanel({
       <FormGroup label="Контакти" columns={2}>
         <Input name="contactPerson" label="Контактна особа" />
         <Input name="phone" label="Телефон" type="tel" placeholder="+380" />
-        <Input name="email" label="Email" type="email" className="sm:col-span-2" />
+        <Input name="email" label="Email" type="email" />
+        <Input name="website" label="Сайт" placeholder="https://" />
       </FormGroup>
 
       <FormGroup label="Реквізити" columns={1}>
         <Textarea name="legalDetails" label="Юридичні реквізити" placeholder="ЄДРПОУ, адреса, IBAN" />
-        <Input name="note" label="Примітка" placeholder="Умови роботи, знижки, домовленості" />
+        <Input name="note" label="Нотатка" placeholder="Умови роботи, знижки, домовленості" />
       </FormGroup>
     </CreatePanel>
   );

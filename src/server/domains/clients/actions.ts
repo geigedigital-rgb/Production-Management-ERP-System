@@ -16,6 +16,7 @@ export async function createClientAction(formData: FormData) {
     contactPerson: formData.get("contactPerson") || null,
     phone: formData.get("phone") || null,
     email: formData.get("email") || null,
+    website: formData.get("website") || null,
     legalDetails: formData.get("legalDetails") || null,
     note: formData.get("note") || null,
   });
@@ -50,6 +51,7 @@ export async function updateClientAction(formData: FormData) {
     contactPerson: formData.get("contactPerson") || null,
     phone: formData.get("phone") || null,
     email: formData.get("email") || null,
+    website: formData.get("website") || null,
     legalDetails: formData.get("legalDetails") || null,
     note: formData.get("note") || null,
   });

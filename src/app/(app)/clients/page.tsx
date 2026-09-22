@@ -119,9 +119,8 @@ export default async function ContactsPage({
               contactPerson: row.contactPerson,
               phone: row.phone,
               email: row.email,
+              website: row.website,
               note: row.note,
-              defaultCargoUsdPerKg:
-                row.defaultCargoUsdPerKg != null ? Number(row.defaultCargoUsdPerKg) : null,
               materialsCount: row._count.materialOffers,
             }))}
           />
@@ -144,6 +143,7 @@ export default async function ContactsPage({
             contactPerson: row.contactPerson,
             phone: row.phone,
             email: row.email,
+            website: row.website,
             legalDetails: row.legalDetails,
             note: row.note,
             ordersCount: row._count.orders,

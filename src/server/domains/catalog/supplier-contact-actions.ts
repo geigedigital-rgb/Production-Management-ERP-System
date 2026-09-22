@@ -11,6 +11,7 @@ import {
 
 function parseSupplierForm(formData: FormData) {
   const cargoRaw = String(formData.get("defaultCargoUsdPerKg") ?? "").trim();
+  const hasCargo = formData.has("defaultCargoUsdPerKg");
   const cargo =
     cargoRaw === "" ? null : Number(cargoRaw.replace(",", "."));
   return {
@@ -18,9 +19,14 @@ function parseSupplierForm(formData: FormData) {
     contactPerson: String(formData.get("contactPerson") ?? "").trim() || null,
     phone: String(formData.get("phone") ?? "").trim() || null,
     email: String(formData.get("email") ?? "").trim() || null,
+    website: String(formData.get("website") ?? "").trim() || null,
     note: String(formData.get("note") ?? "").trim() || null,
-    defaultCargoUsdPerKg:
-      cargo != null && Number.isFinite(cargo) && cargo >= 0 ? cargo : null,
+    ...(hasCargo
+      ? {
+          defaultCargoUsdPerKg:
+            cargo != null && Number.isFinite(cargo) && cargo >= 0 ? cargo : null,
+        }
+      : {}),
   };
 }
 

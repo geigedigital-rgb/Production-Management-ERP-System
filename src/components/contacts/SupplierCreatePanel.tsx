@@ -31,17 +31,11 @@ export function SupplierCreatePanel({
       <FormGroup label="Контакти" columns={2}>
         <Input name="contactPerson" label="Контактна особа" />
         <Input name="phone" label="Телефон" type="tel" placeholder="+380" />
-        <Input name="email" label="Email" type="email" className="sm:col-span-2" />
-        <Input
-          name="defaultCargoUsdPerKg"
-          label="CARGO $/кг (за замовч.)"
-          type="number"
-          step="0.01"
-          placeholder="1.7"
-        />
+        <Input name="email" label="Email" type="email" />
+        <Input name="website" label="Сайт" placeholder="https://" />
       </FormGroup>
-      <FormGroup label="Примітка" columns={1}>
-        <Textarea name="note" label="Примітка" placeholder="Умови, терміни, коментар" />
+      <FormGroup label="Нотатка" columns={1}>
+        <Textarea name="note" label="Нотатка" placeholder="Умови, терміни, коментар" />
       </FormGroup>
     </CreatePanel>
   );

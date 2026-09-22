@@ -216,6 +216,7 @@ model Supplier {
   contactPerson          String?
   phone                  String?
   email                  String?
+  website                String?
   defaultCargoUsdPerKg   Decimal?     @db.Decimal(14, 4)
   /// Last saved color palette — reused when this supplier is picked on a new material.
   defaultAvailableColors String[]     @default([]) @map("default_available_colors")
@@ -579,6 +580,7 @@ model Client {
   contactPerson String?
   phone         String?
   email         String?
+  website       String?
   legalDetails  String?
   note          String?
   status        RecordStatus @default(ACTIVE)

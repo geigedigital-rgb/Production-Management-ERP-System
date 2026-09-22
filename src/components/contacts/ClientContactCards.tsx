@@ -9,6 +9,7 @@ export type ClientCardRow = {
   contactPerson: string | null;
   phone: string | null;
   email: string | null;
+  website: string | null;
   legalDetails: string | null;
   note: string | null;
   ordersCount: number;
@@ -40,7 +41,19 @@ export function ClientContactCards({
             label: "Email",
             value: row.email ?? "",
             kind: "email",
+          },
+          {
+            key: "website",
+            label: "Сайт",
+            value: row.website ?? "",
+            placeholder: "https://",
+          },
+          {
+            key: "note",
+            label: "Нотатка",
+            value: row.note ?? "",
             wide: true,
+            placeholder: "Умови, домовленості…",
           },
         ];
 
@@ -50,6 +63,7 @@ export function ClientContactCards({
             title={row.companyName}
             titleKey="companyName"
             href={`/clients/${row.id}`}
+            detailLabel="Детальніше"
             meta={`${row.ordersCount} зам.`}
             disabled={!canEdit}
             fields={fields}
@@ -59,9 +73,7 @@ export function ClientContactCards({
               for (const [key, value] of Object.entries(values)) {
                 formData.set(key, value);
               }
-              // Mini-card does not edit these — preserve existing.
               formData.set("legalDetails", row.legalDetails ?? "");
-              formData.set("note", row.note ?? "");
               const result = await updateClientAction(formData);
               return { ok: result.ok, error: result.ok ? undefined : result.error };
             }}

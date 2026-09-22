@@ -46,6 +46,7 @@ export type SupplierContactInput = {
   contactPerson?: string | null;
   phone?: string | null;
   email?: string | null;
+  website?: string | null;
   note?: string | null;
   defaultCargoUsdPerKg?: number | null;
 };
@@ -59,6 +60,7 @@ export async function createSupplierContact(input: SupplierContactInput) {
       contactPerson: input.contactPerson?.trim() || null,
       phone: input.phone?.trim() || null,
       email: input.email?.trim() || null,
+      website: input.website?.trim() || null,
       note: input.note?.trim() || null,
       defaultCargoUsdPerKg:
         input.defaultCargoUsdPerKg != null && Number.isFinite(input.defaultCargoUsdPerKg)
@@ -78,11 +80,16 @@ export async function updateSupplierContact(id: string, input: SupplierContactIn
       contactPerson: input.contactPerson?.trim() || null,
       phone: input.phone?.trim() || null,
       email: input.email?.trim() || null,
+      website: input.website?.trim() || null,
       note: input.note?.trim() || null,
-      defaultCargoUsdPerKg:
-        input.defaultCargoUsdPerKg != null && Number.isFinite(input.defaultCargoUsdPerKg)
-          ? input.defaultCargoUsdPerKg
-          : null,
+      ...(input.defaultCargoUsdPerKg !== undefined
+        ? {
+            defaultCargoUsdPerKg:
+              input.defaultCargoUsdPerKg != null && Number.isFinite(input.defaultCargoUsdPerKg)
+                ? input.defaultCargoUsdPerKg
+                : null,
+          }
+        : {}),
     },
   });
 }

@@ -9,8 +9,8 @@ export type SupplierCardRow = {
   contactPerson: string | null;
   phone: string | null;
   email: string | null;
+  website: string | null;
   note: string | null;
-  defaultCargoUsdPerKg: number | null;
   materialsCount: number;
 };
 
@@ -42,11 +42,17 @@ export function SupplierContactCards({
             kind: "email",
           },
           {
-            key: "defaultCargoUsdPerKg",
-            label: "CARGO $/кг",
-            value: row.defaultCargoUsdPerKg != null ? String(row.defaultCargoUsdPerKg) : "",
-            kind: "number",
-            placeholder: "1.7",
+            key: "website",
+            label: "Сайт",
+            value: row.website ?? "",
+            placeholder: "https://",
+          },
+          {
+            key: "note",
+            label: "Нотатка",
+            value: row.note ?? "",
+            wide: true,
+            placeholder: "Умови, терміни…",
           },
         ];
 
@@ -64,7 +70,6 @@ export function SupplierContactCards({
               for (const [key, value] of Object.entries(values)) {
                 formData.set(key, value);
               }
-              formData.set("note", row.note ?? "");
               const result = await updateSupplierContactAction(formData);
               return { ok: result.ok, error: result.ok ? undefined : result.error };
             }}
