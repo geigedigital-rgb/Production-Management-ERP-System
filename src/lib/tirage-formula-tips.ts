@@ -7,6 +7,10 @@ export type TirageFormulaTipInput = {
   cutTotal: number;
   deliveryRate: number;
   deliveryTotal: number;
+  /** Fabric CARGO/NP for the tirage (₴). */
+  materialDeliveryTotal?: number;
+  /** Editable «Доставка» operation total (₴). */
+  opDeliveryTotal?: number;
   deliveryName?: string;
   materials: number;
   sewingTotal: number;
@@ -51,6 +55,8 @@ export function buildTirageFormulaTips(input: TirageFormulaTipInput) {
     cutTotal,
     deliveryRate,
     deliveryTotal,
+    materialDeliveryTotal = 0,
+    opDeliveryTotal = 0,
     deliveryName = "Доставка",
     materials,
     sewingTotal,
@@ -69,20 +75,37 @@ export function buildTirageFormulaTips(input: TirageFormulaTipInput) {
   const markupPerUnit = Math.round(sewingPerUnit * Math.max(0, multiplier) * 100) / 100;
   const suggestedPrice = Math.round((costPerUnit + markupPerUnit) * 100) / 100;
 
+  const deliveryLines: string[] = [];
+  if (materialDeliveryTotal > 0) {
+    deliveryLines.push(
+      `Тканини (CARGO/НП): ${perUnit(materialDeliveryTotal, qty)}/шт × ${qty} = ${money(materialDeliveryTotal)}`,
+      "кг = метри ÷ м/кг · ₴ = кг × $/кг × курс (тип з комплектації).",
+    );
+  }
+  if (opDeliveryTotal > 0 || deliveryRate > 0) {
+    deliveryLines.push(
+      `${deliveryName}: ${money(deliveryRate)}/шт × ${qty} шт = ${money(opDeliveryTotal)}`,
+    );
+  }
+  if (materialDeliveryTotal > 0 && (opDeliveryTotal > 0 || deliveryRate > 0)) {
+    deliveryLines.push(`Разом доставка: ${money(deliveryTotal)}`);
+  }
+  if (deliveryLines.length === 0) {
+    deliveryLines.push("Доставка 0 ₴ на цей тираж.");
+  }
+
   return {
     cut: [
       `${money(cutRate)}/шт × ${qty} шт = ${money(cutTotal)}`,
       "Поле — ставка за шт, під ним — сума на тираж.",
     ].join("\n"),
 
-    delivery: [
-      `${money(deliveryRate)}/шт × ${qty} шт = ${money(deliveryTotal)}`,
-      `${deliveryName}: ставка за шт × тираж.`,
-    ].join("\n"),
+    delivery: deliveryLines.join("\n"),
 
     materials: [
       `${perUnit(materials, qty)}/шт × ${qty} шт = ${money(materials)}`,
       "Закупівля матеріалів з комплектації на тираж.",
+      "Тканина — без CARGO/НП (вони в «Достав.»). Фурнітура — з доставкою упаковки в ₴/од.",
     ].join("\n"),
 
     sewing: [
@@ -140,7 +163,26 @@ export function buildTirageFormulaTips(input: TirageFormulaTipInput) {
 export function buildTirageHeaderTips(args?: {
   otherLineNames?: string[];
   otherHasExtraAdditional?: boolean;
+  hasMaterialDelivery?: boolean;
+  hasDeliveryOp?: boolean;
 }) {
+  const deliveryBody: string[] = ["Доставка"];
+  if (args?.hasMaterialDelivery) {
+    deliveryBody.push(
+      "Тканини з комплектації: CARGO / НП стандарт / НП обʼємні.",
+      "₴/шт і сума на тираж рахуються з витрати (кг × $/кг × курс).",
+    );
+  }
+  if (args?.hasDeliveryOp) {
+    deliveryBody.push(
+      "Плюс операція «Доставка»: ставка за 1 шт (поле).",
+      "Під полем — сума на тираж (матеріали + операція).",
+    );
+  }
+  if (!args?.hasMaterialDelivery && !args?.hasDeliveryOp) {
+    deliveryBody.push("Ставка / сума на тираж, коли є доставка матеріалів або операція.");
+  }
+
   return {
     card: ["Картка", "Показувати цей тираж у прайсі на картці виробу."].join("\n"),
 
@@ -156,17 +198,14 @@ export function buildTirageHeaderTips(args?: {
       "Під полем — сума на тираж (ставка × кількість).",
     ].join("\n"),
 
-    delivery: [
-      "Доставка",
-      "Доставка фурнітури/матеріалів: ставка за 1 шт.",
-      "Під полем — сума на тираж.",
-    ].join("\n"),
+    delivery: deliveryBody.join("\n"),
 
     materials: [
       "Матеріали",
       "Основне — ₴/шт з комплектації.",
       "Сіре — сума на тираж.",
-      "Тканина: опт або роздріб залежно від метрів.",
+      "Тканина: опт або роздріб залежно від метрів (без CARGO/НП).",
+      "Фурнітура: у ₴/од. вже є доставка упаковки.",
     ].join("\n"),
 
     sewing: [
@@ -191,6 +230,7 @@ export function buildTirageHeaderTips(args?: {
     cost: [
       "Собівартість",
       "Мат + Крій + Пошив + Достав + Пакування + ПВ",
+      "Достав. = доставка тканин (CARGO/НП) + операція «Доставка» (якщо є).",
       "Основне — ₴/шт, сіре — сума на тираж.",
     ].join("\n"),
 

@@ -43,6 +43,8 @@ export type MaterialsTableRow = {
   purchasePrice: number;
   waste: number;
   supplierCode: string;
+  /** Names from supplierOffers (+ legacy supplierCode fallback). */
+  supplierNames: string[];
   colorOrAttribute: string;
   note: string;
   details: string;
@@ -60,10 +62,23 @@ export type MaterialsTableRow = {
   wholesaleNote?: string;
   rollWeightKg?: number | null;
   metersPerRoll?: number | null;
+  minWholesaleMeters?: number | null;
   costVatOverride?: "NET" | "GROSS" | null;
 };
 
-type SortKey = "name" | "type" | "unit" | "price" | "waste" | "cost";
+type SortKey = "name" | "type" | "unit" | "suppliers" | "density" | "composition" | "price" | "cost";
+
+function formatDensity(value?: string) {
+  const trimmed = value?.replace(/\s+/g, " ").trim();
+  if (!trimmed) return null;
+  return /г\/м/i.test(trimmed) ? trimmed : `${trimmed} г/м²`;
+}
+
+function formatSuppliers(names: string[]) {
+  if (names.length === 0) return null;
+  if (names.length <= 2) return names.join(" · ");
+  return `${names[0]} · ${names[1]} +${names.length - 2}`;
+}
 
 export function MaterialsTable({
   rows,
@@ -89,15 +104,20 @@ export function MaterialsTable({
         name: (row) => row.nameUk,
         type: (row) => typeLabels[row.type] ?? row.type,
         unit: (row) => row.unitCode,
+        suppliers: (row) => row.supplierNames.join(" ") || row.supplierCode,
+        density: (row) => {
+          const n = Number(String(row.densityGsm ?? "").replace(",", "."));
+          return Number.isFinite(n) && n > 0 ? n : null;
+        },
+        composition: (row) => row.composition?.trim() || null,
         price: (row) => row.purchasePrice,
-        waste: (row) => row.waste,
         cost: (row) => row.purchasePrice * (1 + row.waste / 100),
       }),
     [rows, sort],
   );
   const ids = useMemo(() => sorted.map((row) => row.id), [sorted]);
   const selection = useRowSelection(ids);
-  const colSpan = canEdit ? 8 : 7;
+  const colSpan = canEdit ? 10 : 9;
 
   return (
     <div>
@@ -123,7 +143,7 @@ export function MaterialsTable({
               label="Обрати всі"
             />
           </TH>
-          <SortableTH columnKey="name" sort={sort} onSort={toggle} className="min-w-[18rem] w-[42%]">
+          <SortableTH columnKey="name" sort={sort} onSort={toggle} className="min-w-[14rem] w-[28%]">
             Матеріал
           </SortableTH>
           <SortableTH columnKey="type" sort={sort} onSort={toggle}>
@@ -132,11 +152,17 @@ export function MaterialsTable({
           <SortableTH columnKey="unit" sort={sort} onSort={toggle} align="center" width="3rem">
             Од.
           </SortableTH>
+          <SortableTH columnKey="suppliers" sort={sort} onSort={toggle} className="min-w-[8rem]">
+            Постачальники
+          </SortableTH>
+          <SortableTH columnKey="density" sort={sort} onSort={toggle} align="right">
+            Щільність
+          </SortableTH>
+          <SortableTH columnKey="composition" sort={sort} onSort={toggle} className="min-w-[7rem]">
+            Склад
+          </SortableTH>
           <SortableTH columnKey="price" sort={sort} onSort={toggle} align="right">
             Ціна закупівлі
-          </SortableTH>
-          <SortableTH columnKey="waste" sort={sort} onSort={toggle} align="right">
-            Відходи
           </SortableTH>
           <SortableTH columnKey="cost" sort={sort} onSort={toggle} align="right">
             Собівартість / од.
@@ -153,6 +179,9 @@ export function MaterialsTable({
           ) : (
             sorted.map((row) => {
               const isSelected = selection.isSelected(row.id);
+              const densityLabel = formatDensity(row.densityGsm);
+              const suppliersLabel = formatSuppliers(row.supplierNames);
+              const composition = row.composition?.replace(/\s+/g, " ").trim() || null;
               const editDefaults: MaterialFormDefaults = {
                 id: row.id,
                 nameUk: row.nameUk,
@@ -177,6 +206,7 @@ export function MaterialsTable({
                 wholesaleNote: row.wholesaleNote,
                 rollWeightKg: row.rollWeightKg,
                 metersPerRoll: row.metersPerRoll,
+                minWholesaleMeters: row.minWholesaleMeters,
                 costVatOverride: row.costVatOverride,
               };
               return (
@@ -193,7 +223,7 @@ export function MaterialsTable({
                       label={`Обрати ${row.nameUk}`}
                     />
                   </TD>
-                  <TD className="min-w-[18rem]">
+                  <TD className="min-w-[14rem]">
                     <CellStack title={row.nameUk} subtitle={row.details || undefined} wrap />
                   </TD>
                   <TD nowrap className="text-[var(--color-text-secondary)]">
@@ -202,11 +232,29 @@ export function MaterialsTable({
                   <TD align="center" nowrap className="w-[3rem] type-mono text-[12px] tabular-nums text-[var(--color-text-secondary)]">
                     {formatUnit(row.unitCode)}
                   </TD>
+                  <TD className="max-w-[12rem] text-[var(--color-text-secondary)]">
+                    {suppliersLabel ? (
+                      <span className="line-clamp-2" title={row.supplierNames.join(", ")}>
+                        {suppliersLabel}
+                      </span>
+                    ) : (
+                      <span className="text-[var(--color-text-tertiary)]">—</span>
+                    )}
+                  </TD>
+                  <TD numeric nowrap className="text-[var(--color-text-secondary)]">
+                    {densityLabel ?? <span className="text-[var(--color-text-tertiary)]">—</span>}
+                  </TD>
+                  <TD className="max-w-[10rem] text-[var(--color-text-secondary)]">
+                    {composition ? (
+                      <span className="line-clamp-2" title={composition}>
+                        {composition}
+                      </span>
+                    ) : (
+                      <span className="text-[var(--color-text-tertiary)]">—</span>
+                    )}
+                  </TD>
                   <TD numeric className="font-medium">
                     {formatMoneyUah(row.purchasePrice)}
-                  </TD>
-                  <TD numeric className="text-[var(--color-text-secondary)]">
-                    {row.waste}%
                   </TD>
                   <TD numeric title="Ціна закупівлі з урахуванням відходів">
                     {formatMoneyUah(row.purchasePrice * (1 + row.waste / 100))}

@@ -308,14 +308,14 @@ const lineOrder = resolveMaterialLinePurchasePrice({
 assert.equal(lineOrder.pricingMode, "wholesale");
 assert.equal(lineOrder.purchasePrice, 180);
 
-// Wholesale-only fabric: threshold must not change mode or price.
+// Single-price fabric (no cut): always звичайна; threshold must not change mode or price.
 const wholesaleOnlyBelow = resolveOrderFabricPurchasePrice({
   metersNeeded: 20,
   wholesalePurchasePrice: 180,
   cutPurchasePrice: null,
   minWholesaleMeters: 50,
 });
-assert.equal(wholesaleOnlyBelow.pricingMode, "wholesale");
+assert.equal(wholesaleOnlyBelow.pricingMode, "standard");
 assert.equal(wholesaleOnlyBelow.purchasePrice, 180);
 
 const wholesaleOnlyAbove = resolveOrderFabricPurchasePrice({
@@ -324,7 +324,7 @@ const wholesaleOnlyAbove = resolveOrderFabricPurchasePrice({
   cutPurchasePrice: null,
   minWholesaleMeters: 50,
 });
-assert.equal(wholesaleOnlyAbove.pricingMode, "wholesale");
+assert.equal(wholesaleOnlyAbove.pricingMode, "standard");
 assert.equal(wholesaleOnlyAbove.purchasePrice, 180);
 
 const wholesaleOnlyLine = resolveMaterialLinePurchasePrice({
@@ -337,7 +337,7 @@ const wholesaleOnlyLine = resolveMaterialLinePurchasePrice({
   companyCostMode: "NET",
   metersNeeded: 10,
 });
-assert.equal(wholesaleOnlyLine.pricingMode, "wholesale");
+assert.equal(wholesaleOnlyLine.pricingMode, "standard");
 assert.equal(wholesaleOnlyLine.purchasePrice, 180);
 
 import { computeOrderItemFabricDelivery } from "../src/lib/fabric-delivery";

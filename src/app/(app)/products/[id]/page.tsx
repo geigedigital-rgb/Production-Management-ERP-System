@@ -13,7 +13,7 @@ import { ProductIdentityEditor } from "@/components/products/ProductIdentityEdit
 import { ProductSizesEditor } from "@/components/products/ProductSizesEditor";
 import { DuplicateProductButton } from "@/components/products/DuplicateProductButton";
 import { IconCheckCircle, IconCircle, IconOrders, IconSizes } from "@/components/ui/Icons";
-import { buildCalcFromProduct, getPricingDefaults } from "@/server/domains/calculation/from-entities";
+import { buildCalcFromProduct, getPricingDefaults, productFabricDeliveryAmount } from "@/server/domains/calculation/from-entities";
 import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
 import {
   calcWithClientPrice,
@@ -28,6 +28,7 @@ import {
   sizeWasteFromNorms,
 } from "@/lib/size-bom";
 import { operationMethodLabel } from "@/lib/operation-labels";
+import { materialSupplierNames } from "@/lib/material-catalog-options";
 import { isCutOperationName, resolveCutUnitRateForProduct, summarizeCutOperationDisplay } from "@/lib/cut-rate";
 import {
   isDeliveryOperationName,
@@ -264,30 +265,41 @@ export default async function ProductDetailPage({
             op.operation.calculationMethod === "QUANTITY_TIER" &&
             isDeliveryOperationName(op.operation.nameUk),
         );
-        const deliveryPerUnit = deliveryRow
+        const opDeliveryPerUnit = deliveryRow
           ? resolveQuantityTierRate({
               quantity: qty,
               tiers: pickOperationQuantityTiers(deliveryRow.rateTiers, deliveryRow.operation.rateTiers),
               fallbackRate: operationFallbackRate(deliveryRow),
             })
           : 0;
+        const fabricDeliveryTotal = productFabricDeliveryAmount(product, qty, {
+          ...pricingWithFixed,
+          sizeMode: "standard",
+        });
+        const materialDeliveryPerUnit = qty > 0 ? fabricDeliveryTotal / qty : 0;
+        const deliveryPerUnit = opDeliveryPerUnit + materialDeliveryPerUnit;
         const operationsPerUnit = qty > 0 ? Number(calc.operationsSubtotal) / qty : 0;
         const extraAdditionalTotal = product.additionalCosts.reduce((sum, row) => {
           const amount = Number(row.amount);
           if (!Number.isFinite(amount)) return sum;
           return sum + (row.isPerUnit ? amount * qty : amount);
         }, 0);
-        const pvTotal = Math.max(0, Number(calc.additionalCostsSubtotal) - extraAdditionalTotal);
+        // PV = additionalCosts − product extras − fabric delivery (fabric goes to «Достав.»).
+        const pvTotal = Math.max(
+          0,
+          Number(calc.additionalCostsSubtotal) - extraAdditionalTotal - fabricDeliveryTotal,
+        );
         const extraAdditionalPerUnit = qty > 0 ? extraAdditionalTotal / qty : 0;
         // Пакування = операції комплектації крім крою/пошиву/доставки + additionalCosts виробу.
         const otherOpsPerUnit =
-          operationsPerUnit - cutPerUnit - sewingPerUnit - deliveryPerUnit + extraAdditionalPerUnit;
+          operationsPerUnit - cutPerUnit - sewingPerUnit - opDeliveryPerUnit + extraAdditionalPerUnit;
         return {
           minQuantity: qty,
           costPerUnit: Number(calc.costPerUnit),
           sewingPerUnit,
           cutPerUnit,
           deliveryPerUnit,
+          materialDeliveryPerUnit,
           otherOpsPerUnit,
           otherLineNames,
           otherHasExtraAdditional,
@@ -616,6 +628,7 @@ export default async function ProductDetailPage({
                 unit: m.unitOfMeasure.code,
                 composition: m.composition?.trim() || null,
                 densityGsm: m.densityGsm?.trim() || null,
+                supplierNames: materialSupplierNames(m),
               })),
               operationOptions: operations.map((o) => ({ id: o.id, label: o.nameUk })),
               decorationOptions: decorations.map((d) => ({ id: d.id, label: d.nameUk })),
@@ -663,6 +676,16 @@ export default async function ProductDetailPage({
                     : null,
               })),
               costHints: tirageCostHints,
+              showDeliveryColumn:
+                tirageCostHints.some(
+                  (h) => (h.materialDeliveryPerUnit ?? 0) > 0 || (h.deliveryPerUnit ?? 0) > 0,
+                ) ||
+                product.materials.some(
+                  (row) =>
+                    row.material.type === "FABRIC" &&
+                    row.material.metersPerKg != null &&
+                    Number(row.material.metersPerKg) > 0,
+                ),
             }}
           />
       </ProductDetailPreviewShell>

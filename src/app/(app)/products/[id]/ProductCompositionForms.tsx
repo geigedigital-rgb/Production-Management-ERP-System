@@ -24,6 +24,7 @@ type Option = {
   unit?: string;
   composition?: string | null;
   densityGsm?: string | null;
+  supplierNames?: string[];
 };
 type UnitOption = { id: string; label: string };
 
@@ -170,7 +171,11 @@ export function ProductAddMaterialBar({
             <option
               key={material.id}
               value={material.id}
-              data-description={materialOptionDescription(material.densityGsm, material.composition)}
+              data-description={materialOptionDescription(
+                material.densityGsm,
+                material.composition,
+                material.supplierNames,
+              )}
             >
               {material.label}
             </option>
@@ -286,7 +291,11 @@ export function AddProductMaterialPanel({
             <option
               key={material.id}
               value={material.id}
-              data-description={materialOptionDescription(material.densityGsm, material.composition)}
+              data-description={materialOptionDescription(
+                material.densityGsm,
+                material.composition,
+                material.supplierNames,
+              )}
             >
               {material.label}
             </option>

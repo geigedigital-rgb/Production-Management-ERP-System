@@ -203,7 +203,11 @@ export function DraftAddMaterialForm({
               <option
                 key={row.id}
                 value={row.id}
-                data-description={materialOptionDescription(row.densityGsm, row.composition)}
+                data-description={materialOptionDescription(
+                  row.densityGsm,
+                  row.composition,
+                  row.supplierOffers?.map((offer) => offer.supplierName) ?? [],
+                )}
               >
                 {row.label}
               </option>
@@ -270,7 +274,11 @@ export function DraftAddMaterialForm({
             <option
               key={row.id}
               value={row.id}
-              data-description={materialOptionDescription(row.densityGsm, row.composition)}
+              data-description={materialOptionDescription(
+                row.densityGsm,
+                row.composition,
+                row.supplierOffers?.map((offer) => offer.supplierName) ?? [],
+              )}
             >
               {row.label}
             </option>

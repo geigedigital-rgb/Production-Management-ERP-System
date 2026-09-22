@@ -233,6 +233,7 @@ function liveTirageSheet(args: {
   hint: TirageCostHint | null;
   qty: number;
   cutRate: number;
+  /** Editable «Доставка» operation ₴/шт (0 when no such op). */
   deliveryRate: number;
 }) {
   const qty = args.qty > 0 ? args.qty : 0;
@@ -241,9 +242,11 @@ function liveTirageSheet(args: {
   const other = roundMoney((args.hint?.otherOpsPerUnit ?? 0) * qty);
   const pv = roundMoney((args.hint?.additionalPerUnit ?? 0) * qty);
   const cut = roundMoney(args.cutRate * qty);
-  const delivery = roundMoney(args.deliveryRate * qty);
+  const materialDelivery = roundMoney((args.hint?.materialDeliveryPerUnit ?? 0) * qty);
+  const opDelivery = roundMoney(args.deliveryRate * qty);
+  const delivery = roundMoney(materialDelivery + opDelivery);
   const cost = roundMoney(materials + cut + sewing + delivery + other + pv);
-  return { materials, sewing, other, pv, cut, delivery, cost };
+  return { materials, sewing, other, pv, cut, delivery, materialDelivery, opDelivery, cost };
 }
 
 export function ProductPriceCutPanel({
@@ -255,6 +258,7 @@ export function ProductPriceCutPanel({
   priceTiers,
   costHints = [],
   onDirtyChange,
+  showDeliveryColumn: forceShowDelivery = false,
 }: {
   productId: string;
   optimalQty: number | null;
@@ -269,9 +273,16 @@ export function ProductPriceCutPanel({
   }>;
   costHints?: TirageCostHint[];
   onDirtyChange?: (dirty: boolean) => void;
+  /** Force «Достав.» column even when computed amount is still 0. */
+  showDeliveryColumn?: boolean;
 }) {
   const router = useRouter();
-  const hasDelivery = Boolean(deliveryOp);
+  const hasDeliveryOp = Boolean(deliveryOp);
+  const hasMaterialDelivery = costHints.some(
+    (hint) => (hint.materialDeliveryPerUnit ?? 0) > 0 || (hint.deliveryPerUnit ?? 0) > 0,
+  );
+  const showDeliveryColumn =
+    forceShowDelivery || hasDeliveryOp || hasMaterialDelivery;
   const deliveryTiers = deliveryOp?.tiers ?? [];
   const dirtyRef = useRef(false);
   const pendingHrefRef = useRef<string | null>(null);
@@ -280,8 +291,10 @@ export function ProductPriceCutPanel({
     return buildTirageHeaderTips({
       otherLineNames: sample?.otherLineNames,
       otherHasExtraAdditional: sample?.otherHasExtraAdditional,
+      hasMaterialDelivery: costHints.some((h) => (h.materialDeliveryPerUnit ?? 0) > 0),
+      hasDeliveryOp: Boolean(deliveryOp),
     });
-  }, [costHints]);
+  }, [costHints, deliveryOp]);
 
   const initialMerged = useMemo(() => {
     const qtySet = new Set<number>();
@@ -543,7 +556,7 @@ export function ProductPriceCutPanel({
       }
       markSaved(snapshotRows, snapshotOptimalQty, snapshotOptimalTotal, snapshotBaseModel);
       setMessage(
-        hasDelivery ? "Крій, доставку і прайс збережено" : "Крій і прайс збережено",
+        hasDeliveryOp ? "Крій, доставку і прайс збережено" : "Крій і прайс збережено",
       );
       // Soft refresh in background — do not block UI / wipe local rows.
       void router.refresh();
@@ -645,7 +658,7 @@ export function ProductPriceCutPanel({
             <col className="w-[3.25rem]" />
             <col className="w-[5.5rem]" />
             <col className="w-[5.75rem]" />
-            {hasDelivery ? <col className="w-[5.75rem]" /> : null}
+            {showDeliveryColumn ? <col className="w-[5.75rem]" /> : null}
             <col />
             <col />
             <col />
@@ -668,7 +681,7 @@ export function ProductPriceCutPanel({
               <th className={thClass}>
                 <HeaderTip tip={headerTips.cut}>Крій</HeaderTip>
               </th>
-              {hasDelivery ? (
+              {showDeliveryColumn ? (
                 <th className={thClass}>
                   <HeaderTip tip={headerTips.delivery}>Достав.</HeaderTip>
                 </th>
@@ -712,16 +725,20 @@ export function ProductPriceCutPanel({
                 hint,
                 qty,
                 cutRate: row.cutRate,
-                deliveryRate: hasDelivery ? row.deliveryRate : 0,
+                deliveryRate: hasDeliveryOp ? row.deliveryRate : 0,
               });
               const selling = roundMoney(row.pricePerUnit * qty);
               const profit = roundMoney(selling - sheet.cost);
               const marginPercent = selling > 0 ? (profit / selling) * 100 : 0;
+              const materialDeliveryPerUnit = hint?.materialDeliveryPerUnit ?? 0;
+              const deliveryPerUnit =
+                qty > 0 ? roundMoney(sheet.delivery / qty) : materialDeliveryPerUnit;
               const perUnit = {
                 materials: hint?.materialsPerUnit ?? 0,
                 sewing: sewingPerUnit,
                 other: hint?.otherOpsPerUnit ?? 0,
                 pv: hint?.additionalPerUnit ?? 0,
+                delivery: deliveryPerUnit,
                 cost: qty > 0 ? roundMoney(sheet.cost / qty) : 0,
                 profit: qty > 0 ? roundMoney(profit / qty) : 0,
               };
@@ -729,8 +746,10 @@ export function ProductPriceCutPanel({
                 qty,
                 cutRate: row.cutRate,
                 cutTotal: sheet.cut,
-                deliveryRate: hasDelivery ? row.deliveryRate : 0,
+                deliveryRate: hasDeliveryOp ? row.deliveryRate : 0,
                 deliveryTotal: sheet.delivery,
+                materialDeliveryTotal: sheet.materialDelivery,
+                opDeliveryTotal: sheet.opDelivery,
                 deliveryName: deliveryOp?.name,
                 materials: sheet.materials,
                 sewingTotal: sheet.sewing,
@@ -836,32 +855,40 @@ export function ProductPriceCutPanel({
                       </FormulaTip>
                     </div>
                   </td>
-                  {hasDelivery ? (
+                  {showDeliveryColumn ? (
                     <td className={tdClass}>
-                      <div className="flex flex-col items-end gap-0.5">
-                        <CompactInput
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          inputMode="decimal"
-                          className="w-full"
-                          value={row.deliveryRate}
-                          title={tips.delivery}
-                          onChange={(event) => {
-                            const deliveryRate = Number(event.target.value);
-                            setRows((prev) => {
-                              const next = [...prev];
-                              next[index] = { ...row, deliveryRate };
-                              return next;
-                            });
-                          }}
+                      {hasDeliveryOp ? (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <CompactInput
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            inputMode="decimal"
+                            className="w-full"
+                            value={row.deliveryRate}
+                            title={tips.delivery}
+                            onChange={(event) => {
+                              const deliveryRate = Number(event.target.value);
+                              setRows((prev) => {
+                                const next = [...prev];
+                                next[index] = { ...row, deliveryRate };
+                                return next;
+                              });
+                            }}
+                          />
+                          <FormulaTip tip={tips.delivery}>
+                            <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
+                              {formatAmount(sheet.delivery)}
+                            </span>
+                          </FormulaTip>
+                        </div>
+                      ) : (
+                        <MoneyCell
+                          perUnit={perUnit.delivery}
+                          total={sheet.delivery}
+                          tip={tips.delivery}
                         />
-                        <FormulaTip tip={tips.delivery}>
-                          <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
-                            {formatAmount(sheet.delivery)}
-                          </span>
-                        </FormulaTip>
-                      </div>
+                      )}
                     </td>
                   ) : null}
                   <td className={tdNum}>
@@ -1037,7 +1064,7 @@ export function ProductPriceCutPanel({
         >
           {saving
             ? "Збереження…"
-            : hasDelivery
+            : hasDeliveryOp
               ? "Зберегти крій, доставку і прайс"
               : "Зберегти крій і прайс"}
         </Button>

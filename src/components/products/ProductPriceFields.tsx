@@ -23,7 +23,10 @@ export type TirageCostHint = {
   costPerUnit: number;
   sewingPerUnit: number;
   cutPerUnit: number;
+  /** Total delivery ₴/шт (fabric cargo/NP + optional «Доставка» op). */
   deliveryPerUnit?: number;
+  /** Fabric CARGO/NP from BOM (₴/шт for this tirage). Trim pack delivery stays in materials. */
+  materialDeliveryPerUnit?: number;
   /** Ops left after cut/sew/delivery + product additionalCosts (not PV) — shown as «Пакування». */
   otherOpsPerUnit?: number;
   /** Concrete operation names in the packaging column. */

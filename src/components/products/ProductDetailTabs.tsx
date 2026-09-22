@@ -41,6 +41,7 @@ export function ProductDetailTabs({
       sewingMultiplier?: number | null;
     }>;
     costHints?: TirageCostHint[];
+    showDeliveryColumn?: boolean;
   };
   showPricing?: boolean;
 }) {
@@ -72,7 +73,7 @@ export function ProductDetailTabs({
               ? showPricing
                 ? "Норми на 1 шт (і доставка теж). Сума доставки на тираж = ₴/од. × кількість; сітка — у «Прайс і крій»."
                 : "Склад виробу (без цін і калькуляції)"
-              : "Калькуляція на весь тираж. Статті не перетинаються: Мат + Крій + Пошив + Достав + Пакування + ПВ = Собів."}
+              : "Калькуляція на весь тираж. Статті не перетинаються: Мат + Крій + Пошив + Достав (тканини CARGO/НП + операція) + Пакування + ПВ = Собів."}
           </p>
         </div>
         {tabs.length > 1 ? <SegmentedTabs items={tabs} active={effectiveTab} /> : null}
@@ -89,6 +90,7 @@ export function ProductDetailTabs({
           isBaseModel={price.isBaseModel}
           priceTiers={price.tiers}
           costHints={price.costHints}
+          showDeliveryColumn={price.showDeliveryColumn}
         />
       )}
     </div>

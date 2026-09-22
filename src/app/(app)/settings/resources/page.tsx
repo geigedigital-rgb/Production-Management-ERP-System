@@ -76,54 +76,66 @@ export default async function MaterialsSettingsPage({
   const unitOptions = units.map((u) => ({ id: u.id, label: u.nameUk, code: u.code }));
   const suppliers = [
     ...new Set(
-      materials
-        .map((row) => row.supplierCode?.replace(/\s+/g, " ").trim())
-        .filter((value): value is string => Boolean(value)),
+      materials.flatMap((row) => {
+        const fromOffers = row.supplierOffers
+          .map((offer) => offer.supplier.nameUk.replace(/\s+/g, " ").trim())
+          .filter(Boolean);
+        const legacy = row.supplierCode?.replace(/\s+/g, " ").trim();
+        return legacy ? [...fromOffers, legacy] : fromOffers;
+      }),
     ),
   ].sort((a, b) => a.localeCompare(b, "uk"));
 
-  const rows: MaterialsTableRow[] = filtered.map((row) => ({
-    id: row.id,
-    nameUk: row.nameUk,
-    type: row.type,
-    unitCode: row.unitOfMeasure.code,
-    unitOfMeasureId: row.unitOfMeasureId,
-    purchasePrice: Number(row.purchasePrice),
-    waste: Number(row.defaultWastePercent),
-    supplierCode: row.supplierCode ?? "",
-    colorOrAttribute: row.colorOrAttribute ?? "",
-    note: row.note ?? "",
-    details:
-      row.type === "FABRIC"
-        ? [
-            row.fabricKindUk,
-            row.supplierCode,
-            row.densityGsm ? `${row.densityGsm} г/м²` : null,
-            row.composition,
-            row.widthCm ? `шир. ${row.widthCm}` : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")
-        : [row.supplierCode, row.colorOrAttribute].filter(Boolean).join(" · "),
-    densityGsm: row.densityGsm ?? "",
-    composition: row.composition ?? "",
-    metersPerKg: row.metersPerKg != null ? Number(row.metersPerKg) : null,
-    priceKgUsd: row.priceKgUsd != null ? Number(row.priceKgUsd) : null,
-    priceKgUsdCargo: row.priceKgUsdCargo != null ? Number(row.priceKgUsdCargo) : null,
-    priceKgUsdVat: row.priceKgUsdVat != null ? Number(row.priceKgUsdVat) : null,
-    priceMeterUahNoVat: row.priceMeterUahNoVat != null ? Number(row.priceMeterUahNoVat) : null,
-    priceMeterUahVat: row.priceMeterUahVat != null ? Number(row.priceMeterUahVat) : null,
-    priceMeterUahCutVat:
-      row.priceMeterUahCutVat != null ? Number(row.priceMeterUahCutVat) : null,
-    fabricKindUk: row.fabricKindUk ?? "",
-    widthCm: row.widthCm ?? "",
-    wholesaleNote: row.wholesaleNote ?? "",
-    rollWeightKg: row.rollWeightKg != null ? Number(row.rollWeightKg) : null,
-    metersPerRoll: row.metersPerRoll != null ? Number(row.metersPerRoll) : null,
-    minWholesaleMeters:
-      row.minWholesaleMeters != null ? Number(row.minWholesaleMeters) : null,
-    costVatOverride: row.costVatOverride,
-  }));
+  const rows: MaterialsTableRow[] = filtered.map((row) => {
+    const offerNames = row.supplierOffers
+      .map((offer) => offer.supplier.nameUk.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const legacy = row.supplierCode?.replace(/\s+/g, " ").trim() || "";
+    const supplierNames =
+      offerNames.length > 0
+        ? [...new Set(offerNames)]
+        : legacy
+          ? [legacy]
+          : [];
+
+    return {
+      id: row.id,
+      nameUk: row.nameUk,
+      type: row.type,
+      unitCode: row.unitOfMeasure.code,
+      unitOfMeasureId: row.unitOfMeasureId,
+      purchasePrice: Number(row.purchasePrice),
+      waste: Number(row.defaultWastePercent),
+      supplierCode: row.supplierCode ?? "",
+      supplierNames,
+      colorOrAttribute: row.colorOrAttribute ?? "",
+      note: row.note ?? "",
+      details:
+        row.type === "FABRIC"
+          ? [row.fabricKindUk, row.widthCm ? `шир. ${row.widthCm}` : null]
+              .filter(Boolean)
+              .join(" · ")
+          : [row.colorOrAttribute].filter(Boolean).join(" · "),
+      densityGsm: row.densityGsm ?? "",
+      composition: row.composition ?? "",
+      metersPerKg: row.metersPerKg != null ? Number(row.metersPerKg) : null,
+      priceKgUsd: row.priceKgUsd != null ? Number(row.priceKgUsd) : null,
+      priceKgUsdCargo: row.priceKgUsdCargo != null ? Number(row.priceKgUsdCargo) : null,
+      priceKgUsdVat: row.priceKgUsdVat != null ? Number(row.priceKgUsdVat) : null,
+      priceMeterUahNoVat: row.priceMeterUahNoVat != null ? Number(row.priceMeterUahNoVat) : null,
+      priceMeterUahVat: row.priceMeterUahVat != null ? Number(row.priceMeterUahVat) : null,
+      priceMeterUahCutVat:
+        row.priceMeterUahCutVat != null ? Number(row.priceMeterUahCutVat) : null,
+      fabricKindUk: row.fabricKindUk ?? "",
+      widthCm: row.widthCm ?? "",
+      wholesaleNote: row.wholesaleNote ?? "",
+      rollWeightKg: row.rollWeightKg != null ? Number(row.rollWeightKg) : null,
+      metersPerRoll: row.metersPerRoll != null ? Number(row.metersPerRoll) : null,
+      minWholesaleMeters:
+        row.minWholesaleMeters != null ? Number(row.minWholesaleMeters) : null,
+      costVatOverride: row.costVatOverride,
+    };
+  });
 
   return (
     <div>

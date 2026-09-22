@@ -172,6 +172,7 @@ export function ConfigurationTab({
     label: string;
     composition?: string | null;
     densityGsm?: string | null;
+    supplierNames?: string[];
   }>;
   operationOptions: Array<{ id: string; label: string }>;
   unitOptions: Array<{ id: string; label: string }>;
@@ -950,6 +951,7 @@ function InlineAddOrderMaterial({
     label: string;
     composition?: string | null;
     densityGsm?: string | null;
+    supplierNames?: string[];
   }>;
   units: Array<{ id: string; label: string }>;
   sizeCode: string;
@@ -996,7 +998,11 @@ function InlineAddOrderMaterial({
           <option
             key={row.id}
             value={row.id}
-            data-description={materialOptionDescription(row.densityGsm, row.composition)}
+            data-description={materialOptionDescription(
+              row.densityGsm,
+              row.composition,
+              row.supplierNames,
+            )}
           >
             {row.label}
           </option>

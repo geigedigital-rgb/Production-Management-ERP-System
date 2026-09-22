@@ -318,6 +318,7 @@ export function DraftCompositionBomEditor({
                 const specHint = materialOptionDescription(
                   catalog?.densityGsm,
                   catalog?.composition,
+                  catalog?.supplierOffers?.map((offer) => offer.supplierName) ?? [],
                 );
                 const isSelected = selectedMaterialKey === row.key;
                 const showColorSlot = draftMaterialShowsColorSlot(row, {

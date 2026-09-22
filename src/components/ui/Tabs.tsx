@@ -41,7 +41,7 @@ export function SegmentedTabs({
                 className={cn(
                   "tabular rounded-full px-1.5 text-[11px] font-semibold",
                   isActive
-                    ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
+                    ? "bg-[var(--color-primary-100)] text-[var(--color-primary-800)]"
                     : "bg-[var(--color-surface)] text-[var(--color-text-tertiary)]",
                 )}
               >
@@ -54,7 +54,7 @@ export function SegmentedTabs({
         const classes = cn(
           "inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[13px] font-semibold transition-colors",
           isActive
-            ? "bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-[0_1px_2px_rgba(18,31,24,0.08)]"
+            ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
             : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
           item.disabled && "cursor-not-allowed opacity-45",
         );

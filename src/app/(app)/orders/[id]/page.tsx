@@ -33,7 +33,7 @@ import {
   IconVersions,
 } from "@/components/ui/Icons";
 import { formatDateUk, formatMoneyUah, formatUnit } from "@/lib/utils";
-import { materialOptionDescription } from "@/lib/material-catalog-options";
+import { materialOptionDescription, materialSupplierNames } from "@/lib/material-catalog-options";
 import { formatSizeRun, lineCostOnSizes, uniqueBomCount } from "@/lib/size-bom";
 import { fabricMetersNeeded } from "@/lib/fabric-pricing";
 import { deliveryRateUsdPerKg } from "@/lib/fabric-delivery-types";
@@ -254,6 +254,10 @@ export default async function OrderDetailPage({
       specHint: materialOptionDescription(
         row.material?.densityGsm,
         row.material?.composition,
+        materialSupplierNames({
+          supplierCode: row.material?.supplierCode,
+          supplierOffers: row.material?.supplierOffers,
+        }),
       ),
     };
   });
@@ -881,6 +885,7 @@ export default async function OrderDetailPage({
               label: `${material.nameUk} (${formatUnit(material.unitOfMeasure.code)})`,
               composition: material.composition?.trim() || null,
               densityGsm: material.densityGsm?.trim() || null,
+              supplierNames: materialSupplierNames(material),
             }))}
             operationOptions={operationsCatalog.map((operation) => ({
               id: operation.id,

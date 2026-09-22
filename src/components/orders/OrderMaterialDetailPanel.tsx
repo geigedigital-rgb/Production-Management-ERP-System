@@ -567,11 +567,13 @@ export function OrderMaterialDetailPanel({
                     live.pricingMode === "wholesale" ||
                     (threshold != null && live.metersNeeded >= threshold);
                   const modeLabel =
-                    !hasCut || atWholesale
-                      ? "Гурт (опт)"
-                      : live.pricingMode === "cut"
-                        ? "Відріз"
-                        : "Стандарт (до межі гурту)";
+                    !hasCut
+                      ? "Звичайна ціна"
+                      : atWholesale
+                        ? "Гурт (опт)"
+                        : live.pricingMode === "cut"
+                          ? "Відріз"
+                          : "Стандарт (до межі гурту)";
                   const catalogHint =
                     live.catalogMinWholesaleMeters != null
                       ? `${live.catalogMinWholesaleMeters} м`
@@ -632,7 +634,7 @@ export function OrderMaterialDetailPanel({
                         </p>
                       ) : !hasCut ? (
                         <p className="type-caption">
-                          У каталозі лише гуртова ціна — ₴/м не перемикається. Межу все одно можна
+                          У каталозі одна (звичайна) ціна — ₴/м не перемикається. Межу все одно можна
                           зафіксувати для цього замовлення.
                           {threshold != null
                             ? live.metersNeeded >= threshold

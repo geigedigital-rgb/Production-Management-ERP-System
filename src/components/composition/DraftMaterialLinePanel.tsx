@@ -115,9 +115,9 @@ export function DraftMaterialLinePanel({
         : null
     : null;
   const isWholesale =
-    !hasCut || (wholesaleThreshold != null && metersNeeded >= wholesaleThreshold);
+    hasCut && wholesaleThreshold != null && metersNeeded >= wholesaleThreshold;
   const pricingModeLabel = !hasCut
-    ? "гурт"
+    ? "звичайна"
     : pricing?.pricingMode === "wholesale" || isWholesale
       ? "гурт"
       : pricing?.pricingMode === "cut"
@@ -238,7 +238,7 @@ export function DraftMaterialLinePanel({
               <div className="sm:col-span-2">
                 <dt className="text-[var(--color-text-tertiary)]">Режим</dt>
                 <dd className="font-medium">
-                  {isWholesale ? "Гурт (опт)" : "Відріз / стандарт"}
+                  {!hasCut ? "Звичайна ціна" : isWholesale ? "Гурт (опт)" : "Відріз / стандарт"}
                   {row.wholesaleNote ? (
                     <span className="type-caption ml-1.5">· {row.wholesaleNote}</span>
                   ) : null}
@@ -247,7 +247,7 @@ export function DraftMaterialLinePanel({
             </dl>
             {!hasCut ? (
               <p className="type-caption">
-                У каталозі лише гуртова ціна — межа витрати не застосовується.
+                У каталозі одна (звичайна) ціна — межа витрати на ₴/м не впливає.
               </p>
             ) : wholesaleThreshold != null ? (
               <p className="type-caption">

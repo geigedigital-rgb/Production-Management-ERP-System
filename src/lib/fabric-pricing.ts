@@ -208,11 +208,11 @@ export function resolveOrderFabricPurchasePrice(input: {
   const minM = num(input.minWholesaleMeters);
   const wholesale = input.wholesalePurchasePrice;
 
-  // Single ₴/m price = always wholesale; threshold only matters when cut vs гурт differ.
+  // Single ₴/m price = звичайна; гурт only exists when cut vs wholesale differ.
   if (cut == null || cut <= 0) {
     return {
       purchasePrice: wholesale > 0 ? wholesale : 0,
-      pricingMode: wholesale > 0 ? "wholesale" : "standard",
+      pricingMode: "standard",
     };
   }
 
@@ -281,9 +281,9 @@ export function deriveFabricPricing(
 
   const cutPurchasePrice = num(inputs.priceMeterUahCutVat);
 
-  // Catalog / base model: conservative cut price when present.
+  // Catalog / base model: conservative cut price when present; else звичайна (not гурт).
   let purchasePrice = wholesalePurchasePrice;
-  let pricingMode: FabricPricingMode = wholesalePurchasePrice > 0 ? "wholesale" : "standard";
+  let pricingMode: FabricPricingMode = "standard";
   if (cutPurchasePrice != null && cutPurchasePrice > 0) {
     purchasePrice = cutPurchasePrice;
     pricingMode = "cut";
@@ -331,7 +331,7 @@ export function fabricPricingModeLabel(mode: FabricPricingMode): string {
     case "wholesale":
       return "гуртова ціна";
     default:
-      return "каталожна ціна";
+      return "звичайна ціна";
   }
 }
 
@@ -384,7 +384,7 @@ export function resolveMaterialLinePurchasePrice(input: {
     }
     return {
       purchasePrice: wholesalePurchasePrice > 0 ? wholesalePurchasePrice : catalogPrice,
-      pricingMode: wholesalePurchasePrice > 0 ? "wholesale" : "standard",
+      pricingMode: "standard",
       wholesalePurchasePrice,
       cutPurchasePrice,
     };

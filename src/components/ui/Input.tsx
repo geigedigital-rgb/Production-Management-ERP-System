@@ -23,6 +23,7 @@ export function Input({
   optional,
   id,
   readOnly,
+  disabled,
   suffix,
   ...props
 }: InputProps) {
@@ -31,11 +32,13 @@ export function Input({
       id={id ?? props.name}
       required={required}
       readOnly={readOnly}
+      disabled={disabled}
       className={cn(
         controlClass,
         error && "border-[var(--color-danger-text)] focus:ring-[var(--color-danger-text)]",
-        readOnly &&
+        (readOnly || disabled) &&
           "cursor-default border-[var(--color-border)] bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] focus:border-[var(--color-border)] focus:ring-0",
+        disabled && "opacity-70",
         suffix && "pr-11",
         inputClassName,
       )}

@@ -128,6 +128,12 @@ export default async function ProductsPage({
     composition: material.composition?.trim() || null,
     densityGsm: material.densityGsm?.trim() || null,
     availableColors: material.availableColors ?? [],
+    supplierOffers: material.supplierOffers.map((offer) => ({
+      supplierId: offer.supplierId,
+      supplierName: offer.supplier.nameUk,
+      isPrimary: offer.isPrimary,
+      availableColors: offer.availableColors ?? [],
+    })),
   }));
   const operationCatalog = operations.map((operation) => ({
     id: operation.id,

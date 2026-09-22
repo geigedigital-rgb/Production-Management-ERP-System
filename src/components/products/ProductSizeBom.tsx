@@ -254,6 +254,7 @@ export function ProductSizeBom({
     unit?: string;
     composition?: string | null;
     densityGsm?: string | null;
+    supplierNames?: string[];
   }>;
   operationOptions: Array<{ id: string; label: string }>;
   decorationOptions: Array<{ id: string; label: string }>;
@@ -555,7 +556,11 @@ export function ProductSizeBom({
                 const unitCost =
                   displayConsumption * (1 + waste / 100) * row.price;
                 const autoFromBase = scopeIsOversize && !hasSizeNorm;
-                const specHint = materialOptionDescription(row.densityGsm, row.composition);
+                const specHint = materialOptionDescription(
+                  row.densityGsm,
+                  row.composition,
+                  row.supplierOffers?.map((offer) => offer.supplierName) ?? [],
+                );
                 return (
                   <TR
                     key={row.id}

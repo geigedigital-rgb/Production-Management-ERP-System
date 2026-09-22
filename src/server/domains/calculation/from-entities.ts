@@ -31,7 +31,16 @@ import {
 } from "@/lib/quantity-tiers";
 import { resolveSizeCoeffs, isOversizeCode } from "@/lib/size-coeffs";
 import { isSewOperationName } from "@/lib/sewing-markup";
-import { resolveMaterialLinePurchasePrice, type MaterialCostVatMode } from "@/lib/fabric-pricing";
+import {
+  DEFAULT_FABRIC_PRICING_GLOBALS,
+  resolveMaterialLinePurchasePrice,
+  type FabricPricingGlobals,
+  type MaterialCostVatMode,
+} from "@/lib/fabric-pricing";
+import {
+  FABRIC_DELIVERY_ADDITIONAL_ID,
+  computeProductFabricDelivery,
+} from "@/lib/fabric-delivery";
 import {
   FIXED_COST_ADDITIONAL_ID,
   isFixedCostOperationName,
@@ -170,12 +179,115 @@ export async function getPricingDefaults() {
     minimumMarginPercent: Number(pricing?.minimumMarginPercent ?? 15),
     roundingDecimals: 2,
     materialCostVatMode: (pricing?.materialCostVatMode ?? "NET") as MaterialCostVatMode,
+    usdUahRate: Number(pricing?.usdUahRate ?? DEFAULT_FABRIC_PRICING_GLOBALS.usdUahRate),
+    fabricCargoUsdPerKg: Number(
+      pricing?.fabricCargoUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.fabricCargoUsdPerKg,
+    ),
+    npStandardUsdPerKg: Number(
+      pricing?.npStandardUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.npStandardUsdPerKg,
+    ),
+    npVolumeUsdPerKg: Number(
+      pricing?.npVolumeUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.npVolumeUsdPerKg,
+    ),
     sizeRules: sizeRules.map((row) => ({
       sizeCode: row.sizeCode,
       materialCoeff: Number(row.materialCoeff),
       operationCoeff: Number(row.operationCoeff),
     })),
   };
+}
+
+function fabricGlobalsFromPricing(pricing: {
+  usdUahRate?: number;
+  fabricCargoUsdPerKg?: number;
+  npStandardUsdPerKg?: number;
+  npVolumeUsdPerKg?: number;
+  materialCostVatMode?: MaterialCostVatMode;
+}): FabricPricingGlobals {
+  return {
+    usdUahRate: pricing.usdUahRate ?? DEFAULT_FABRIC_PRICING_GLOBALS.usdUahRate,
+    fabricCargoUsdPerKg:
+      pricing.fabricCargoUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.fabricCargoUsdPerKg,
+    npStandardUsdPerKg:
+      pricing.npStandardUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.npStandardUsdPerKg,
+    npVolumeUsdPerKg:
+      pricing.npVolumeUsdPerKg ?? DEFAULT_FABRIC_PRICING_GLOBALS.npVolumeUsdPerKg,
+    materialCostVatMode:
+      pricing.materialCostVatMode ?? DEFAULT_FABRIC_PRICING_GLOBALS.materialCostVatMode,
+  };
+}
+
+/** Fabric cargo/NP delivery ₴ for a product tirage (same size mix as buildCalcFromProduct). */
+export function productFabricDeliveryAmount(
+  product: ProductDetail,
+  quantity: number,
+  pricing: {
+    sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>;
+    sizeMode?: "all" | "standard";
+    usdUahRate?: number;
+    fabricCargoUsdPerKg?: number;
+    npStandardUsdPerKg?: number;
+    npVolumeUsdPerKg?: number;
+    materialCostVatMode?: MaterialCostVatMode;
+  },
+): number {
+  const sizeRules = pricing.sizeRules;
+  const productSizes =
+    pricing.sizeMode === "standard"
+      ? product.sizes.filter((row) => !isOversizeCode(row.size.code))
+      : product.sizes;
+  const sizes =
+    productSizes.length > 0
+      ? productSizes.map((row) => {
+          const coeffs = resolveSizeCoeffs(row.size.code, sizeRules);
+          return {
+            sizeCode: row.size.code,
+            quantity: 0,
+            materialCoeff: coeffs.materialCoeff,
+          };
+        })
+      : [{ sizeCode: "ONE", quantity: 0, materialCoeff: 1 }];
+
+  const base = Math.floor(quantity / sizes.length);
+  let remainder = quantity - base * sizes.length;
+  for (const size of sizes) {
+    size.quantity = base + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder -= 1;
+  }
+
+  const { totalUah } = computeProductFabricDelivery({
+    lines: product.materials.map((row) => ({
+      id: row.id,
+      deliveryType: row.deliveryType,
+      supplierId: row.supplierId,
+      consumptionPerUnit: Number(row.consumptionPerUnit),
+      wastePercent: Number(row.wastePercent ?? row.material.defaultWastePercent),
+      sizeCodes: sizeCodesFromScopes(row.sizeScopes),
+      sizeConsumption: sizeConsumptionFromNorms(row.sizeNorms),
+      sizeWaste: sizeWasteFromNorms(row.sizeNorms),
+      material: {
+        type: row.material.type,
+        metersPerKg: numOrNull(row.material.metersPerKg),
+        priceKgUsd: numOrNull(row.material.priceKgUsd),
+        priceKgUsdCargo: numOrNull(row.material.priceKgUsdCargo),
+        deliveryType: row.material.deliveryType,
+        supplierOffers: (row.material.supplierOffers ?? []).map((offer) => ({
+          supplierId: offer.supplierId,
+          isPrimary: offer.isPrimary,
+          deliveryType: offer.deliveryType,
+          metersPerKg: numOrNull(offer.metersPerKg),
+          priceKgUsd: numOrNull(offer.priceKgUsd),
+          priceKgUsdCargo: numOrNull(offer.priceKgUsdCargo),
+          cargoUsdPerKg: numOrNull(offer.cargoUsdPerKg),
+          npStandardUsdPerKg: numOrNull(offer.npStandardUsdPerKg),
+          npVolumeUsdPerKg: numOrNull(offer.npVolumeUsdPerKg),
+        })),
+      },
+    })),
+    sizes,
+    globals: fabricGlobalsFromPricing(pricing),
+  });
+  return totalUah;
 }
 
 /** Project defaults. Order-level % margin override is retired (price list owns selling). */
@@ -277,6 +389,10 @@ export function buildCalcFromProduct(
     sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }>;
     fixedCosts?: FixedCostCalcOptions | null;
     materialCostVatMode?: MaterialCostVatMode;
+    usdUahRate?: number;
+    fabricCargoUsdPerKg?: number;
+    npStandardUsdPerKg?: number;
+    npVolumeUsdPerKg?: number;
     /** When true, fabric ₴/м follows cut vs wholesale for this tirage (same as order). */
     quantityAwareMaterialPrices?: boolean;
     /**
@@ -403,6 +519,15 @@ export function buildCalcFromProduct(
     pricingMethod: pricing.pricingMethod,
     targetRatePercent: pricing.targetRatePercent,
   };
+
+  const fabricDelivery = productFabricDeliveryAmount(product, quantity, pricing);
+  if (fabricDelivery > 0) {
+    input.additionalCosts.push({
+      id: FABRIC_DELIVERY_ADDITIONAL_ID,
+      amount: fabricDelivery,
+      isPerUnit: false,
+    });
+  }
 
   if (pricing.fixedCosts) {
     const sewingSizes = sizes.map((size) => {
@@ -562,7 +687,7 @@ export function buildCalcFromOrderItem(
         isPerUnit: row.isPerUnit,
       })),
     ...(fabricDelivery > 0
-      ? [{ id: "fabric-delivery", amount: fabricDelivery, isPerUnit: false }]
+      ? [{ id: FABRIC_DELIVERY_ADDITIONAL_ID, amount: fabricDelivery, isPerUnit: false }]
       : []),
   ];
 

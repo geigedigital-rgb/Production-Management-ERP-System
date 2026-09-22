@@ -93,6 +93,12 @@ export default async function NewOrderPage({
             material.minWholesaleMeters != null ? Number(material.minWholesaleMeters) : null,
           costVatOverride: material.costVatOverride,
           availableColors: material.availableColors ?? [],
+          supplierOffers: material.supplierOffers.map((offer) => ({
+            supplierId: offer.supplierId,
+            supplierName: offer.supplier.nameUk,
+            isPrimary: offer.isPrimary,
+            availableColors: offer.availableColors ?? [],
+          })),
           metersPerKg: material.metersPerKg != null ? Number(material.metersPerKg) : null,
           priceKgUsdCargo:
             material.priceKgUsdCargo != null ? Number(material.priceKgUsdCargo) : null,

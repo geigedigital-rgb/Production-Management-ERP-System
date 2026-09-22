@@ -268,13 +268,9 @@ function previewFabricLineTerms(input: {
   const cutPurchasePrice =
     numField(fields.priceMeterUahCutVat) ?? numField(input.material.priceMeterUahCutVat);
   const hasCutPrice = cutPurchasePrice != null && cutPurchasePrice > 0;
-  // Threshold affects ₴/m only with cut↔гурт; order override is still shown/stored either way.
+  // Межа гурту — окремо від відрізу; відріз лише дає іншу ₴/м нижче межі.
   const minWholesaleMeters =
-    override != null && override > 0
-      ? override
-      : hasCutPrice
-        ? catalogMinWholesale
-        : null;
+    override != null && override > 0 ? override : catalogMinWholesale;
 
   return {
     purchasePricePerMeter: resolved.purchasePrice,
