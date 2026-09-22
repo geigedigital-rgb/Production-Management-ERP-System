@@ -456,7 +456,10 @@ export function OrderMaterialDetailPanel({
                   }))}
                   materialFallbackColors={detail.materialAvailableColors ?? []}
                   disabled={locked || pending}
-                  onSupplierChange={(next) => handleSupplierChange(next ?? "")}
+                  onSupplierDeliveryChange={(next) => {
+                    handleSupplierChange(next.supplierId ?? "");
+                    if (next.deliveryType) setDeliveryType(next.deliveryType);
+                  }}
                   onColorChange={setColorSnapshot}
                 />
 
@@ -694,7 +697,7 @@ export function OrderMaterialDetailPanel({
                           }
                         }}
                         options={[
-                          { value: "auto", label: "Авто (cargo × кг × курс)" },
+                          { value: "auto", label: "Авто" },
                           { value: "manual", label: "Вручну (фіксована сума)" },
                         ]}
                       />
@@ -709,11 +712,6 @@ export function OrderMaterialDetailPanel({
                           value={deliveryAmount}
                           onChange={setDeliveryAmount}
                         />
-                        <p className="type-caption">
-                          Окремий рядок у блоці «Доставка», не входить у ₴/м тканини. Авто за
-                          cargo було б {formatMoneyUah(live.deliveryComputed)} (
-                          {live.kgNeeded ?? "—"} кг × ${live.cargo}/кг × {live.rate} ₴/$).
-                        </p>
                       </div>
                     ) : (
                       <>
@@ -738,10 +736,11 @@ export function OrderMaterialDetailPanel({
                               </p>
                             );
                           }
+                          const activeType = deliveryType || options[0]!.type;
                           return (
                             <Select
                               label="Тип доставки"
-                              value={deliveryType || options[0]!.type}
+                              value={activeType}
                               onChange={(event) => {
                                 const next = event.target.value;
                                 setDeliveryType(next);
@@ -752,7 +751,8 @@ export function OrderMaterialDetailPanel({
                             >
                               {options.map((opt) => (
                                 <option key={opt.type} value={opt.type}>
-                                  {opt.label} · {opt.rateUsdPerKg} $/кг
+                                  {opt.label} · {opt.rateUsdPerKg}{" "}
+                                  {opt.type === "NP_VOLUME" ? "₴/м³" : "$/кг"}
                                 </option>
                               ))}
                             </Select>
@@ -761,25 +761,25 @@ export function OrderMaterialDetailPanel({
                         <div className="flex flex-wrap gap-4">
                           <NumberField
                             label="Тариф"
-                            prefix="$"
-                            suffix="/кг"
+                            prefix={deliveryType === "NP_VOLUME" ? undefined : "$"}
+                            suffix={deliveryType === "NP_VOLUME" ? "₴/м³" : "/кг"}
                             value={cargoUsdPerKg}
                             placeholder={String(detail.defaultCargoUsdPerKg)}
                             onChange={setCargoUsdPerKg}
                           />
-                          <NumberField
-                            label="Курс"
-                            suffix="₴/$"
-                            step="0.01"
-                            value={usdUahRate}
-                            placeholder={String(detail.defaultUsdUahRate ?? detail.usdUahRate)}
-                            onChange={setUsdUahRate}
-                          />
+                          {deliveryType !== "NP_VOLUME" ? (
+                            <NumberField
+                              label="Курс"
+                              suffix="₴/$"
+                              step="0.01"
+                              value={usdUahRate}
+                              placeholder={String(detail.defaultUsdUahRate ?? detail.usdUahRate)}
+                              onChange={setUsdUahRate}
+                            />
+                          ) : null}
                         </div>
-                        <p className="type-caption">
-                          {live.kgNeeded ?? "—"} кг × ${live.cargo}/кг × {live.rate} ₴/$ ={" "}
-                          {formatMoneyUah(live.deliveryComputed)}. Зміни лише для цього
-                          замовлення.
+                        <p className="type-caption tabular text-[var(--color-text-secondary)]">
+                          {formatMoneyUah(live.deliveryComputed)}
                         </p>
                       </>
                     )}
@@ -801,7 +801,10 @@ export function OrderMaterialDetailPanel({
                 }))}
                 materialFallbackColors={detail.materialAvailableColors ?? []}
                 disabled={locked || pending}
-                onSupplierChange={(next) => handleSupplierChange(next ?? "")}
+                onSupplierDeliveryChange={(next) => {
+                  handleSupplierChange(next.supplierId ?? "");
+                  if (next.deliveryType) setDeliveryType(next.deliveryType);
+                }}
                 onColorChange={setColorSnapshot}
               />
               {(() => {

@@ -36,7 +36,7 @@ export async function updatePricingSettingsAction(formData: FormData) {
     usdUahRate: formData.get("usdUahRate") || 45,
     fabricCargoUsdPerKg: formData.get("fabricCargoUsdPerKg") || 1.7,
     npStandardUsdPerKg: formData.get("npStandardUsdPerKg") || 0.4,
-    npVolumeUsdPerKg: formData.get("npVolumeUsdPerKg") || 0.8,
+    npVolumeUsdPerKg: formData.get("npVolumeUsdPerKg") || 2500,
     inputVatRatePercent: formData.get("inputVatRatePercent") || 20,
     materialCostVatMode: formData.get("materialCostVatMode") || "NET",
   });

@@ -332,12 +332,12 @@ async function syncFabricGlobalsFromForm(formData: FormData) {
   const nextNpStandard =
     ratePatch.npStandardUsdPerKg ?? Number(existing.npStandardUsdPerKg ?? 0.4);
   const nextNpVolume =
-    ratePatch.npVolumeUsdPerKg ?? Number(existing.npVolumeUsdPerKg ?? 0.8);
+    ratePatch.npVolumeUsdPerKg ?? Number(existing.npVolumeUsdPerKg ?? 2500);
 
   const sameRate = Number(existing.usdUahRate) === usdUahRate;
   const sameCargo = Number(existing.fabricCargoUsdPerKg) === nextCargo;
   const sameNpStandard = Number(existing.npStandardUsdPerKg ?? 0.4) === nextNpStandard;
-  const sameNpVolume = Number(existing.npVolumeUsdPerKg ?? 0.8) === nextNpVolume;
+  const sameNpVolume = Number(existing.npVolumeUsdPerKg ?? 2500) === nextNpVolume;
   if (sameRate && sameCargo && sameNpStandard && sameNpVolume) return;
 
   await prisma.pricingSettings.update({

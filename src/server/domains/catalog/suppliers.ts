@@ -24,10 +24,74 @@ export async function listSuppliers(params?: { search?: string }) {
     where: {
       status: "ACTIVE",
       ...(search
-        ? { nameUk: { contains: search, mode: "insensitive" as const } }
+        ? {
+            OR: [
+              { nameUk: { contains: search, mode: "insensitive" as const } },
+              { contactPerson: { contains: search, mode: "insensitive" as const } },
+              { phone: { contains: search, mode: "insensitive" as const } },
+              { email: { contains: search, mode: "insensitive" as const } },
+            ],
+          }
         : {}),
     },
+    include: {
+      _count: { select: { materialOffers: true } },
+    },
     orderBy: { nameUk: "asc" },
+  });
+}
+
+export type SupplierContactInput = {
+  nameUk: string;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  note?: string | null;
+  defaultCargoUsdPerKg?: number | null;
+};
+
+export async function createSupplierContact(input: SupplierContactInput) {
+  const nameUk = input.nameUk.replace(/\s+/g, " ").trim();
+  if (!nameUk) throw new Error("NAME_REQUIRED");
+  return prisma.supplier.create({
+    data: {
+      nameUk,
+      contactPerson: input.contactPerson?.trim() || null,
+      phone: input.phone?.trim() || null,
+      email: input.email?.trim() || null,
+      note: input.note?.trim() || null,
+      defaultCargoUsdPerKg:
+        input.defaultCargoUsdPerKg != null && Number.isFinite(input.defaultCargoUsdPerKg)
+          ? input.defaultCargoUsdPerKg
+          : null,
+    },
+  });
+}
+
+export async function updateSupplierContact(id: string, input: SupplierContactInput) {
+  const nameUk = input.nameUk.replace(/\s+/g, " ").trim();
+  if (!nameUk) throw new Error("NAME_REQUIRED");
+  return prisma.supplier.update({
+    where: { id },
+    data: {
+      nameUk,
+      contactPerson: input.contactPerson?.trim() || null,
+      phone: input.phone?.trim() || null,
+      email: input.email?.trim() || null,
+      note: input.note?.trim() || null,
+      defaultCargoUsdPerKg:
+        input.defaultCargoUsdPerKg != null && Number.isFinite(input.defaultCargoUsdPerKg)
+          ? input.defaultCargoUsdPerKg
+          : null,
+    },
+  });
+}
+
+export async function archiveSuppliers(ids: string[]) {
+  if (ids.length === 0) return { count: 0 };
+  return prisma.supplier.updateMany({
+    where: { id: { in: ids }, status: "ACTIVE" },
+    data: { status: "ARCHIVED" },
   });
 }
 

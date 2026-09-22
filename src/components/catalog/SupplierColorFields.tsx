@@ -10,36 +10,96 @@ import {
   reconcileColorForSupplier,
 } from "@/lib/supplier-colors";
 import { swatchForColorLabel } from "@/lib/trim-colors";
+import {
+  fabricDeliveryTypeLabel,
+  normalizeFabricDeliveryType,
+  type FabricDeliveryTypeCode,
+} from "@/lib/fabric-delivery-types";
 import { cn } from "@/lib/utils";
 import { SoftBusy } from "@/components/ui/SoftBusy";
+
+export type SupplierDeliveryOption = {
+  type: FabricDeliveryTypeCode;
+  label: string;
+  rateLabel?: string;
+};
 
 export type SupplierColorOfferOption = {
   supplierId: string;
   supplierName: string;
   isPrimary?: boolean;
   availableColors: string[];
+  preferredDeliveryType?: FabricDeliveryTypeCode | string | null;
+  deliveryOptions?: SupplierDeliveryOption[];
 };
 
+function encodeSupplierDelivery(
+  supplierId: string,
+  deliveryType: string | null | undefined,
+) {
+  return `${supplierId}::${deliveryType || ""}`;
+}
+
+function decodeSupplierDelivery(value: string): {
+  supplierId: string | null;
+  deliveryType: FabricDeliveryTypeCode | null;
+} {
+  if (!value) return { supplierId: null, deliveryType: null };
+  const [supplierId, typeRaw] = value.split("::");
+  if (!supplierId) return { supplierId: null, deliveryType: null };
+  return {
+    supplierId,
+    deliveryType: typeRaw ? normalizeFabricDeliveryType(typeRaw) : null,
+  };
+}
+
+function flattenSupplierDeliveryOptions(offers: SupplierColorOfferOption[]) {
+  return offers.flatMap((offer) => {
+    const options =
+      offer.deliveryOptions && offer.deliveryOptions.length > 0
+        ? offer.deliveryOptions
+        : [
+            {
+              type: normalizeFabricDeliveryType(offer.preferredDeliveryType ?? "CARGO"),
+              label: fabricDeliveryTypeLabel(
+                normalizeFabricDeliveryType(offer.preferredDeliveryType ?? "CARGO"),
+              ),
+            },
+          ];
+    return options.map((opt) => ({
+      value: encodeSupplierDelivery(offer.supplierId, opt.type),
+      supplierId: offer.supplierId,
+      deliveryType: opt.type,
+      label: `${offer.supplierName} · ${opt.label}${offer.isPrimary ? " · осн." : ""}`,
+      rateLabel: opt.rateLabel,
+    }));
+  });
+}
+
 /**
- * Supplier first, then color from that supplier's palette.
- * Used on product BOM and order material detail.
+ * Supplier + delivery method first («Постачальник · CARGO»), then color from palette.
  */
 export function SupplierColorFields({
   supplierId,
+  deliveryType,
   color,
   offers,
   materialFallbackColors = [],
   disabled,
-  onSupplierChange,
+  onSupplierDeliveryChange,
   onColorChange,
   compact,
 }: {
   supplierId: string | null | undefined;
+  deliveryType?: string | null;
   color: string | null | undefined;
   offers: SupplierColorOfferOption[];
   materialFallbackColors?: string[];
   disabled?: boolean;
-  onSupplierChange: (supplierId: string | null) => void;
+  onSupplierDeliveryChange: (next: {
+    supplierId: string | null;
+    deliveryType: FabricDeliveryTypeCode | null;
+  }) => void;
   onColorChange: (color: string | null) => void;
   compact?: boolean;
 }) {
@@ -58,9 +118,10 @@ export function SupplierColorFields({
     [offerRows, supplierId, materialFallbackColors],
   );
 
-  function changeSupplier(next: string | null) {
-    onSupplierChange(next);
-  }
+  const flatOptions = useMemo(() => flattenSupplierDeliveryOptions(offers), [offers]);
+  const selectValue = supplierId
+    ? encodeSupplierDelivery(supplierId, deliveryType)
+    : "";
 
   if (offers.length === 0 && palette.length === 0) {
     return (
@@ -70,34 +131,48 @@ export function SupplierColorFields({
     );
   }
 
+  const selectEl =
+    offers.length > 0 ? (
+      <Select
+        size="sm"
+        className={compact ? "max-w-[14rem] min-w-0 flex-1 basis-[10rem]" : undefined}
+        selectClassName={
+          compact ? "!h-7 !min-h-7 !rounded-[6px] !px-1.5 !text-[12px]" : undefined
+        }
+        value={
+          flatOptions.some((row) => row.value === selectValue)
+            ? selectValue
+            : supplierId
+              ? encodeSupplierDelivery(
+                  supplierId,
+                  offers.find((o) => o.supplierId === supplierId)?.preferredDeliveryType ??
+                    null,
+                )
+              : ""
+        }
+        disabled={disabled}
+        placeholder="Постачальник · доставка…"
+        onChange={(event) =>
+          onSupplierDeliveryChange(decodeSupplierDelivery(event.target.value))
+        }
+      >
+        <option value="">Постачальник · доставка…</option>
+        {flatOptions.map((row) => (
+          <option key={row.value} value={row.value}>
+            {row.label}
+            {row.rateLabel ? ` · ${row.rateLabel}` : ""}
+          </option>
+        ))}
+      </Select>
+    ) : null;
+
   if (compact) {
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        {offers.length > 0 ? (
-          <Select
-            size="sm"
-            className="max-w-[11rem] min-w-0 flex-1 basis-[8.5rem]"
-            selectClassName="!h-7 !min-h-7 !rounded-[6px] !px-1.5 !text-[12px]"
-            value={supplierId ?? ""}
-            disabled={disabled}
-            placeholder="Постачальник…"
-            onChange={(event) => changeSupplier(event.target.value || null)}
-          >
-            <option value="">Постачальник…</option>
-            {offers.map((offer) => (
-              <option key={offer.supplierId} value={offer.supplierId}>
-                {offer.supplierName}
-                {offer.isPrimary ? " · осн." : ""}
-              </option>
-            ))}
-          </Select>
-        ) : null}
-
+        {selectEl}
         {supplierId || offers.length === 0 ? (
           palette.length === 0 ? (
-            <span className="text-[11px] text-[var(--color-warning-text)]">
-              Немає кольорів
-            </span>
+            <span className="text-[11px] text-[var(--color-warning-text)]">Немає кольорів</span>
           ) : (
             <ColorSelect
               value={color}
@@ -108,9 +183,7 @@ export function SupplierColorFields({
             />
           )
         ) : (
-          <span className="text-[11px] text-[var(--color-text-quiet)]">
-            оберіть постачальника
-          </span>
+          <span className="text-[11px] text-[var(--color-text-quiet)]">оберіть постачальника</span>
         )}
       </div>
     );
@@ -121,22 +194,9 @@ export function SupplierColorFields({
       {offers.length > 0 ? (
         <label className="block">
           <span className="mb-1 block text-[11px] font-medium text-[var(--color-text-tertiary)]">
-            Постачальник
+            Постачальник · доставка
           </span>
-          <Select
-            size="sm"
-            value={supplierId ?? ""}
-            disabled={disabled}
-            onChange={(event) => changeSupplier(event.target.value || null)}
-          >
-            <option value="">Оберіть постачальника…</option>
-            {offers.map((offer) => (
-              <option key={offer.supplierId} value={offer.supplierId}>
-                {offer.supplierName}
-                {offer.isPrimary ? " · основний" : ""}
-              </option>
-            ))}
-          </Select>
+          {selectEl}
         </label>
       ) : null}
 
@@ -160,7 +220,7 @@ export function SupplierColorFields({
         </div>
       ) : (
         <p className="type-caption">
-          Спочатку оберіть постачальника — зʼявиться його палітра.
+          Спочатку оберіть постачальника і спосіб доставки — зʼявиться палітра.
         </p>
       )}
     </div>
@@ -171,6 +231,7 @@ export function ProductMaterialSupplierColorEditor({
   productId,
   productMaterialId,
   supplierId,
+  deliveryType,
   color,
   offers,
   materialFallbackColors,
@@ -179,6 +240,7 @@ export function ProductMaterialSupplierColorEditor({
   productId: string;
   productMaterialId: string;
   supplierId: string | null;
+  deliveryType?: string | null;
   color: string | null;
   offers: SupplierColorOfferOption[];
   materialFallbackColors?: string[];
@@ -187,12 +249,19 @@ export function ProductMaterialSupplierColorEditor({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  function save(next: { supplierId?: string | null; colorSnapshot?: string | null }) {
+  function save(next: {
+    supplierId?: string | null;
+    deliveryType?: string | null;
+    colorSnapshot?: string | null;
+  }) {
     const formData = new FormData();
     formData.set("productId", productId);
     formData.set("id", productMaterialId);
     if (next.supplierId !== undefined) {
       formData.set("supplierId", next.supplierId ?? "");
+    }
+    if (next.deliveryType !== undefined) {
+      formData.set("deliveryType", next.deliveryType ?? "");
     }
     if (next.colorSnapshot !== undefined) {
       formData.set("colorSnapshot", next.colorSnapshot ?? "");
@@ -207,21 +276,29 @@ export function ProductMaterialSupplierColorEditor({
   }
 
   if (readOnly) {
-    return <SupplierColorReadOnly supplierId={supplierId} color={color} offers={offers} />;
+    return (
+      <SupplierColorReadOnly
+        supplierId={supplierId}
+        deliveryType={deliveryType}
+        color={color}
+        offers={offers}
+      />
+    );
   }
 
   return (
     <SupplierColorFields
       supplierId={supplierId}
+      deliveryType={deliveryType}
       color={color}
       offers={offers}
       materialFallbackColors={materialFallbackColors}
       disabled={pending}
       compact
-      onSupplierChange={(next) => {
+      onSupplierDeliveryChange={(next) => {
         const reconciled = reconcileColorForSupplier({
           color,
-          supplierId: next,
+          supplierId: next.supplierId,
           offers: offers.map((row) => ({
             supplierId: row.supplierId,
             isPrimary: row.isPrimary,
@@ -229,18 +306,23 @@ export function ProductMaterialSupplierColorEditor({
           })),
           materialFallback: materialFallbackColors,
         });
-        save({ supplierId: next, colorSnapshot: reconciled });
+        save({
+          supplierId: next.supplierId,
+          deliveryType: next.deliveryType,
+          colorSnapshot: reconciled,
+        });
       }}
       onColorChange={(next) => save({ colorSnapshot: next })}
     />
   );
 }
 
-/** Same compact supplier · color control for order BOM rows. */
+/** Same compact supplier · delivery · color control for order BOM rows. */
 export function OrderMaterialSupplierColorEditor({
   orderId,
   orderItemMaterialId,
   supplierId,
+  deliveryType,
   color,
   offers,
   materialFallbackColors,
@@ -249,6 +331,7 @@ export function OrderMaterialSupplierColorEditor({
   orderId: string;
   orderItemMaterialId: string;
   supplierId: string | null;
+  deliveryType?: string | null;
   color: string | null;
   offers: SupplierColorOfferOption[];
   materialFallbackColors?: string[];
@@ -257,12 +340,19 @@ export function OrderMaterialSupplierColorEditor({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  function save(next: { supplierId?: string | null; colorSnapshot?: string | null }) {
+  function save(next: {
+    supplierId?: string | null;
+    deliveryType?: string | null;
+    colorSnapshot?: string | null;
+  }) {
     const formData = new FormData();
     formData.set("orderId", orderId);
     formData.set("id", orderItemMaterialId);
     if (next.supplierId !== undefined) {
       formData.set("supplierId", next.supplierId ?? "");
+    }
+    if (next.deliveryType !== undefined) {
+      formData.set("deliveryType", next.deliveryType ?? "");
     }
     if (next.colorSnapshot !== undefined) {
       formData.set("colorSnapshot", next.colorSnapshot ?? "");
@@ -277,7 +367,14 @@ export function OrderMaterialSupplierColorEditor({
   }
 
   if (readOnly) {
-    return <SupplierColorReadOnly supplierId={supplierId} color={color} offers={offers} />;
+    return (
+      <SupplierColorReadOnly
+        supplierId={supplierId}
+        deliveryType={deliveryType}
+        color={color}
+        offers={offers}
+      />
+    );
   }
 
   return (
@@ -288,15 +385,16 @@ export function OrderMaterialSupplierColorEditor({
       >
         <SupplierColorFields
           supplierId={supplierId}
+          deliveryType={deliveryType}
           color={color}
           offers={offers}
           materialFallbackColors={materialFallbackColors}
           disabled={pending}
           compact
-          onSupplierChange={(next) => {
+          onSupplierDeliveryChange={(next) => {
             const reconciled = reconcileColorForSupplier({
               color,
-              supplierId: next,
+              supplierId: next.supplierId,
               offers: offers.map((row) => ({
                 supplierId: row.supplierId,
                 isPrimary: row.isPrimary,
@@ -304,7 +402,11 @@ export function OrderMaterialSupplierColorEditor({
               })),
               materialFallback: materialFallbackColors,
             });
-            save({ supplierId: next, colorSnapshot: reconciled });
+            save({
+              supplierId: next.supplierId,
+              deliveryType: next.deliveryType,
+              colorSnapshot: reconciled,
+            });
           }}
           onColorChange={(next) => save({ colorSnapshot: next })}
         />
@@ -315,16 +417,24 @@ export function OrderMaterialSupplierColorEditor({
 
 function SupplierColorReadOnly({
   supplierId,
+  deliveryType,
   color,
   offers,
 }: {
   supplierId: string | null;
+  deliveryType?: string | null;
   color: string | null;
   offers: SupplierColorOfferOption[];
 }) {
-  const supplierName =
-    offers.find((row) => row.supplierId === supplierId)?.supplierName ?? null;
-  const parts = [supplierName, color].filter(Boolean);
+  const offer = offers.find((row) => row.supplierId === supplierId);
+  const deliveryLabel = deliveryType
+    ? fabricDeliveryTypeLabel(normalizeFabricDeliveryType(deliveryType))
+    : null;
+  const parts = [
+    offer?.supplierName,
+    deliveryLabel,
+    color,
+  ].filter(Boolean);
   if (parts.length === 0) return null;
   const swatch = color?.trim() ? swatchForColorLabel(color) : null;
   return (

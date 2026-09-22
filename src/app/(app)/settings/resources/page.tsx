@@ -33,7 +33,7 @@ export default async function MaterialsSettingsPage({
     usdUahRate: 45,
     fabricCargoUsdPerKg: 1.7,
     npStandardUsdPerKg: 0.4,
-    npVolumeUsdPerKg: 0.8,
+    npVolumeUsdPerKg: 2500,
     materialCostVatMode: "NET",
   };
   let dbError = false;

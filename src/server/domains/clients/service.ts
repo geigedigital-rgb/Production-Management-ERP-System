@@ -83,6 +83,21 @@ export async function createClient(raw: ClientFormValues) {
   });
 }
 
+export async function updateClient(id: string, raw: ClientFormValues) {
+  const data = clientFormSchema.parse(raw);
+  return prisma.client.update({
+    where: { id },
+    data: {
+      companyName: data.companyName,
+      contactPerson: data.contactPerson || null,
+      phone: data.phone || null,
+      email: data.email || null,
+      legalDetails: data.legalDetails || null,
+      note: data.note || null,
+    },
+  });
+}
+
 export async function archiveClients(ids: string[]) {
   if (ids.length === 0) return { count: 0 };
   return prisma.client.updateMany({

@@ -213,6 +213,9 @@ model Material {
 model Supplier {
   id                     String       @id @default(cuid())
   nameUk                 String
+  contactPerson          String?
+  phone                  String?
+  email                  String?
   defaultCargoUsdPerKg   Decimal?     @db.Decimal(14, 4)
   /// Last saved color palette — reused when this supplier is picked on a new material.
   defaultAvailableColors String[]     @default([]) @map("default_available_colors")
@@ -450,6 +453,8 @@ model ProductMaterial {
   note               String?
   /// Preferred supplier for this BOM line (palette + terms).
   supplierId         String?
+  /// Delivery option for this supplier (CARGO / NP_*) — with supplier forms «Name · CARGO».
+  deliveryType       FabricDeliveryType? @map("delivery_type")
   /// Default color for this product line (from the chosen supplier palette).
   colorSnapshot      String?
   /// Manual display/calc order; copied into order BOM as sortOrder.
@@ -813,8 +818,8 @@ model PricingSettings {
   fabricCargoUsdPerKg   Decimal       @default(1.7) @db.Decimal(14, 4)
   /// Nova Poshta standard delivery $/kg
   npStandardUsdPerKg    Decimal       @default(0.4) @db.Decimal(14, 4)
-  /// Nova Poshta volumetric delivery $/kg
-  npVolumeUsdPerKg      Decimal       @default(0.8) @db.Decimal(14, 4)
+  /// Nova Poshta volumetric delivery ₴/м³ (legacy column name)
+  npVolumeUsdPerKg      Decimal       @default(2500) @db.Decimal(14, 4)
   /// Reference rate for hints (UA standard 20)
   inputVatRatePercent   Decimal       @default(20) @db.Decimal(8, 4)
   /// NET = COGS without recoverable VAT; GROSS = full price with VAT

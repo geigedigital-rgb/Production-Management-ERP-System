@@ -409,14 +409,18 @@ export async function updateProductMaterialSupplierColorAction(formData: FormDat
 
   const hasSupplier = formData.has("supplierId");
   const hasColor = formData.has("colorSnapshot");
+  const hasDelivery = formData.has("deliveryType");
   const supplierId = hasSupplier
     ? String(formData.get("supplierId") ?? "").trim() || null
     : undefined;
   const colorSnapshot = hasColor
     ? String(formData.get("colorSnapshot") ?? "").trim() || null
     : undefined;
+  const deliveryType = hasDelivery
+    ? String(formData.get("deliveryType") ?? "").trim() || null
+    : undefined;
 
-  await setProductMaterialSupplierColor({ id, supplierId, colorSnapshot });
+  await setProductMaterialSupplierColor({ id, supplierId, colorSnapshot, deliveryType });
   revalidatePath(`/products/${productId}`);
   revalidatePath("/orders");
   return { ok: true as const };

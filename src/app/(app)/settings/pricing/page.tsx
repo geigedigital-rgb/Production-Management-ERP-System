@@ -96,11 +96,11 @@ export default async function PricingSettingsPage() {
                 />
                 <Input
                   name="npVolumeUsdPerKg"
-                  label="НП обʼємні, $/кг"
+                  label="НП обʼємні, ₴/м³"
                   type="number"
-                  step="0.01"
+                  step="1"
                   min="0"
-                  defaultValue={Number(pricing?.npVolumeUsdPerKg ?? 0.8)}
+                  defaultValue={Number(pricing?.npVolumeUsdPerKg ?? 2500)}
                 />
               </FormGroup>
 

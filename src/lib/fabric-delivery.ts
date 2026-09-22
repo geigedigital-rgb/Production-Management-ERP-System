@@ -3,18 +3,22 @@ import {
   resolveCargoUsdPerKg,
   type FabricPricingGlobals,
 } from "@/lib/fabric-pricing";
-import { deliveryRateUsdPerKg } from "@/lib/fabric-delivery-types";
+import {
+  deliveryRateUsdPerKg,
+  fabricKgToVolumeM3,
+  isVolumeDeliveryType,
+} from "@/lib/fabric-delivery-types";
 
 export type FabricDeliveryMaterialSource = {
   type?: string | null;
   metersPerKg?: number | null;
   priceKgUsd?: number | null;
   priceKgUsdCargo?: number | null;
-  /** Explicit cargo override ($/kg) for this line. */
+  /** Explicit rate override: $/кг (weight) or ₴/м³ (NP_VOLUME). */
   cargoUsdPerKg?: number | null;
-  /** Material catalog delivery type — used when cargoUsdPerKg is unset. */
+  /** Material / line delivery type — used when cargoUsdPerKg is unset. */
   deliveryType?: string | null;
-  /** Explicit USD/UAH rate override for this line. */
+  /** Explicit USD/UAH rate override for this line (weight tariffs only). */
   usdUahRate?: number | null;
   consumptionPerUnit: number;
   wastePercent: number;
@@ -30,7 +34,7 @@ function round1(value: number) {
   return Math.round(value * 10) / 10;
 }
 
-function resolveLineCargoUsdPerKg(
+function resolveLineRate(
   row: Pick<
     FabricDeliveryMaterialSource,
     "priceKgUsd" | "priceKgUsdCargo" | "cargoUsdPerKg" | "deliveryType"
@@ -76,14 +80,21 @@ export function computeFabricDeliveryLine(
   if (meters <= 0) return 0;
 
   const kgNeeded = meters / metersPerKg;
-  const cargoUsdPerKg = resolveLineCargoUsdPerKg(row, globals);
-  const usdUahRate = resolveLineUsdUahRate(row, globals);
-  if (cargoUsdPerKg <= 0 || usdUahRate <= 0) return 0;
+  const rate = resolveLineRate(row, globals);
+  if (rate <= 0) return 0;
 
-  return round1(kgNeeded * cargoUsdPerKg * usdUahRate);
+  // НП обʼємні: ₴/м³ × м³ (м³ ≈ кг / насипна щільність) — без курсу $.
+  if (isVolumeDeliveryType(row.deliveryType)) {
+    return round1(fabricKgToVolumeM3(kgNeeded) * rate);
+  }
+
+  const usdUahRate = resolveLineUsdUahRate(row, globals);
+  if (usdUahRate <= 0) return 0;
+
+  return round1(kgNeeded * rate * usdUahRate);
 }
 
-/** Preliminary fabric delivery in ₴ for an order item (cargo $/kg × kg needed). */
+/** Preliminary fabric delivery in ₴ for an order item. */
 export function computeOrderItemFabricDelivery(input: {
   materials: FabricDeliveryMaterialSource[];
   quantitiesBySize: Record<string, number>;

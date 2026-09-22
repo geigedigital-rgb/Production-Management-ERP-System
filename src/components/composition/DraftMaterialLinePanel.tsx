@@ -394,7 +394,7 @@ export function DraftMaterialLinePanel({
               color={row.lineColor}
               offers={offers}
               materialFallbackColors={row.availableColors ?? []}
-              onSupplierChange={changeSupplier}
+              onSupplierDeliveryChange={(next) => changeSupplier(next.supplierId)}
               onColorChange={(next) => onChange({ lineColor: next })}
             />
           </section>

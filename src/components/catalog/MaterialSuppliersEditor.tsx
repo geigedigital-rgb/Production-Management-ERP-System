@@ -16,9 +16,7 @@ import {
 } from "@/server/domains/catalog/actions";
 import { deriveFabricPricing, type FabricPricingGlobals } from "@/lib/fabric-pricing";
 import {
-  FABRIC_DELIVERY_TYPES,
   deliveryRateUsdPerKg,
-  fabricDeliveryTypeLabel,
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
@@ -33,6 +31,7 @@ import {
   trimConfiguredDeliveryOptions,
 } from "@/lib/trim-pack-pricing";
 import { SupplierPaletteEditor } from "@/components/catalog/SupplierPaletteEditor";
+import { DeliveryRatesFields } from "@/components/catalog/DeliveryRatesFields";
 import { formatMoneyUah, cn } from "@/lib/utils";
 import { swatchForColorLabel } from "@/lib/trim-colors";
 
@@ -198,7 +197,9 @@ export function MaterialSuppliersEditor({
     return {
       ...fabricGlobals,
       usdUahRate,
-      fabricCargoUsdPerKg: resolved.rateUsdPerKg,
+      // НП обʼємні не додається в $/кг → ₴/м; лише CARGO / НП стандарт.
+      fabricCargoUsdPerKg:
+        resolved.type === "NP_VOLUME" ? 0 : resolved.rateUsdPerKg,
     };
   }, [fabricGlobals, usdUahRate, draft]);
 
@@ -462,7 +463,8 @@ export function MaterialSuppliersEditor({
                       npVolumeUsdPerKg: row.npVolumeUsdPerKg,
                     }).map((opt) => (
                       <span key={opt.type} className="type-caption ml-2 tabular">
-                        {opt.label} · {opt.rateUsdPerKg} $/кг
+                        {opt.label} · {opt.rateUsdPerKg}{" "}
+                        {opt.type === "NP_VOLUME" ? "₴/м³" : "$/кг"}
                       </span>
                     ))
                   : trimConfiguredDeliveryOptions({
@@ -634,6 +636,11 @@ export function MaterialSuppliersEditor({
 
           {pricingKind === "unit" ? (
             <FormGroup label="Закупівля і доставка" icon={<IconPurchaseKg size={14} />} columns={3} compact>
+              <DeliveryRatesFields
+                mode="trim"
+                draft={draft}
+                onChange={(next) => setDraft((prev) => ({ ...prev, ...next }))}
+              />
               <Input
                 label="Ціна упаковки"
                 type="number"
@@ -648,63 +655,8 @@ export function MaterialSuppliersEditor({
                 hint={
                   unitsPerPack != null && unitsPerPack > 0
                     ? `На ${unitsPerPack} шт`
-                    : "Спочатку збережіть шт в упаковці"
+                    : undefined
                 }
-              />
-              <Select
-                label="Тип для собівартості"
-                required
-                value={draft.deliveryType}
-                onChange={(event) =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    deliveryType: normalizeFabricDeliveryType(event.target.value),
-                  }))
-                }
-                hint="Який тариф береться в ₴/од."
-              >
-                {FABRIC_DELIVERY_TYPES.map((code) => (
-                  <option key={code} value={code}>
-                    {fabricDeliveryTypeLabel(code)}
-                  </option>
-                ))}
-              </Select>
-              <Input
-                label="CARGO"
-                type="number"
-                min={0}
-                step="0.01"
-                suffix="₴/уп."
-                optional
-                value={draft.cargoUsdPerKg}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, cargoUsdPerKg: event.target.value }))
-                }
-              />
-              <Input
-                label="НП стандарт"
-                type="number"
-                min={0}
-                step="0.01"
-                suffix="₴/уп."
-                optional
-                value={draft.npStandardUsdPerKg}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, npStandardUsdPerKg: event.target.value }))
-                }
-              />
-              <Input
-                label="НП обʼємні"
-                type="number"
-                min={0}
-                step="0.01"
-                suffix="₴/уп."
-                optional
-                value={draft.npVolumeUsdPerKg}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, npVolumeUsdPerKg: event.target.value }))
-                }
-                hint="Порожнє поле = тип недоступний у замовленні"
               />
               <Input
                 label="Собівартість / од."
@@ -745,18 +697,6 @@ export function MaterialSuppliersEditor({
                     priceMeterUahVat: event.target.value,
                   }))
                 }
-                hint={
-                  hasTrimPackQuote({
-                    unitsPerPack,
-                    purchasePackPrice: draft.purchasePackPrice
-                      ? Number(draft.purchasePackPrice)
-                      : null,
-                    packDeliveryCostUah:
-                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ?? null,
-                  })
-                    ? `(ціна + доставка) ÷ ${unitsPerPack} шт`
-                    : "Або вручну ₴ за 1 шт без упаковки"
-                }
               />
               <Input
                 className="sm:col-span-2"
@@ -770,92 +710,42 @@ export function MaterialSuppliersEditor({
             </FormGroup>
           ) : (
           <FormGroup label="Доставка і закупівля" icon={<IconPurchaseKg size={14} />} columns={3} compact>
-            <Select
-              label="Тип для собівартості"
-              required
-              value={draft.deliveryType}
-              onChange={(event) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  deliveryType: normalizeFabricDeliveryType(event.target.value),
-                }))
-              }
-              hint="Який тариф береться в ₴/м каталогу"
-            >
-              {FABRIC_DELIVERY_TYPES.map((code) => (
-                <option key={code} value={code}>
-                  {fabricDeliveryTypeLabel(code)}
-                </option>
-              ))}
-            </Select>
-            <Input
-              label="CARGO"
-              type="number"
-              min={0}
-              step="0.01"
-              suffix="$/кг"
-              optional
-              placeholder={String(deliveryRateUsdPerKg("CARGO", fabricGlobals))}
-              value={draft.cargoUsdPerKg}
-              onChange={(event) => {
-                const value = event.target.value;
+            <DeliveryRatesFields
+              mode="fabric"
+              fabricGlobals={fabricGlobals}
+              draft={draft}
+              onChange={(next) => {
                 setDraft((prev) => {
-                  const next = { ...prev, cargoUsdPerKg: value };
-                  if (!draft.priceKgUsd || draft.deliveryType !== "CARGO") return next;
+                  const merged = { ...prev, ...next };
+                  if (!merged.priceKgUsd || merged.deliveryType !== "CARGO") return merged;
+                  const cargo = merged.cargoUsdPerKg ? Number(merged.cargoUsdPerKg) : null;
                   const auto = deriveFabricPricing(
                     {
                       metersPerKg: metersPerKg ?? null,
-                      priceKgUsd: Number(draft.priceKgUsd),
-                      priceKgUsdVat: draft.priceKgUsdVat
-                        ? Number(draft.priceKgUsdVat)
+                      priceKgUsd: Number(merged.priceKgUsd),
+                      priceKgUsdVat: merged.priceKgUsdVat
+                        ? Number(merged.priceKgUsdVat)
                         : null,
                     },
                     {
                       ...liveGlobals,
                       fabricCargoUsdPerKg:
-                        Number(value) >= 0 ? Number(value) : liveGlobals.fabricCargoUsdPerKg,
+                        cargo != null && cargo >= 0 ? cargo : liveGlobals.fabricCargoUsdPerKg,
                     },
                   );
                   return {
-                    ...next,
+                    ...merged,
                     priceMeterUahNoVat:
                       auto.priceMeterUahNoVat != null
                         ? String(auto.priceMeterUahNoVat)
-                        : prev.priceMeterUahNoVat,
+                        : merged.priceMeterUahNoVat,
                     priceMeterUahVat:
                       auto.priceMeterUahVat != null
                         ? String(auto.priceMeterUahVat)
-                        : prev.priceMeterUahVat,
+                        : merged.priceMeterUahVat,
                   };
                 });
               }}
-            />
-            <Input
-              label="НП стандарт"
-              type="number"
-              min={0}
-              step="0.01"
-              suffix="$/кг"
-              optional
-              placeholder={String(deliveryRateUsdPerKg("NP_STANDARD", fabricGlobals))}
-              value={draft.npStandardUsdPerKg}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, npStandardUsdPerKg: event.target.value }))
-              }
-            />
-            <Input
-              label="НП обʼємні"
-              type="number"
-              min={0}
-              step="0.01"
-              suffix="$/кг"
-              optional
-              placeholder={String(deliveryRateUsdPerKg("NP_VOLUME", fabricGlobals))}
-              value={draft.npVolumeUsdPerKg}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, npVolumeUsdPerKg: event.target.value }))
-              }
-              hint="Порожнє поле = тип недоступний у замовленні"
             />
             <Input
               label="Ціна"

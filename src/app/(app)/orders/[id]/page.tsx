@@ -208,15 +208,47 @@ export default async function OrderDetailPage({
       groupKey: row.materialId ?? row.nameSnapshot,
       pricingHint,
       supplierId: row.supplierId ?? null,
+      deliveryType: row.deliveryType ?? null,
       supplierName: row.supplierNameSnapshot ?? row.material?.supplierCode ?? null,
       colorSnapshot: row.colorSnapshot ?? null,
       supplierOffers:
-        row.material?.supplierOffers?.map((offer) => ({
-          supplierId: offer.supplierId,
-          supplierName: offer.supplier.nameUk,
-          isPrimary: offer.isPrimary,
-          availableColors: offer.availableColors ?? [],
-        })) ?? [],
+        row.material?.supplierOffers?.map((offer) => {
+          const mode = row.material?.type === "FABRIC" ? "fabric" : "trim";
+          return {
+            supplierId: offer.supplierId,
+            supplierName: offer.supplier.nameUk,
+            isPrimary: offer.isPrimary,
+            availableColors: offer.availableColors ?? [],
+            preferredDeliveryType: offer.deliveryType,
+            deliveryOptions: [
+              offer.cargoUsdPerKg != null
+                ? {
+                    type: "CARGO" as const,
+                    label: "CARGO",
+                    rateLabel: `${Number(offer.cargoUsdPerKg)} ${mode === "fabric" ? "$/кг" : "₴/уп."}`,
+                  }
+                : null,
+              offer.npStandardUsdPerKg != null
+                ? {
+                    type: "NP_STANDARD" as const,
+                    label: "НП стандарт",
+                    rateLabel: `${Number(offer.npStandardUsdPerKg)} ${mode === "fabric" ? "$/кг" : "₴/уп."}`,
+                  }
+                : null,
+              offer.npVolumeUsdPerKg != null
+                ? {
+                    type: "NP_VOLUME" as const,
+                    label: "НП обʼємні",
+                    rateLabel: `${Number(offer.npVolumeUsdPerKg)} ${mode === "fabric" ? "₴/м³" : "₴/уп."}`,
+                  }
+                : null,
+            ].filter(Boolean) as Array<{
+              type: "CARGO" | "NP_STANDARD" | "NP_VOLUME";
+              label: string;
+              rateLabel: string;
+            }>,
+          };
+        }) ?? [],
       materialAvailableColors: row.material?.availableColors ?? [],
       isFabric: row.material?.type === "FABRIC",
       specHint: materialOptionDescription(
@@ -281,7 +313,10 @@ export default async function OrderDetailPage({
         cargoUsdPerKg:
           row.cargoUsdPerKg != null
             ? Number(row.cargoUsdPerKg)
-            : deliveryRateUsdPerKg(row.material?.deliveryType, fabricGlobals),
+            : deliveryRateUsdPerKg(
+                row.deliveryType ?? row.material?.deliveryType,
+                fabricGlobals,
+              ),
         usdUahRate:
           row.usdUahRate != null ? Number(row.usdUahRate) : fabricGlobals.usdUahRate,
         kgNeeded,

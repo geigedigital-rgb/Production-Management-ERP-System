@@ -137,6 +137,7 @@ function previewFabricLineTerms(input: {
     consumptionPerUnit: { toString(): string } | number;
     wastePercent: { toString(): string } | number;
     sizeCode: string | null;
+    deliveryType?: string | null;
     cargoUsdPerKg?: { toString(): string } | number | null;
     usdUahRate?: { toString(): string } | number | null;
     costVatOverride?: MaterialCostVatMode | null;
@@ -218,7 +219,9 @@ function previewFabricLineTerms(input: {
     (input.offer
       ? resolveSupplierDeliveryRate(
           {
-            deliveryType: (input.offer as { deliveryType?: string | null }).deliveryType,
+            deliveryType:
+              input.row.deliveryType ??
+              (input.offer as { deliveryType?: string | null }).deliveryType,
             cargoUsdPerKg: numField(input.offer.cargoUsdPerKg),
             npStandardUsdPerKg: numField(
               (input.offer as { npStandardUsdPerKg?: { toString(): string } | number | null })
@@ -232,7 +235,10 @@ function previewFabricLineTerms(input: {
           input.globals,
         ).rateUsdPerKg
       : null) ??
-    deliveryRateUsdPerKg(input.material.deliveryType, input.globals);
+    deliveryRateUsdPerKg(
+      input.row.deliveryType ?? input.material.deliveryType,
+      input.globals,
+    );
   const usdUahRate =
     input.usdUahRateOverride ??
     numField(input.row.usdUahRate) ??
@@ -244,6 +250,7 @@ function previewFabricLineTerms(input: {
       priceKgUsd: fields.priceKgUsd,
       priceKgUsdCargo: fields.priceKgUsdCargo,
       cargoUsdPerKg,
+      deliveryType: input.row.deliveryType ?? input.material.deliveryType,
       usdUahRate,
       consumptionPerUnit: Number(input.row.consumptionPerUnit),
       wastePercent: Number(input.row.wastePercent),
@@ -303,6 +310,7 @@ function fabricDeliverySourceForLine(input: {
     consumptionPerUnit: { toString(): string } | number;
     wastePercent: { toString(): string } | number;
     sizeCode: string | null;
+    deliveryType?: string | null;
     cargoUsdPerKg?: { toString(): string } | number | null;
     usdUahRate?: { toString(): string } | number | null;
   };
@@ -314,9 +322,24 @@ function fabricDeliverySourceForLine(input: {
     input.material,
     input.offer,
   );
+  const lineDeliveryType =
+    input.row.deliveryType ??
+    (input.offer as { deliveryType?: string | null } | undefined)?.deliveryType ??
+    input.material.deliveryType ??
+    null;
+  const offerRateForType = (type: string | null | undefined): number | null => {
+    if (!input.offer || !type) return null;
+    const offer = input.offer as {
+      cargoUsdPerKg?: { toString(): string } | number | null;
+      npStandardUsdPerKg?: { toString(): string } | number | null;
+      npVolumeUsdPerKg?: { toString(): string } | number | null;
+    };
+    if (type === "NP_STANDARD") return numField(offer.npStandardUsdPerKg);
+    if (type === "NP_VOLUME") return numField(offer.npVolumeUsdPerKg);
+    return numField(offer.cargoUsdPerKg);
+  };
   const cargoOverride =
-    numField(input.row.cargoUsdPerKg) ??
-    (input.offer ? numField(input.offer.cargoUsdPerKg) : null);
+    numField(input.row.cargoUsdPerKg) ?? offerRateForType(lineDeliveryType);
   const usdUahRateOverride = numField(input.row.usdUahRate);
   return {
     type: merged.type ?? input.material.type,
@@ -324,7 +347,7 @@ function fabricDeliverySourceForLine(input: {
     priceKgUsd: merged.priceKgUsd,
     priceKgUsdCargo: merged.priceKgUsdCargo,
     cargoUsdPerKg: cargoOverride,
-    deliveryType: input.material.deliveryType ?? null,
+    deliveryType: lineDeliveryType,
     usdUahRate: usdUahRateOverride,
     consumptionPerUnit: Number(input.row.consumptionPerUnit),
     wastePercent: Number(input.row.wastePercent),
@@ -524,6 +547,7 @@ function bomFromProduct(
           supplierId: source.supplierId ?? null,
           supplierNameSnapshot: source.supplier?.nameUk ?? null,
           colorSnapshot: source.colorSnapshot ?? null,
+          deliveryType: source.deliveryType ?? null,
           sortOrder: index,
           sizeCode: row.sizeCode,
         };
@@ -1675,7 +1699,11 @@ export async function updateOrderItemMaterialTerms(input: {
     input.costVatOverride !== undefined ? input.costVatOverride : row.costVatOverride;
 
   const cargoUsdPerKg =
-    input.cargoUsdPerKg !== undefined ? input.cargoUsdPerKg : numField(row.cargoUsdPerKg);
+    input.cargoUsdPerKg !== undefined
+      ? input.cargoUsdPerKg
+      : input.deliveryType !== undefined
+        ? null
+        : numField(row.cargoUsdPerKg);
 
   const deliveryType =
     input.deliveryType !== undefined
@@ -1709,6 +1737,7 @@ export async function updateOrderItemMaterialTerms(input: {
     consumptionPerUnit,
     wastePercent,
     costVatOverride,
+    deliveryType,
     cargoUsdPerKg,
     usdUahRate,
     minWholesaleMetersOverride,
@@ -1934,6 +1963,10 @@ export async function setOrderItemMaterialConsumption(input: {
             consumptionPerUnit: row.consumptionPerUnit,
             wastePercent: row.wastePercent,
             purchasePrice: row.purchasePrice,
+            supplierId: row.supplierId,
+            supplierNameSnapshot: row.supplierNameSnapshot,
+            colorSnapshot: row.colorSnapshot,
+            deliveryType: row.deliveryType,
             sortOrder: row.sortOrder + index + 1,
             sizeCode: size.sizeCode,
           },
@@ -1987,6 +2020,10 @@ export async function removeOrderItemMaterial(id: string, sizeCode?: string | nu
             consumptionPerUnit: row.consumptionPerUnit,
             wastePercent: row.wastePercent,
             purchasePrice: row.purchasePrice,
+            supplierId: row.supplierId,
+            supplierNameSnapshot: row.supplierNameSnapshot,
+            colorSnapshot: row.colorSnapshot,
+            deliveryType: row.deliveryType,
             sortOrder: row.sortOrder + index,
             sizeCode: size.sizeCode,
           },
@@ -2161,6 +2198,10 @@ export async function copyOrderItemSizeSpec(input: {
             consumptionPerUnit: source.consumptionPerUnit,
             wastePercent: source.wastePercent,
             purchasePrice: source.purchasePrice,
+            supplierId: source.supplierId,
+            supplierNameSnapshot: source.supplierNameSnapshot,
+            colorSnapshot: source.colorSnapshot,
+            deliveryType: source.deliveryType,
             sortOrder: source.sortOrder,
             sizeCode,
           },

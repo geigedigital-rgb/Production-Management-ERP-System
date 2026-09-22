@@ -133,12 +133,19 @@ type MaterialView = {
   composition?: string | null;
   densityGsm?: string | null;
   supplierId?: string | null;
+  deliveryType?: string | null;
   colorSnapshot?: string | null;
   supplierOffers?: Array<{
     supplierId: string;
     supplierName: string;
     isPrimary?: boolean;
     availableColors: string[];
+    preferredDeliveryType?: string | null;
+    deliveryOptions?: Array<{
+      type: "CARGO" | "NP_STANDARD" | "NP_VOLUME";
+      label: string;
+      rateLabel?: string;
+    }>;
   }>;
   materialAvailableColors?: string[];
 };
@@ -649,6 +656,7 @@ export function ProductSizeBom({
                             productId={productId}
                             productMaterialId={row.id}
                             supplierId={row.supplierId ?? null}
+                            deliveryType={row.deliveryType ?? null}
                             color={row.colorSnapshot ?? null}
                             offers={row.supplierOffers ?? []}
                             materialFallbackColors={row.materialAvailableColors}

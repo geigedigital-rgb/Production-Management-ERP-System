@@ -46,6 +46,7 @@ import {
 import {
   FABRIC_DELIVERY_TYPES,
   deliveryRateUsdPerKg,
+  deliveryRateUnitLabel,
   fabricDeliveryTypeLabel,
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
@@ -345,9 +346,11 @@ function MaterialFields({
     () => ({
       ...fabricGlobals,
       fabricCargoUsdPerKg:
-        Number(fabricCargoUsdPerKg) >= 0
+        Number(fabricCargoUsdPerKg) >= 0 && deliveryType !== "NP_VOLUME"
           ? Number(fabricCargoUsdPerKg)
-          : deliveryRateUsdPerKg(deliveryType, fabricGlobals),
+          : deliveryType === "NP_VOLUME"
+            ? 0
+            : deliveryRateUsdPerKg(deliveryType, fabricGlobals),
     }),
     [fabricGlobals, fabricCargoUsdPerKg, deliveryType],
   );
@@ -356,7 +359,10 @@ function MaterialFields({
     setDeliveryType(nextType);
     const rate = deliveryRateUsdPerKg(nextType, fabricGlobals);
     setFabricCargoUsdPerKg(String(rate));
-    recalcMeterPrices({ fabricCargoUsdPerKg: String(rate) });
+    // НП обʼємні — ₴/м³, не входить у формулу $/кг → ₴/м.
+    recalcMeterPrices({
+      fabricCargoUsdPerKg: nextType === "NP_VOLUME" ? "0" : String(rate),
+    });
   }
 
   const derived = useMemo(
@@ -1167,7 +1173,7 @@ function MaterialFields({
                   type="number"
                   step="0.01"
                   min="0"
-                  suffix="$/кг"
+                  suffix={deliveryRateUnitLabel(deliveryType, "fabric")}
                   value={fabricCargoUsdPerKg}
                   onChange={(event) => {
                     const value = event.target.value;

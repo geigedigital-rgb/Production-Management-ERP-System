@@ -515,6 +515,7 @@ export async function addProductMaterial(input: {
 export async function setProductMaterialSupplierColor(input: {
   id: string;
   supplierId?: string | null;
+  deliveryType?: string | null;
   colorSnapshot?: string | null;
 }) {
   const row = await prisma.productMaterial.findUniqueOrThrow({
@@ -531,6 +532,9 @@ export async function setProductMaterialSupplierColor(input: {
   });
 
   const { reconcileColorForSupplier } = await import("@/lib/supplier-colors");
+  const { normalizeFabricDeliveryType, isFabricDeliveryType } = await import(
+    "@/lib/fabric-delivery-types"
+  );
   const offers = row.material.supplierOffers.map((offer) => ({
     supplierId: offer.supplierId,
     isPrimary: offer.isPrimary,
@@ -549,10 +553,24 @@ export async function setProductMaterialSupplierColor(input: {
           materialFallback: row.material.availableColors,
         });
 
+  let deliveryType = row.deliveryType;
+  if (input.deliveryType !== undefined) {
+    deliveryType =
+      input.deliveryType && isFabricDeliveryType(input.deliveryType)
+        ? normalizeFabricDeliveryType(input.deliveryType)
+        : null;
+  } else if (input.supplierId !== undefined && supplierId) {
+    const offer = row.material.supplierOffers.find((o) => o.supplierId === supplierId);
+    deliveryType = offer?.deliveryType ?? null;
+  } else if (input.supplierId !== undefined && !supplierId) {
+    deliveryType = null;
+  }
+
   return prisma.productMaterial.update({
     where: { id: input.id },
     data: {
       supplierId,
+      deliveryType,
       colorSnapshot: nextColor,
     },
   });
