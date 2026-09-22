@@ -27,29 +27,19 @@ export function ClientContactCards({
     <ContactCardsGrid>
       {rows.map((row) => {
         const fields: ContactField[] = [
-          {
-            key: "companyName",
-            label: "Компанія / ПІБ",
-            value: row.companyName,
-            required: true,
-            wide: true,
-          },
           { key: "contactPerson", label: "Контакт", value: row.contactPerson ?? "" },
-          { key: "phone", label: "Телефон", value: row.phone ?? "", kind: "tel", placeholder: "+380" },
-          { key: "email", label: "Email", value: row.email ?? "", kind: "email", wide: true },
           {
-            key: "legalDetails",
-            label: "Реквізити",
-            value: row.legalDetails ?? "",
-            kind: "textarea",
-            wide: true,
-            placeholder: "ЄДРПОУ, адреса, IBAN",
+            key: "phone",
+            label: "Телефон",
+            value: row.phone ?? "",
+            kind: "tel",
+            placeholder: "+380",
           },
           {
-            key: "note",
-            label: "Примітка",
-            value: row.note ?? "",
-            kind: "textarea",
+            key: "email",
+            label: "Email",
+            value: row.email ?? "",
+            kind: "email",
             wide: true,
           },
         ];
@@ -58,6 +48,7 @@ export function ClientContactCards({
           <ContactCard
             key={row.id}
             title={row.companyName}
+            titleKey="companyName"
             href={`/clients/${row.id}`}
             meta={`${row.ordersCount} зам.`}
             disabled={!canEdit}
@@ -68,6 +59,9 @@ export function ClientContactCards({
               for (const [key, value] of Object.entries(values)) {
                 formData.set(key, value);
               }
+              // Mini-card does not edit these — preserve existing.
+              formData.set("legalDetails", row.legalDetails ?? "");
+              formData.set("note", row.note ?? "");
               const result = await updateClientAction(formData);
               return { ok: result.ok, error: result.ok ? undefined : result.error };
             }}

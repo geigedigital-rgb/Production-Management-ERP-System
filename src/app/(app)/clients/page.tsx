@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { listClients } from "@/server/domains/clients/service";
 import { listSuppliers } from "@/server/domains/catalog/suppliers";
-import { PageHeader } from "@/components/ui/Page";
+import { EmptyState, PageHeader } from "@/components/ui/Page";
 import { ViewTabs } from "@/components/ui/Tabs";
 import { SearchField, ResetFilters } from "@/components/ui/Filters";
 import { ClientCreatePanel } from "@/components/clients/ClientCreateForm";
@@ -62,7 +62,7 @@ export default async function ContactsPage({
     <div className="space-y-4">
       <PageHeader
         title="Контакти"
-        description="Клієнти для замовлень і постачальники матеріалів — легкі картки з редагуванням на місці."
+        description="Клієнти та постачальники."
         actions={
           tab === "suppliers" ? (
             canEditSuppliers ? <SupplierCreatePanel /> : null
@@ -87,11 +87,7 @@ export default async function ContactsPage({
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchField
-          placeholder={
-            tab === "suppliers"
-              ? "Назва, контакт або телефон"
-              : "Компанія, контакт або телефон"
-          }
+          placeholder={tab === "suppliers" ? "Пошук постачальника" : "Пошук клієнта"}
           className="w-64"
         />
         <ResetFilters keys={["q"]} />
@@ -104,21 +100,16 @@ export default async function ContactsPage({
 
       {tab === "suppliers" ? (
         filteredSuppliers.length === 0 ? (
-          <div className="rounded-[var(--radius-surface)] border border-dashed border-[var(--color-border)] px-4 py-10 text-center">
-            <p className="text-[14px] font-medium text-[var(--color-text)]">
-              {term ? "Постачальників не знайдено" : "Постачальників ще немає"}
-            </p>
-            <p className="type-caption mt-1">
-              {term
+          <EmptyState
+            size="sm"
+            title={term ? "Постачальників не знайдено" : "Постачальників ще немає"}
+            description={
+              term
                 ? "Спробуйте інший запит."
-                : "Додайте постачальника тут або під час редагування матеріалу."}
-            </p>
-            {!term && canEditSuppliers ? (
-              <div className="mt-3 flex justify-center">
-                <SupplierCreatePanel />
-              </div>
-            ) : null}
-          </div>
+                : "Додайте постачальника або створіть його в картці матеріалу."
+            }
+            action={!term && canEditSuppliers ? <SupplierCreatePanel /> : undefined}
+          />
         ) : (
           <SupplierContactCards
             canEdit={canEditSuppliers}
@@ -136,21 +127,14 @@ export default async function ContactsPage({
           />
         )
       ) : filteredClients.length === 0 ? (
-        <div className="rounded-[var(--radius-surface)] border border-dashed border-[var(--color-border)] px-4 py-10 text-center">
-          <p className="text-[14px] font-medium text-[var(--color-text)]">
-            {term ? "Клієнтів не знайдено" : "Клієнтів ще немає"}
-          </p>
-          <p className="type-caption mt-1">
-            {term
-              ? "Спробуйте інший запит."
-              : "Створіть першого клієнта, щоб оформити замовлення."}
-          </p>
-          {!term && canEditClients ? (
-            <div className="mt-3 flex justify-center">
-              <ClientCreatePanel />
-            </div>
-          ) : null}
-        </div>
+        <EmptyState
+          size="sm"
+          title={term ? "Клієнтів не знайдено" : "Клієнтів ще немає"}
+          description={
+            term ? "Спробуйте інший запит." : "Створіть клієнта, щоб оформити замовлення."
+          }
+          action={!term && canEditClients ? <ClientCreatePanel /> : undefined}
+        />
       ) : (
         <ClientContactCards
           canEdit={canEditClients}

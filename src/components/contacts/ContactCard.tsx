@@ -11,49 +11,75 @@ export type ContactField = {
   key: string;
   label: string;
   value: string;
-  kind?: "text" | "tel" | "email" | "textarea" | "number";
+  kind?: "text" | "tel" | "email" | "number";
   placeholder?: string;
   required?: boolean;
   wide?: boolean;
 };
 
+const controlCompact = cn(
+  "h-8 w-full rounded-[var(--radius-control)] border border-[var(--color-border)]",
+  "bg-[var(--color-surface)] px-2.5 text-[13px] text-[var(--color-text-primary)] outline-none transition-colors",
+  "placeholder:text-[var(--color-text-quiet)]",
+  "hover:border-[var(--color-border-strong)]",
+  "focus:border-[var(--color-primary-500)] focus:ring-2 focus:ring-[var(--color-focus-ring)]",
+  "disabled:bg-[var(--color-surface-subtle)] disabled:text-[var(--color-text-tertiary)]",
+);
+
 /**
- * Compact editable contact card — white lift on canvas, tinted header,
- * field wells for contrast (not a flat fill).
+ * Mini contact card — Panel tokens, dense fields, no chrome noise.
+ * Name lives in the header (editable); body = essentials only.
  */
 export function ContactCard({
   title,
-  badge,
+  titleKey,
   meta,
-  fields,
   href,
+  fields,
   disabled,
   onSave,
 }: {
   title: string;
-  badge?: React.ReactNode;
+  /** When set, header name is an editable field with this key. */
+  titleKey?: string;
   meta?: React.ReactNode;
-  fields: ContactField[];
   href?: string;
+  fields: ContactField[];
   disabled?: boolean;
   onSave: (values: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const allKeys = [
+    ...(titleKey ? [{ key: titleKey, value: title }] : []),
+    ...fields.map((f) => ({ key: f.key, value: f.value })),
+  ];
   const [draft, setDraft] = useState<Record<string, string>>(() =>
-    Object.fromEntries(fields.map((f) => [f.key, f.value])),
+    Object.fromEntries(allKeys.map((f) => [f.key, f.value])),
   );
   const [error, setError] = useState<string | null>(null);
 
-  const fieldSignature = fields.map((f) => `${f.key}=${f.value}`).join("\n");
+  const fieldSignature = [
+    titleKey ? `${titleKey}=${title}` : "",
+    ...fields.map((f) => `${f.key}=${f.value}`),
+  ].join("\n");
 
   useEffect(() => {
-    setDraft(Object.fromEntries(fields.map((f) => [f.key, f.value])));
+    setDraft(
+      Object.fromEntries([
+        ...(titleKey ? [[titleKey, title] as const] : []),
+        ...fields.map((f) => [f.key, f.value] as const),
+      ]),
+    );
     setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldSignature]);
 
-  const dirty = fields.some((f) => (draft[f.key] ?? "") !== (f.value ?? ""));
+  const dirty =
+    (titleKey ? (draft[titleKey] ?? "") !== title : false) ||
+    fields.some((f) => (draft[f.key] ?? "") !== (f.value ?? ""));
+
+  const displayTitle = titleKey ? (draft[titleKey] ?? title) : title;
 
   function save() {
     if (disabled || !dirty) return;
@@ -69,122 +95,105 @@ export function ContactCard({
   }
 
   function reset() {
-    setDraft(Object.fromEntries(fields.map((f) => [f.key, f.value])));
+    setDraft(
+      Object.fromEntries([
+        ...(titleKey ? [[titleKey, title] as const] : []),
+        ...fields.map((f) => [f.key, f.value] as const),
+      ]),
+    );
     setError(null);
   }
 
-  const inputClass = cn(
-    "h-7 w-full rounded-[6px] border border-transparent bg-[var(--color-surface-subtle)] px-2",
-    "text-[12.5px] leading-none text-[var(--color-text-primary)] outline-none transition-colors",
-    "placeholder:text-[var(--color-text-quiet)]",
-    "hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-hover)]",
-    "focus:border-[var(--color-primary-500)] focus:bg-[var(--color-surface)] focus:shadow-[0_0_0_3px_var(--color-focus-ring)]",
-    "disabled:opacity-55",
-  );
-
   return (
-    <SoftBusy busy={pending} className="min-w-0">
+    <SoftBusy busy={pending} tone="inline" className="min-w-0">
       <article
         className={cn(
-          "relative overflow-hidden rounded-[var(--radius-surface)] border bg-[var(--color-surface)] shadow-[var(--shadow-card)]",
-          dirty
-            ? "border-[var(--color-primary-300)]"
-            : "border-[var(--color-border-strong)]",
+          "flex h-full flex-col rounded-[var(--radius-surface)] border bg-[var(--color-surface)] shadow-[var(--shadow-card)]",
+          dirty ? "border-[var(--color-primary-300)]" : "border-[var(--color-border)]",
         )}
       >
-        <span
-          aria-hidden
-          className={cn(
-            "absolute inset-y-0 left-0 w-[3px]",
-            dirty ? "bg-[var(--color-primary-500)]" : "bg-[var(--color-primary-300)]",
-          )}
-        />
-
-        <header
-          className={cn(
-            "flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b py-1.5 pl-3.5 pr-2.5",
-            dirty
-              ? "border-[var(--color-primary-100)] bg-[var(--color-tint-sage)]"
-              : "border-[var(--color-border)] bg-[var(--color-surface-tint)]",
-          )}
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            {href ? (
+        <header className="flex items-start gap-2 border-b border-[var(--color-divider)] px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            {titleKey && !disabled ? (
+              <input
+                aria-label="Назва"
+                disabled={pending}
+                className={cn(
+                  "type-subsection w-full truncate border-0 bg-transparent p-0 outline-none",
+                  "placeholder:text-[var(--color-text-quiet)]",
+                  "focus:text-[var(--color-primary-800)]",
+                )}
+                value={displayTitle}
+                placeholder="Назва"
+                required
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, [titleKey]: event.target.value }))
+                }
+              />
+            ) : href ? (
               <Link
                 href={href}
-                className="truncate text-[13px] font-semibold tracking-[-0.01em] text-[var(--color-text-primary)] hover:text-[var(--color-primary-700)]"
+                className="type-subsection block truncate hover:text-[var(--color-primary-700)]"
               >
-                {title}
+                {displayTitle}
               </Link>
             ) : (
-              <h3 className="truncate text-[13px] font-semibold tracking-[-0.01em] text-[var(--color-text-primary)]">
-                {title}
-              </h3>
+              <h3 className="type-subsection truncate">{displayTitle}</h3>
             )}
-            {meta != null && meta !== "" ? (
-              <span className="shrink-0 rounded-[var(--radius-badge)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[10.5px] font-medium tabular text-[var(--color-text-secondary)] shadow-[inset_0_0_0_1px_var(--color-border)]">
-                {meta}
-              </span>
+            {href && titleKey && !disabled ? (
+              <Link
+                href={href}
+                className="type-caption mt-0.5 inline-block text-[var(--color-text-quiet)] hover:text-[var(--color-primary-700)]"
+              >
+                Картка →
+              </Link>
             ) : null}
           </div>
-          {badge}
+          {meta != null && meta !== "" ? (
+            <span className="type-caption shrink-0 tabular text-[var(--color-text-tertiary)]">
+              {meta}
+            </span>
+          ) : null}
         </header>
 
-        <div className="grid gap-x-2 gap-y-1.5 px-2.5 py-2 pl-3.5 sm:grid-cols-2">
+        <div className="grid flex-1 grid-cols-2 gap-x-2 gap-y-2 px-3 py-2.5">
           {fields.map((field) => (
             <label
               key={field.key}
-              className={cn("block min-w-0", field.wide && "sm:col-span-2")}
+              className={cn("flex min-w-0 flex-col gap-0.5", field.wide && "col-span-2")}
             >
-              <span className="mb-0.5 block text-[11px] font-medium text-[var(--color-text-tertiary)]">
+              <span className="type-label">
                 {field.label}
                 {field.required ? (
-                  <span className="text-[var(--color-primary-500)]"> *</span>
+                  <span className="ml-0.5 text-[var(--color-danger-text)]">*</span>
                 ) : null}
               </span>
-              {field.kind === "textarea" ? (
-                <textarea
-                  rows={2}
-                  disabled={disabled || pending}
-                  className={cn(inputClass, "h-auto min-h-[2.25rem] resize-y py-1.5 leading-snug")}
-                  value={draft[field.key] ?? ""}
-                  placeholder={field.placeholder}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, [field.key]: event.target.value }))
-                  }
-                />
-              ) : (
-                <input
-                  type={field.kind === "number" ? "number" : field.kind ?? "text"}
-                  disabled={disabled || pending}
-                  className={inputClass}
-                  value={draft[field.key] ?? ""}
-                  placeholder={field.placeholder}
-                  required={field.required}
-                  step={field.kind === "number" ? "any" : undefined}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, [field.key]: event.target.value }))
-                  }
-                />
-              )}
+              <input
+                type={field.kind === "number" ? "number" : field.kind ?? "text"}
+                disabled={disabled || pending}
+                className={controlCompact}
+                value={draft[field.key] ?? ""}
+                placeholder={field.placeholder}
+                required={field.required}
+                step={field.kind === "number" ? "any" : undefined}
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, [field.key]: event.target.value }))
+                }
+              />
             </label>
           ))}
         </div>
 
         {(error || dirty) && !disabled ? (
-          <footer className="flex flex-wrap items-center gap-1.5 border-t border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2.5 py-1.5 pl-3.5">
+          <footer className="mt-auto flex items-center gap-2 border-t border-[var(--color-divider)] px-3 py-2">
             {error ? (
               <span className="type-caption text-[var(--color-danger-text)]">{error}</span>
-            ) : (
-              <span className="type-caption text-[var(--color-primary-700)]">Є зміни</span>
-            )}
-            <div className="ml-auto flex gap-1">
-              {dirty ? (
-                <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={reset}>
-                  Скасувати
-                </Button>
-              ) : null}
-              <Button type="button" size="sm" disabled={pending || !dirty || disabled} onClick={save}>
+            ) : null}
+            <div className="ml-auto flex gap-1.5">
+              <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={reset}>
+                Скасувати
+              </Button>
+              <Button type="button" size="sm" disabled={pending || !dirty} onClick={save}>
                 {pending ? "…" : "Зберегти"}
               </Button>
             </div>
@@ -197,6 +206,6 @@ export function ContactCard({
 
 export function ContactCardsGrid({ children }: { children: React.ReactNode }) {
   return (
-    <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{children}</div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{children}</div>
   );
 }
