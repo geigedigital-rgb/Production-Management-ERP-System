@@ -238,7 +238,7 @@ const fabricGlobals = {
   usdUahRate: 45,
   fabricCargoUsdPerKg: 1.7,
   npStandardUsdPerKg: 0.4,
-  npVolumeUsdPerKg: 2500,
+  npVolumeUsdPerKg: 0.8,
   materialCostVatMode: "NET" as const,
 };
 

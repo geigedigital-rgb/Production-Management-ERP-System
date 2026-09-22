@@ -558,7 +558,7 @@ export default async function ProductDetailPage({
                         ? {
                             type: "NP_VOLUME" as const,
                             label: "НП обʼємні",
-                            rateLabel: `${Number(offer.npVolumeUsdPerKg)} ${mode === "fabric" ? "₴/м³" : "₴/уп."}`,
+                            rateLabel: `${Number(offer.npVolumeUsdPerKg)} ${mode === "fabric" ? "$/кг" : "₴/уп."}`,
                           }
                         : null,
                     ].filter(Boolean) as Array<{

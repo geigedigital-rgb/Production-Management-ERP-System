@@ -197,9 +197,7 @@ export function MaterialSuppliersEditor({
     return {
       ...fabricGlobals,
       usdUahRate,
-      // НП обʼємні не додається в $/кг → ₴/м; лише CARGO / НП стандарт.
-      fabricCargoUsdPerKg:
-        resolved.type === "NP_VOLUME" ? 0 : resolved.rateUsdPerKg,
+      fabricCargoUsdPerKg: resolved.rateUsdPerKg,
     };
   }, [fabricGlobals, usdUahRate, draft]);
 
@@ -463,8 +461,7 @@ export function MaterialSuppliersEditor({
                       npVolumeUsdPerKg: row.npVolumeUsdPerKg,
                     }).map((opt) => (
                       <span key={opt.type} className="type-caption ml-2 tabular">
-                        {opt.label} · {opt.rateUsdPerKg}{" "}
-                        {opt.type === "NP_VOLUME" ? "₴/м³" : "$/кг"}
+                        {opt.label} · {opt.rateUsdPerKg} $/кг
                       </span>
                     ))
                   : trimConfiguredDeliveryOptions({

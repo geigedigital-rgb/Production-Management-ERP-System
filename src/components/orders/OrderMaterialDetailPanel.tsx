@@ -751,8 +751,7 @@ export function OrderMaterialDetailPanel({
                             >
                               {options.map((opt) => (
                                 <option key={opt.type} value={opt.type}>
-                                  {opt.label} · {opt.rateUsdPerKg}{" "}
-                                  {opt.type === "NP_VOLUME" ? "₴/м³" : "$/кг"}
+                                  {opt.label} · {opt.rateUsdPerKg} $/кг
                                 </option>
                               ))}
                             </Select>
@@ -761,24 +760,23 @@ export function OrderMaterialDetailPanel({
                         <div className="flex flex-wrap gap-4">
                           <NumberField
                             label="Тариф"
-                            prefix={deliveryType === "NP_VOLUME" ? undefined : "$"}
-                            suffix={deliveryType === "NP_VOLUME" ? "₴/м³" : "/кг"}
+                            prefix="$"
+                            suffix="/кг"
                             value={cargoUsdPerKg}
                             placeholder={String(detail.defaultCargoUsdPerKg)}
                             onChange={setCargoUsdPerKg}
                           />
-                          {deliveryType !== "NP_VOLUME" ? (
-                            <NumberField
-                              label="Курс"
-                              suffix="₴/$"
-                              step="0.01"
-                              value={usdUahRate}
-                              placeholder={String(detail.defaultUsdUahRate ?? detail.usdUahRate)}
-                              onChange={setUsdUahRate}
-                            />
-                          ) : null}
+                          <NumberField
+                            label="Курс"
+                            suffix="₴/$"
+                            step="0.01"
+                            value={usdUahRate}
+                            placeholder={String(detail.defaultUsdUahRate ?? detail.usdUahRate)}
+                            onChange={setUsdUahRate}
+                          />
                         </div>
                         <p className="type-caption tabular text-[var(--color-text-secondary)]">
+                          {live.kgNeeded ?? "—"} кг × ${live.cargo}/кг × {live.rate} ₴/$ ={" "}
                           {formatMoneyUah(live.deliveryComputed)}
                         </p>
                       </>

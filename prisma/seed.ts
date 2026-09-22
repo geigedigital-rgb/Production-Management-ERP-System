@@ -633,7 +633,7 @@ async function main() {
       usdUahRate: 45,
       fabricCargoUsdPerKg: 1.7,
       npStandardUsdPerKg: 0.4,
-      npVolumeUsdPerKg: 2500,
+      npVolumeUsdPerKg: 0.8,
       inputVatRatePercent: 20,
       materialCostVatMode: "NET",
     },

@@ -346,11 +346,9 @@ function MaterialFields({
     () => ({
       ...fabricGlobals,
       fabricCargoUsdPerKg:
-        Number(fabricCargoUsdPerKg) >= 0 && deliveryType !== "NP_VOLUME"
+        Number(fabricCargoUsdPerKg) >= 0
           ? Number(fabricCargoUsdPerKg)
-          : deliveryType === "NP_VOLUME"
-            ? 0
-            : deliveryRateUsdPerKg(deliveryType, fabricGlobals),
+          : deliveryRateUsdPerKg(deliveryType, fabricGlobals),
     }),
     [fabricGlobals, fabricCargoUsdPerKg, deliveryType],
   );
@@ -359,10 +357,7 @@ function MaterialFields({
     setDeliveryType(nextType);
     const rate = deliveryRateUsdPerKg(nextType, fabricGlobals);
     setFabricCargoUsdPerKg(String(rate));
-    // НП обʼємні — ₴/м³, не входить у формулу $/кг → ₴/м.
-    recalcMeterPrices({
-      fabricCargoUsdPerKg: nextType === "NP_VOLUME" ? "0" : String(rate),
-    });
+    recalcMeterPrices({ fabricCargoUsdPerKg: String(rate) });
   }
 
   const derived = useMemo(

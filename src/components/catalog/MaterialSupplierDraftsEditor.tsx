@@ -128,7 +128,7 @@ export function MaterialSupplierDraftsEditor({
     );
     return {
       ...fabricGlobals,
-      fabricCargoUsdPerKg: resolved.type === "NP_VOLUME" ? 0 : resolved.rateUsdPerKg,
+      fabricCargoUsdPerKg: resolved.rateUsdPerKg,
     };
   }, [fabricGlobals, draft]);
 
