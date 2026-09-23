@@ -511,8 +511,8 @@ function MaterialFields({
 
   const wizardSteps = useMemo(() => {
     if (type !== "FABRIC") {
-      if (wizard) return ["Основне", "Ціна", "Постачальник", "Готово"];
-      return ["Основне", "Постачальник", "Ціна", "Готово"];
+      // Same mental model as edit: Основне (шт/собівартість) → Постачальник (ціна/доставка).
+      return ["Основне", "Постачальник", "Готово"];
     }
     if (managePricingSeparately) {
       return ["Основне", "Параметри", "Доставка", "Готово"];
@@ -537,6 +537,9 @@ function MaterialFields({
   const stepKey = wizardSteps[wizardStep] ?? "Основне";
 
   const wizardMultiSuppliers = wizard && !managePricingSeparately;
+  /** Pack quote lives on supplier offers (create drafts or edit editor). */
+  const trimPricingOnSuppliers =
+    type !== "FABRIC" && (managePricingSeparately || wizardMultiSuppliers);
   const supplierPricingKind = type === "FABRIC" && !fabricEachPricing ? "fabric" : "unit";
 
   /** Mirror primary draft into classic form fields so createMaterial still syncs primary. */
@@ -555,6 +558,8 @@ function MaterialFields({
       setSupplierOther(name);
     }
     if (supplierPricingKind === "unit") {
+      if (primary.purchasePackPrice) setPurchasePackPrice(primary.purchasePackPrice);
+      if (primary.packDeliveryCostUah) setPackDeliveryCostUah(primary.packDeliveryCostUah);
       if (primary.priceMeterUahNoVat) setPurchasePrice(primary.priceMeterUahNoVat);
       return;
     }
@@ -721,10 +726,15 @@ function MaterialFields({
       </FormGroup>
       </div>
 
-      {/* Calc fields stay mounted for submit; visible on price/ready steps. */}
+      {/* Calc fields: always in edit; on create for шт — on «Основне» (same as edit). */}
       <div
         className={
-          !wizard || showStep("Ціна") || showStep("Готово") ? "space-y-4" : "hidden"
+          !wizard ||
+          showStep("Ціна") ||
+          showStep("Готово") ||
+          (type !== "FABRIC" && showStep("Основне"))
+            ? "space-y-4"
+            : "hidden"
         }
       >
       <FormGroup
@@ -746,7 +756,7 @@ function MaterialFields({
               value={unitsPerPack}
               onChange={(event) => setUnitsPerPack(event.target.value)}
             />
-            {!managePricingSeparately ? (
+            {!trimPricingOnSuppliers ? (
               <>
                 <Input
                   name="purchasePackPrice"
@@ -805,12 +815,10 @@ function MaterialFields({
                 : "₴"
           }
           value={purchaseDisplay}
-          readOnly={purchaseReadOnly || (type !== "FABRIC" && managePricingSeparately)}
-          tabIndex={
-            purchaseReadOnly || (type !== "FABRIC" && managePricingSeparately) ? -1 : undefined
-          }
+          readOnly={purchaseReadOnly || trimPricingOnSuppliers}
+          tabIndex={purchaseReadOnly || trimPricingOnSuppliers ? -1 : undefined}
           hint={
-            type !== "FABRIC" && managePricingSeparately
+            trimPricingOnSuppliers
               ? "З умов основного постачальника (ціна + доставка упаковки)"
               : trimPackActive
                 ? `(ціна + доставка) ÷ ${Math.floor(Number(unitsPerPack))} шт`
@@ -819,13 +827,12 @@ function MaterialFields({
                   : undefined
           }
           onChange={
-            purchaseReadOnly || (type !== "FABRIC" && managePricingSeparately)
+            purchaseReadOnly || trimPricingOnSuppliers
               ? undefined
               : (event) => setPurchasePrice(event.target.value)
           }
         />
-        {(wizardMultiSuppliers && trimPackActive) ||
-        (type !== "FABRIC" && managePricingSeparately) ? (
+        {(wizardMultiSuppliers && trimPackActive) || trimPricingOnSuppliers ? (
           <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
         ) : null}
         <Input
@@ -839,6 +846,16 @@ function MaterialFields({
           defaultValue={defaults?.defaultWastePercent ?? 0}
         />
       </FormGroup>
+      {type !== "FABRIC" && wizard && showStep("Основне") ? (
+        <FormGroup columns={2} compact>
+          <Input
+            name="colorOrAttribute"
+            label="Колір / характеристика"
+            optional
+            defaultValue={defaults?.colorOrAttribute}
+          />
+        </FormGroup>
+      ) : null}
       </div>
 
       {type === "FABRIC" ? (
@@ -1099,6 +1116,7 @@ function MaterialFields({
                   offers={supplierDrafts}
                   onChange={setSupplierDrafts}
                   metersPerKg={metersPerKg ? Number(metersPerKg) : null}
+                  unitsPerPack={unitsPerPack ? Number(unitsPerPack) : null}
                   fabricGlobals={liveGlobals}
                   knownSuppliers={knownSuppliers}
                   defaultDeliveryType={deliveryType}
@@ -1270,8 +1288,8 @@ function MaterialFields({
                   name="priceMeterUahNoVat"
                   label={
                     minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
-                      ? "₴/м (гурт)"
-                      : "₴/м"
+                      ? "Гурт"
+                      : "Звичайна"
                   }
                   type="number"
                   step="0.1"
@@ -1296,7 +1314,7 @@ function MaterialFields({
                         ? "Авто з ₴/м² × ширина"
                         : minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
                           ? `Гуртова ціна від ${minWholesaleMeters} м`
-                          : "Без ПДВ"
+                          : "Базова ціна тканини без доставки"
                   }
                 />
                 <input type="hidden" name="priceMeterUahVat" value="" />
@@ -1316,11 +1334,11 @@ function MaterialFields({
                       setPriceMeterCutVat("");
                     }
                   }}
-                  hint="Від скількох м.п. діє гуртова ціна"
+                  hint="Від цієї кількості м.п. діє гурт"
                 />
                 <Input
                   name="priceMeterUahCutVat"
-                  label="Відріз"
+                  label="Звичайна"
                   type="number"
                   step="0.1"
                   min="0"
@@ -1334,7 +1352,7 @@ function MaterialFields({
                   hint={
                     minWholesaleMeters.trim() === "" || Number(minWholesaleMeters) <= 0
                       ? "Спочатку вкажіть межу гурту"
-                      : "Ціна нижче межі (зазвичай дорожча)"
+                      : "Ціна до межі (базова, зазвичай дорожча)"
                   }
                 />
                 <Input
@@ -1348,7 +1366,7 @@ function MaterialFields({
                 {derived.purchasePrice > 0 ? (
                   <p className="type-caption sm:col-span-2 tabular">
                     Активна собівартість з цих умов: {formatMoneyUah(derived.purchasePrice)}/м
-                    {derived.pricingMode === "cut" ? " (відріз)" : ""}
+                    {derived.pricingMode === "cut" ? " (звичайна)" : ""}
                     {minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
                       ? priceMeterCutVat.trim() !== "" && Number(priceMeterCutVat) > 0
                         ? ` · ≥ ${minWholesaleMeters} м → гурт`
@@ -1427,18 +1445,21 @@ function MaterialFields({
                 offers={supplierDrafts}
                 onChange={setSupplierDrafts}
                 metersPerKg={null}
+                unitsPerPack={unitsPerPack ? Number(unitsPerPack) : null}
                 fabricGlobals={liveGlobals}
                 knownSuppliers={knownSuppliers}
                 defaultDeliveryType={deliveryType}
                 onEditingChange={setSupplierDraftEditing}
                 pricingKind="unit"
               />
-              <Input
-                name="colorOrAttribute"
-                label="Колір / характеристика"
-                optional
-                defaultValue={defaults?.colorOrAttribute}
-              />
+              {!wizard ? (
+                <Input
+                  name="colorOrAttribute"
+                  label="Колір / характеристика"
+                  optional
+                  defaultValue={defaults?.colorOrAttribute}
+                />
+              ) : null}
             </>
           ) : managePricingSeparately ? (
             <FormGroup
@@ -1499,13 +1520,21 @@ function MaterialFields({
         </div>
       )}
 
-      <div className={showStep("Готово") || !wizard ? "space-y-4" : "hidden"}>
-      <FormGroup
-        label={wizard ? undefined : "Примітка"}
-        icon={wizard ? undefined : <IconNote size={14} />}
-        columns={1}
-        compact
+      <div
+        className={
+          showStep("Готово") ||
+          !wizard ||
+          (type !== "FABRIC" && showStep("Основне"))
+            ? "space-y-4"
+            : "hidden"
+        }
       >
+        <FormGroup
+          label={wizard ? undefined : "Примітка"}
+          icon={wizard ? undefined : <IconNote size={14} />}
+          columns={1}
+          compact
+        >
         <Input
           name="note"
           label="Коментар"

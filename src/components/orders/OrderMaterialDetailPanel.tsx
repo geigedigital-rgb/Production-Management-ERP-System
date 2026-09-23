@@ -572,8 +572,8 @@ export function OrderMaterialDetailPanel({
                       : atWholesale
                         ? "Гурт (опт)"
                         : live.pricingMode === "cut"
-                          ? "Відріз"
-                          : "Стандарт (до межі гурту)";
+                          ? "Звичайна"
+                          : "Звичайна (до межі гурту)";
                   const catalogHint =
                     live.catalogMinWholesaleMeters != null
                       ? `${live.catalogMinWholesaleMeters} м`

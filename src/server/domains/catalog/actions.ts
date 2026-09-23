@@ -165,6 +165,8 @@ export async function createMaterialAction(formData: FormData) {
         priceMeterUahCutVat?: string;
         minWholesaleMeters?: string;
         wholesaleNote?: string;
+        purchasePackPrice?: string;
+        packDeliveryCostUah?: string;
         availableColors?: string;
       }>;
       if (Array.isArray(drafts)) {
@@ -206,6 +208,12 @@ export async function createMaterialAction(formData: FormData) {
               ? Number(draft.minWholesaleMeters)
               : null,
             wholesaleNote: draft.wholesaleNote || null,
+            purchasePackPrice: draft.purchasePackPrice
+              ? Number(draft.purchasePackPrice)
+              : null,
+            packDeliveryCostUah: draft.packDeliveryCostUah
+              ? Number(draft.packDeliveryCostUah)
+              : null,
             availableColors: splitColorLabels(String(draft.availableColors ?? "")),
           });
         }

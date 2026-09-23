@@ -121,9 +121,9 @@ export function DraftMaterialLinePanel({
     : pricing?.pricingMode === "wholesale" || isWholesale
       ? "гурт"
       : pricing?.pricingMode === "cut"
-        ? "відріз"
+        ? "звичайна"
         : pricing?.pricingMode === "standard"
-          ? "стандарт"
+          ? "звичайна"
           : null;
 
   const cargo =
@@ -208,7 +208,7 @@ export function DraftMaterialLinePanel({
               {!vatChosen
                 ? "Оберіть ПДВ — без цього ціна в калькуляції не зафіксована."
                 : priceModeMissing
-                  ? "Оберіть режим ціни (авто / відріз / гурт)."
+                  ? "Оберіть режим ціни (авто / звичайна / гурт)."
                   : "ПДВ і режим ціни для цієї позиції."}
             </p>
             <MaterialPricingToggles
@@ -238,7 +238,7 @@ export function DraftMaterialLinePanel({
               <div className="sm:col-span-2">
                 <dt className="text-[var(--color-text-tertiary)]">Режим</dt>
                 <dd className="font-medium">
-                  {!hasCut ? "Звичайна ціна" : isWholesale ? "Гурт (опт)" : "Відріз / стандарт"}
+                  {!hasCut ? "Звичайна ціна" : isWholesale ? "Гурт (опт)" : "Звичайна (до межі)"}
                   {row.wholesaleNote ? (
                     <span className="type-caption ml-1.5">· {row.wholesaleNote}</span>
                   ) : null}

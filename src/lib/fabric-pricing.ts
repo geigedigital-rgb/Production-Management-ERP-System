@@ -327,7 +327,7 @@ export function fabricMetersNeeded(input: {
 export function fabricPricingModeLabel(mode: FabricPricingMode): string {
   switch (mode) {
     case "cut":
-      return "ціна на відріз";
+      return "звичайна ціна";
     case "wholesale":
       return "гуртова ціна";
     default:

@@ -180,8 +180,8 @@ export default async function OrderDetailPage({
       const nearCut = Math.abs(price - cut) < 0.05;
       pricingHint = nearCut
         ? minM
-          ? `ціна на відріз (гурт від ${minM} м)`
-          : "ціна на відріз"
+          ? `звичайна ціна (гурт від ${minM} м)`
+          : "звичайна ціна"
         : "гуртова ціна";
     }
     return {
