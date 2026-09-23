@@ -33,10 +33,10 @@ import { resolveSizeCoeffs, isOversizeCode } from "@/lib/size-coeffs";
 import { isSewOperationName } from "@/lib/sewing-markup";
 import {
   DEFAULT_FABRIC_PRICING_GLOBALS,
-  resolveMaterialLinePurchasePrice,
   type FabricPricingGlobals,
   type MaterialCostVatMode,
 } from "@/lib/fabric-pricing";
+import { resolveBomMaterialPurchasePrice } from "@/lib/order-material-terms";
 import {
   FABRIC_DELIVERY_ADDITIONAL_ID,
   computeProductFabricDelivery,
@@ -345,39 +345,35 @@ function productMaterialPurchasePrice(args: {
   quantityAware: boolean;
   companyCostMode: MaterialCostVatMode;
 }): number {
-  const catalog = Number(args.row.material.purchasePrice);
-  if (!args.quantityAware) return catalog;
-
   const applies = effectiveSizeCodes(sizeCodesFromScopes(args.row.sizeScopes), args.sizeCodes);
   const sizeConsumption = sizeConsumptionFromNorms(args.row.sizeNorms);
   const sizeWaste = sizeWasteFromNorms(args.row.sizeNorms);
   const baseWaste = Number(args.row.wastePercent ?? args.row.material.defaultWastePercent);
-  let metersNeeded = 0;
-  for (const size of args.sizes) {
-    if (size.quantity <= 0 || !applies.includes(size.sizeCode)) continue;
-    const hasExplicitNorm = sizeConsumption[size.sizeCode] != null;
-    const consumption = consumptionForSize(
-      Number(args.row.consumptionPerUnit),
-      sizeConsumption,
-      size.sizeCode,
-    );
-    const waste = wasteForSize(baseWaste, sizeWaste, size.sizeCode);
-    const coeff = hasExplicitNorm ? 1 : (size.materialCoeff ?? 1);
-    metersNeeded += consumption * (1 + waste / 100) * size.quantity * coeff;
+
+  let metersNeeded: number | null = null;
+  if (args.quantityAware) {
+    metersNeeded = 0;
+    for (const size of args.sizes) {
+      if (size.quantity <= 0 || !applies.includes(size.sizeCode)) continue;
+      const hasExplicitNorm = sizeConsumption[size.sizeCode] != null;
+      const consumption = consumptionForSize(
+        Number(args.row.consumptionPerUnit),
+        sizeConsumption,
+        size.sizeCode,
+      );
+      const waste = wasteForSize(baseWaste, sizeWaste, size.sizeCode);
+      const coeff = hasExplicitNorm ? 1 : (size.materialCoeff ?? 1);
+      metersNeeded += consumption * (1 + waste / 100) * size.quantity * coeff;
+    }
   }
 
-  return resolveMaterialLinePurchasePrice({
-    type: args.row.material.type,
-    purchasePrice: catalog,
-    priceMeterUahNoVat: numOrNull(args.row.material.priceMeterUahNoVat),
-    priceMeterUahVat: numOrNull(args.row.material.priceMeterUahVat),
-    priceMeterUahCutVat: numOrNull(args.row.material.priceMeterUahCutVat),
-    metersPerRoll: numOrNull(args.row.material.metersPerRoll),
-    minWholesaleMeters: numOrNull(args.row.material.minWholesaleMeters),
-    costVatOverride: args.row.material.costVatOverride ?? null,
+  return resolveBomMaterialPurchasePrice({
+    material: args.row.material,
+    offers: args.row.material.supplierOffers ?? [],
+    supplierId: args.row.supplierId,
     companyCostMode: args.companyCostMode,
     metersNeeded,
-  }).purchasePrice;
+  });
 }
 
 export function buildCalcFromProduct(

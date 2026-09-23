@@ -195,7 +195,13 @@ export default async function ProductsPage({
             if (commercialTiers.length > 0) {
               return resolveCommercialPricePerUnit({ quantity: qty, tiers: commercialTiers });
             }
-            return Number(buildCalcFromProduct(detail, qty, pricing).sellingPricePerUnit);
+            return Number(
+              buildCalcFromProduct(detail, qty, {
+                ...pricing,
+                quantityAwareMaterialPrices: true,
+                sizeMode: "standard",
+              }).sellingPricePerUnit,
+            );
           })
         : [],
     };

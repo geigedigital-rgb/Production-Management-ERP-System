@@ -1,4 +1,5 @@
 import type { MaterialCostVatMode } from "@/lib/fabric-pricing";
+import { resolveMaterialLinePurchasePrice } from "@/lib/fabric-pricing";
 
 export type FabricMaterialSnapshot = {
   type?: string | null;
@@ -27,6 +28,20 @@ export type SupplierOfferSnapshot = {
   cargoUsdPerKg?: number | null;
 };
 
+/** Prefer BOM/order supplier; else primary; else first offer. */
+export function pickSupplierOffer<T extends { supplierId: string; isPrimary?: boolean }>(
+  offers: T[] | null | undefined,
+  supplierId?: string | null,
+): T | null {
+  const list = offers ?? [];
+  if (list.length === 0) return null;
+  if (supplierId) {
+    const match = list.find((row) => row.supplierId === supplierId);
+    if (match) return match;
+  }
+  return list.find((row) => row.isPrimary) ?? list[0] ?? null;
+}
+
 /** Merge catalog material with a supplier offer for order-line pricing. */
 export function fabricFieldsForOrderLine(
   material: FabricMaterialSnapshot,
@@ -44,6 +59,76 @@ export function fabricFieldsForOrderLine(
     metersPerRoll: offer.metersPerRoll ?? material.metersPerRoll,
     minWholesaleMeters: offer.minWholesaleMeters ?? material.minWholesaleMeters,
   };
+}
+
+/**
+ * Product BOM / tirage COGS using the selected supplier's terms.
+ * `metersNeeded` null → conservative (ціна до опт when cut exists).
+ * With meters → cut vs опт by threshold (Прайс і крій / order).
+ */
+export function resolveBomMaterialPurchasePrice(input: {
+  material: {
+    type?: string | null;
+    purchasePrice: { toString(): string } | number;
+    metersPerKg?: { toString(): string } | number | null;
+    priceKgUsd?: { toString(): string } | number | null;
+    priceKgUsdCargo?: { toString(): string } | number | null;
+    priceMeterUahNoVat?: { toString(): string } | number | null;
+    priceMeterUahVat?: { toString(): string } | number | null;
+    priceMeterUahCutVat?: { toString(): string } | number | null;
+    metersPerRoll?: { toString(): string } | number | null;
+    minWholesaleMeters?: { toString(): string } | number | null;
+    costVatOverride?: MaterialCostVatMode | null;
+  };
+  offers?: Array<{
+    supplierId: string;
+    isPrimary?: boolean;
+    metersPerKg?: { toString(): string } | number | null;
+    priceKgUsd?: { toString(): string } | number | null;
+    priceKgUsdCargo?: { toString(): string } | number | null;
+    priceKgUsdVat?: { toString(): string } | number | null;
+    priceMeterUahNoVat?: { toString(): string } | number | null;
+    priceMeterUahVat?: { toString(): string } | number | null;
+    priceMeterUahCutVat?: { toString(): string } | number | null;
+    metersPerRoll?: { toString(): string } | number | null;
+    minWholesaleMeters?: { toString(): string } | number | null;
+    cargoUsdPerKg?: { toString(): string } | number | null;
+  }> | null;
+  supplierId?: string | null;
+  companyCostMode: MaterialCostVatMode;
+  metersNeeded?: number | null;
+}): number {
+  const offer = pickSupplierOffer(input.offers, input.supplierId);
+  const base = materialToSnapshot(input.material);
+  const merged = fabricFieldsForOrderLine(base, offer ? offerToSnapshot(offer) : null);
+
+  let purchaseFallback = base.purchasePrice;
+  if (offer) {
+    const unit = offerToSnapshot(offer).priceMeterUahNoVat;
+    if (input.material.type !== "FABRIC" && unit != null && unit > 0) {
+      purchaseFallback = unit;
+    } else if (
+      input.material.type === "FABRIC" &&
+      unit != null &&
+      unit > 0 &&
+      !(base.purchasePrice > 0)
+    ) {
+      purchaseFallback = unit;
+    }
+  }
+
+  return resolveMaterialLinePurchasePrice({
+    type: merged.type,
+    purchasePrice: purchaseFallback,
+    priceMeterUahNoVat: merged.priceMeterUahNoVat,
+    priceMeterUahVat: merged.priceMeterUahVat,
+    priceMeterUahCutVat: merged.priceMeterUahCutVat,
+    metersPerRoll: merged.metersPerRoll,
+    minWholesaleMeters: merged.minWholesaleMeters,
+    costVatOverride: merged.costVatOverride ?? null,
+    companyCostMode: input.companyCostMode,
+    metersNeeded: input.metersNeeded,
+  }).purchasePrice;
 }
 
 export function offerToSnapshot(offer: {

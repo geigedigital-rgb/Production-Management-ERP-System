@@ -6,6 +6,13 @@ import {
   sizeWasteFromNorms,
 } from "@/lib/size-bom";
 import {
+  fabricFieldsForOrderLine,
+  materialToSnapshot,
+  offerToSnapshot,
+  pickSupplierOffer,
+  resolveBomMaterialPurchasePrice,
+} from "@/lib/order-material-terms";
+import {
   defaultOperationRateTiers,
   parseRateTiersInput,
 } from "@/lib/quantity-tiers";
@@ -381,39 +388,41 @@ export async function getProduct(id: string) {
 
 export function toCompositionTemplate(product: NonNullable<Awaited<ReturnType<typeof getProduct>>>) {
   return {
-    materials: product.materials.map((row) => ({
+    materials: product.materials.map((row) => {
+      const offer = pickSupplierOffer(row.material.supplierOffers ?? [], row.supplierId);
+      const merged = fabricFieldsForOrderLine(
+        materialToSnapshot(row.material),
+        offer ? offerToSnapshot(offer) : null,
+      );
+      return {
       materialId: row.materialId,
       name: row.material.nameUk,
       unit: row.material.unitOfMeasure.code,
       consumption: Number(row.consumptionPerUnit),
       waste: Number(row.wastePercent ?? row.material.defaultWastePercent),
-      price: Number(row.material.purchasePrice),
+      price: resolveBomMaterialPurchasePrice({
+        material: row.material,
+        offers: row.material.supplierOffers ?? [],
+        supplierId: row.supplierId,
+        companyCostMode: "NET",
+        metersNeeded: null,
+      }),
       sizeCodes: sizeCodesFromScopes(row.sizeScopes),
       sizeConsumption: sizeConsumptionFromNorms(row.sizeNorms),
       sizeWaste: sizeWasteFromNorms(row.sizeNorms),
       materialType: row.material.type,
-      priceMeterUahNoVat:
-        row.material.priceMeterUahNoVat != null
-          ? Number(row.material.priceMeterUahNoVat)
-          : null,
-      priceMeterUahVat:
-        row.material.priceMeterUahVat != null ? Number(row.material.priceMeterUahVat) : null,
-      priceMeterUahCutVat:
-        row.material.priceMeterUahCutVat != null
-          ? Number(row.material.priceMeterUahCutVat)
-          : null,
-      metersPerRoll:
-        row.material.metersPerRoll != null ? Number(row.material.metersPerRoll) : null,
-      minWholesaleMeters:
-        row.material.minWholesaleMeters != null
-          ? Number(row.material.minWholesaleMeters)
-          : null,
-      metersPerKg:
-        row.material.metersPerKg != null ? Number(row.material.metersPerKg) : null,
+      supplierId: row.supplierId,
+      priceMeterUahNoVat: merged.priceMeterUahNoVat,
+      priceMeterUahVat: merged.priceMeterUahVat,
+      priceMeterUahCutVat: merged.priceMeterUahCutVat,
+      metersPerRoll: merged.metersPerRoll,
+      minWholesaleMeters: merged.minWholesaleMeters,
+      metersPerKg: merged.metersPerKg,
       wholesaleNote: row.material.wholesaleNote ?? null,
       costVatMode: row.material.costVatOverride,
       availableColors: row.material.availableColors ?? [],
-    })),
+    };
+    }),
     operations: product.operations.map((row) => ({
       operationId: row.operationId,
       name: row.operation.nameUk,

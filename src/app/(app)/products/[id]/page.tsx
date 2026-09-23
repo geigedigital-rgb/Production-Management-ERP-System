@@ -14,6 +14,7 @@ import { ProductSizesEditor } from "@/components/products/ProductSizesEditor";
 import { DuplicateProductButton } from "@/components/products/DuplicateProductButton";
 import { IconCheckCircle, IconCircle, IconOrders, IconSizes } from "@/components/ui/Icons";
 import { buildCalcFromProduct, getPricingDefaults, productFabricDeliveryAmount } from "@/server/domains/calculation/from-entities";
+import { resolveBomMaterialPurchasePrice } from "@/lib/order-material-terms";
 import { fixedCostOptionsFromDb } from "@/server/domains/fixed-costs/service";
 import {
   calcWithClientPrice,
@@ -533,7 +534,15 @@ export default async function ProductDetailPage({
                 unit: row.material.unitOfMeasure.code,
                 consumption: Number(row.consumptionPerUnit),
                 waste: Number(row.wastePercent ?? row.material.defaultWastePercent),
-                price: canViewCosts ? Number(row.material.purchasePrice) : 0,
+                price: canViewCosts
+                  ? resolveBomMaterialPurchasePrice({
+                      material: row.material,
+                      offers: row.material.supplierOffers ?? [],
+                      supplierId: row.supplierId,
+                      companyCostMode: pricing.materialCostVatMode ?? "NET",
+                      metersNeeded: null,
+                    })
+                  : 0,
                 sizeCodes: sizeCodesFromScopes(row.sizeScopes),
                 sizeConsumption: sizeConsumptionFromNorms(row.sizeNorms),
                 sizeWaste: sizeWasteFromNorms(row.sizeNorms),
