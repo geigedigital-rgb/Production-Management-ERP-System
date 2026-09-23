@@ -679,7 +679,21 @@ export async function upsertMaterialSupplierOfferAction(formData: FormData) {
     wholesaleNote: String(formData.get("wholesaleNote") ?? "") || null,
     availableColors: splitColorLabels(colorsRaw),
   });
+
+  const usdUahRate = Number(formData.get("usdUahRate"));
+  if (Number.isFinite(usdUahRate) && usdUahRate > 0) {
+    const existing = await prisma.pricingSettings.findFirst();
+    if (existing && Number(existing.usdUahRate) !== usdUahRate) {
+      await prisma.pricingSettings.update({
+        where: { id: existing.id },
+        data: { usdUahRate },
+      });
+      await resyncFabricPurchasePrices();
+    }
+  }
+
   revalidatePath("/settings/resources");
+  revalidatePath("/settings/pricing");
   revalidatePath("/products");
   revalidatePath("/orders");
   return { ok: true as const };

@@ -302,6 +302,7 @@ function MaterialFields({
       deliveryRateUsdPerKg(normalizeFabricDeliveryType(defaults?.deliveryType), fabricGlobals),
     ),
   );
+  const [usdUahRate, setUsdUahRate] = useState(fabricGlobals.usdUahRate);
 
   const [purchasePrice, setPurchasePrice] = useState(String(defaults?.purchasePrice ?? 0));
   const [unitsPerPack, setUnitsPerPack] = useState(numStr(defaults?.unitsPerPack));
@@ -345,12 +346,13 @@ function MaterialFields({
   const liveGlobals = useMemo<FabricPricingGlobals>(
     () => ({
       ...fabricGlobals,
+      usdUahRate,
       fabricCargoUsdPerKg:
         Number(fabricCargoUsdPerKg) >= 0
           ? Number(fabricCargoUsdPerKg)
           : deliveryRateUsdPerKg(deliveryType, fabricGlobals),
     }),
-    [fabricGlobals, fabricCargoUsdPerKg, deliveryType],
+    [fabricGlobals, fabricCargoUsdPerKg, deliveryType, usdUahRate],
   );
 
   function applyDeliveryType(nextType: FabricDeliveryTypeCode) {
@@ -790,51 +792,42 @@ function MaterialFields({
             )}
           </>
         ) : null}
-        <Input
-          name={wizardMultiSuppliers && !trimPackActive ? undefined : "purchasePrice"}
-          label={
-            fabricEachPricing
-              ? fabricUnitMode === "cone"
-                ? "Собівартість"
-                : "Собівартість"
-              : type === "FABRIC"
-                ? "Собівартість"
-                : "Собівартість / од."
-          }
-          type="number"
-          step="0.01"
-          min="0"
-          required
-          suffix={
-            fabricEachPricing
-              ? fabricUnitMode === "cone"
-                ? "₴/боб"
-                : "₴/шт"
-              : type === "FABRIC"
-                ? "₴/м"
-                : "₴"
-          }
-          value={purchaseDisplay}
-          readOnly={purchaseReadOnly || trimPricingOnSuppliers}
-          tabIndex={purchaseReadOnly || trimPricingOnSuppliers ? -1 : undefined}
-          hint={
-            trimPricingOnSuppliers
-              ? "З умов основного постачальника (ціна + доставка упаковки)"
-              : trimPackActive
+        {!trimPricingOnSuppliers && !(wizardMultiSuppliers && fabricEachPricing) ? (
+          <Input
+            name={wizardMultiSuppliers && !trimPackActive ? undefined : "purchasePrice"}
+            label="Ціна"
+            type="number"
+            step="0.01"
+            min="0"
+            required
+            suffix={
+              fabricEachPricing
+                ? fabricUnitMode === "cone"
+                  ? "₴/боб"
+                  : "₴/шт"
+                : type === "FABRIC"
+                  ? "₴/м"
+                  : "₴"
+            }
+            value={purchaseDisplay}
+            readOnly={purchaseReadOnly}
+            tabIndex={purchaseReadOnly ? -1 : undefined}
+            hint={
+              trimPackActive
                 ? `(ціна + доставка) ÷ ${Math.floor(Number(unitsPerPack))} шт`
                 : type !== "FABRIC"
                   ? "Або вкажіть упаковку — ₴/од. порахуємо самі"
                   : undefined
-          }
-          onChange={
-            purchaseReadOnly || trimPricingOnSuppliers
-              ? undefined
-              : (event) => setPurchasePrice(event.target.value)
-          }
-        />
-        {(wizardMultiSuppliers && trimPackActive) || trimPricingOnSuppliers ? (
+            }
+            onChange={
+              purchaseReadOnly
+                ? undefined
+                : (event) => setPurchasePrice(event.target.value)
+            }
+          />
+        ) : (
           <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
-        ) : null}
+        )}
         <Input
           name="defaultWastePercent"
           label="Відходи"
@@ -1075,21 +1068,9 @@ function MaterialFields({
                 />
                 <input type="hidden" name="deliveryType" value={deliveryType} />
                 <input type="hidden" name="fabricCargoUsdPerKg" value={fabricCargoUsdPerKg} />
-                <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
+                <input type="hidden" name="usdUahRate" value={usdUahRate} />
                 {fabricEachPricing ? (
-                  <FormGroup label="Ціна закупки" columns={2} compact>
-                    <Input
-                      name="purchasePrice"
-                      label="Ціна"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      suffix="₴"
-                      required
-                      value={purchasePrice}
-                      onChange={(event) => setPurchasePrice(event.target.value)}
-                    />
-                  </FormGroup>
+                  <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
                 ) : (
                   <>
                     <input type="hidden" name="priceKgUsd" value={priceKgUsd} />
@@ -1122,6 +1103,8 @@ function MaterialFields({
                   defaultDeliveryType={deliveryType}
                   onEditingChange={setSupplierDraftEditing}
                   pricingKind={supplierPricingKind}
+                  usdUahRate={usdUahRate}
+                  onUsdUahRateChange={setUsdUahRate}
                 />
               </>
             ) : managePricingSeparately ? (
@@ -1130,7 +1113,7 @@ function MaterialFields({
                 <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
                 <input type="hidden" name="deliveryType" value={deliveryType} />
                 <input type="hidden" name="fabricCargoUsdPerKg" value={fabricCargoUsdPerKg} />
-                <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
+                <input type="hidden" name="usdUahRate" value={usdUahRate} />
               </>
             ) : (
               <FormGroup
@@ -1197,7 +1180,7 @@ function MaterialFields({
                   }}
                   hint="Для кількох типів (НП стандарт + обʼємні) — після створення редагуйте в «Умовах» постачальника"
                 />
-                <input type="hidden" name="usdUahRate" value={fabricGlobals.usdUahRate} />
+                <input type="hidden" name="usdUahRate" value={usdUahRate} />
               </FormGroup>
             )}
           </div>
@@ -1288,8 +1271,8 @@ function MaterialFields({
                   name="priceMeterUahNoVat"
                   label={
                     minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
-                      ? "Гурт"
-                      : "Звичайна"
+                      ? "Ціна опт"
+                      : "Ціна"
                   }
                   type="number"
                   step="0.1"
@@ -1313,14 +1296,14 @@ function MaterialFields({
                       : fabricUnitMode === "m2"
                         ? "Авто з ₴/м² × ширина"
                         : minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
-                          ? `Гуртова ціна від ${minWholesaleMeters} м`
-                          : "Базова ціна тканини без доставки"
+                          ? `Ціна опт від ${minWholesaleMeters} м`
+                          : "Ціна тканини без доставки"
                   }
                 />
                 <input type="hidden" name="priceMeterUahVat" value="" />
                 <Input
                   name="minWholesaleMeters"
-                  label="Межа гурту"
+                  label="Межа опт"
                   type="number"
                   step="0.1"
                   min="0"
@@ -1334,11 +1317,11 @@ function MaterialFields({
                       setPriceMeterCutVat("");
                     }
                   }}
-                  hint="Від цієї кількості м.п. діє гурт"
+                  hint="Після цієї кількості діє ціна опт"
                 />
                 <Input
                   name="priceMeterUahCutVat"
-                  label="Звичайна"
+                  label="Ціна"
                   type="number"
                   step="0.1"
                   min="0"
@@ -1351,8 +1334,8 @@ function MaterialFields({
                   onChange={(event) => setPriceMeterCutVat(event.target.value)}
                   hint={
                     minWholesaleMeters.trim() === "" || Number(minWholesaleMeters) <= 0
-                      ? "Спочатку вкажіть межу гурту"
-                      : "Ціна до межі (базова, зазвичай дорожча)"
+                      ? "Спочатку вкажіть межу опт"
+                      : "Ціна до межі опт (зазвичай дорожча)"
                   }
                 />
                 <Input
@@ -1366,12 +1349,12 @@ function MaterialFields({
                 {derived.purchasePrice > 0 ? (
                   <p className="type-caption sm:col-span-2 tabular">
                     Активна собівартість з цих умов: {formatMoneyUah(derived.purchasePrice)}/м
-                    {derived.pricingMode === "cut" ? " (звичайна)" : ""}
+                    {derived.pricingMode === "cut" ? " (до опт)" : ""}
                     {minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
                       ? priceMeterCutVat.trim() !== "" && Number(priceMeterCutVat) > 0
                         ? ` · ≥ ${minWholesaleMeters} м → гурт`
                         : ` · гурт від ${minWholesaleMeters} м`
-                      : " · звичайна ціна"}
+                      : " · ціна"}
                   </p>
                 ) : null}
               </FormGroup>
@@ -1451,6 +1434,8 @@ function MaterialFields({
                 defaultDeliveryType={deliveryType}
                 onEditingChange={setSupplierDraftEditing}
                 pricingKind="unit"
+                usdUahRate={usdUahRate}
+                onUsdUahRateChange={setUsdUahRate}
               />
               {!wizard ? (
                 <Input

@@ -66,7 +66,7 @@ export type MaterialsTableRow = {
   costVatOverride?: "NET" | "GROSS" | null;
 };
 
-type SortKey = "name" | "type" | "unit" | "suppliers" | "density" | "composition" | "price" | "cost";
+type SortKey = "name" | "type" | "unit" | "suppliers" | "density" | "composition" | "price";
 
 function formatDensity(value?: string) {
   const trimmed = value?.replace(/\s+/g, " ").trim();
@@ -111,13 +111,12 @@ export function MaterialsTable({
         },
         composition: (row) => row.composition?.trim() || null,
         price: (row) => row.purchasePrice,
-        cost: (row) => row.purchasePrice * (1 + row.waste / 100),
       }),
     [rows, sort],
   );
   const ids = useMemo(() => sorted.map((row) => row.id), [sorted]);
   const selection = useRowSelection(ids);
-  const colSpan = canEdit ? 10 : 9;
+  const colSpan = canEdit ? 9 : 8;
 
   return (
     <div>
@@ -162,10 +161,7 @@ export function MaterialsTable({
             Склад
           </SortableTH>
           <SortableTH columnKey="price" sort={sort} onSort={toggle} align="right">
-            Ціна закупівлі
-          </SortableTH>
-          <SortableTH columnKey="cost" sort={sort} onSort={toggle} align="right">
-            Собівартість / од.
+            Ціна
           </SortableTH>
           {canEdit ? (
             <TH width="88px" align="right">
@@ -255,9 +251,6 @@ export function MaterialsTable({
                   </TD>
                   <TD numeric className="font-medium">
                     {formatMoneyUah(row.purchasePrice)}
-                  </TD>
-                  <TD numeric title="Ціна закупівлі з урахуванням відходів">
-                    {formatMoneyUah(row.purchasePrice * (1 + row.waste / 100))}
                   </TD>
                   {canEdit ? (
                     <TD align="right" nowrap>

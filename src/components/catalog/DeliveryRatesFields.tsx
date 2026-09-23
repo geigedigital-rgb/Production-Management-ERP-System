@@ -3,6 +3,7 @@
 import { Input } from "@/components/ui/Input";
 import {
   FABRIC_DELIVERY_TYPES,
+  DEFAULT_FABRIC_DELIVERY_RATES,
   deliveryRateUsdPerKg,
   deliveryRateUnitLabel,
   fabricDeliveryTypeLabel,
@@ -40,18 +41,23 @@ function configuredTypes(draft: DeliveryRateDraft): FabricDeliveryTypeCode[] {
 
 /**
  * Delivery methods as tabs (+ dashed tabs to add). Active tab = COGS method;
- * rate field edits that tab only.
+ * rate field edits that tab only. Fabric rates are always $/кг (+ optional course).
  */
 export function DeliveryRatesFields({
   draft,
   onChange,
   mode,
   fabricGlobals,
+  usdUahRate,
+  onUsdUahRateChange,
 }: {
   draft: DeliveryRateDraft;
   onChange: (next: DeliveryRateDraft) => void;
   mode: "fabric" | "trim";
   fabricGlobals?: FabricDeliveryRateGlobals;
+  /** Fabric only: editable ₴/$ course used in $/кг → ₴ calculations. */
+  usdUahRate?: string;
+  onUsdUahRateChange?: (next: string) => void;
 }) {
   const active = normalizeFabricDeliveryType(draft.deliveryType);
   const configured = configuredTypes(draft);
@@ -64,13 +70,21 @@ export function DeliveryRatesFields({
   const companyDefault =
     mode === "fabric" && fabricGlobals
       ? String(deliveryRateUsdPerKg(active, fabricGlobals))
-      : undefined;
+      : mode === "fabric"
+        ? String(DEFAULT_FABRIC_DELIVERY_RATES[active])
+        : undefined;
+  const showCourse = mode === "fabric" && onUsdUahRateChange != null;
+
+  function defaultRateFor(type: FabricDeliveryTypeCode): string {
+    if (fabricGlobals) return String(deliveryRateUsdPerKg(type, fabricGlobals));
+    return String(DEFAULT_FABRIC_DELIVERY_RATES[type]);
+  }
 
   function setActiveType(type: FabricDeliveryTypeCode) {
     const key = rateKey(type);
     const next = { ...draft, deliveryType: type };
-    if (!next[key].trim() && mode === "fabric" && fabricGlobals) {
-      next[key] = String(deliveryRateUsdPerKg(type, fabricGlobals));
+    if (!next[key].trim() && mode === "fabric") {
+      next[key] = defaultRateFor(type);
     }
     onChange(next);
   }
@@ -82,8 +96,8 @@ export function DeliveryRatesFields({
       const remaining = configuredTypes(next);
       if (remaining[0]) {
         next.deliveryType = remaining[0];
-      } else if (mode === "fabric" && fabricGlobals) {
-        next[rateKey("CARGO")] = String(deliveryRateUsdPerKg("CARGO", fabricGlobals));
+      } else if (mode === "fabric") {
+        next[rateKey("CARGO")] = defaultRateFor("CARGO");
         next.deliveryType = "CARGO";
       } else {
         next.deliveryType = "CARGO";
@@ -126,6 +140,7 @@ export function DeliveryRatesFields({
                   )}
                 >
                   {rate}
+                  {mode === "fabric" ? " $" : ""}
                 </span>
               ) : null}
               {canRemove ? (
@@ -165,18 +180,32 @@ export function DeliveryRatesFields({
         ))}
       </div>
 
-      <Input
-        label={`Тариф · ${fabricDeliveryTypeLabel(active)}`}
-        type="number"
-        min={0}
-        step="0.01"
-        suffix={suffix}
-        optional
-        placeholder={companyDefault}
-        value={draft[activeKey]}
-        onChange={(event) => onChange({ ...draft, [activeKey]: event.target.value })}
-        className="max-w-[12rem]"
-      />
+      <div className="flex flex-wrap items-end gap-3">
+        <Input
+          label={`Тариф · ${fabricDeliveryTypeLabel(active)}`}
+          type="number"
+          min={0}
+          step="0.01"
+          suffix={suffix}
+          optional
+          placeholder={companyDefault}
+          value={draft[activeKey]}
+          onChange={(event) => onChange({ ...draft, [activeKey]: event.target.value })}
+          className="max-w-[12rem]"
+        />
+        {showCourse ? (
+          <Input
+            label="Курс"
+            type="number"
+            min={0}
+            step="0.01"
+            suffix="₴/$"
+            value={usdUahRate ?? ""}
+            onChange={(event) => onUsdUahRateChange?.(event.target.value)}
+            className="max-w-[10rem]"
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

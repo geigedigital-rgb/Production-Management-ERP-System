@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 
-/** Compact segmented control for material purchase modes. */
+/** Dense segmented control — active = solid green. */
 export function ModeSegment<T extends string>({
   label,
   value,
@@ -17,11 +17,13 @@ export function ModeSegment<T extends string>({
   className?: string;
 }) {
   return (
-    <div className={cn("space-y-1 sm:col-span-full", className)}>
+    <div className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
       {label ? (
-        <p className="type-label text-[var(--color-text-tertiary)]">{label}</p>
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">
+          {label}
+        </span>
       ) : null}
-      <div className="inline-flex flex-wrap items-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-1">
+      <div className="inline-flex items-center gap-0.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-0.5">
         {options.map((option) => {
           const active = option.value === value;
           return (
@@ -30,9 +32,9 @@ export function ModeSegment<T extends string>({
               type="button"
               onClick={() => onChange(option.value)}
               className={cn(
-                "rounded-[8px] px-3 py-1.5 text-[12.5px] font-semibold transition-colors",
+                "rounded-[6px] px-2 py-1 text-[11.5px] font-semibold leading-none transition-colors",
                 active
-                  ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
+                  ? "bg-[var(--color-primary-500)] text-white"
                   : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
               )}
             >
@@ -45,9 +47,33 @@ export function ModeSegment<T extends string>({
   );
 }
 
+/** One compact row for purchase mode toggles. */
+export function PurchaseModeRow({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "sm:col-span-full flex flex-wrap items-center gap-x-3 gap-y-1.5",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 export type FabricQuoteMode = "meter" | "kg";
 export type FabricTierMode = "single" | "tier";
 export type FabricDeliveryUiMode = "kg" | "none";
+
+/** шт / бобіна: direct unit price vs pack quote. */
+export type UnitQuoteMode = "each" | "pack";
+export type UnitDeliveryUiMode = "pack" | "none";
 
 export function inferFabricQuoteMode(input: {
   priceKgUsd?: string | number | null;
@@ -93,4 +119,26 @@ export function inferFabricDeliveryUiMode(input: {
     if (Number.isFinite(n) && n >= 0) return "kg";
   }
   return "none";
+}
+
+export function inferUnitQuoteMode(input: {
+  purchasePackPrice?: string | number | null;
+}): UnitQuoteMode {
+  const raw = input.purchasePackPrice;
+  if (raw == null || raw === "") return "each";
+  const n = typeof raw === "number" ? raw : Number(String(raw).replace(",", "."));
+  return Number.isFinite(n) && n >= 0 ? "pack" : "each";
+}
+
+export function inferUnitDeliveryUiMode(input: {
+  cargoUsdPerKg?: string | number | null;
+  npStandardUsdPerKg?: string | number | null;
+  npVolumeUsdPerKg?: string | number | null;
+  packDeliveryCostUah?: string | number | null;
+}): UnitDeliveryUiMode {
+  if (inferFabricDeliveryUiMode(input) === "kg") return "pack";
+  const raw = input.packDeliveryCostUah;
+  if (raw == null || raw === "") return "none";
+  const n = typeof raw === "number" ? raw : Number(String(raw).replace(",", "."));
+  return Number.isFinite(n) && n >= 0 ? "pack" : "none";
 }

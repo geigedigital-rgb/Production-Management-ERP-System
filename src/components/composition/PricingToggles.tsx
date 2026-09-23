@@ -53,10 +53,10 @@ export function MaterialPricingToggles({
         <>
           <span className="mx-0.5 text-[10px] text-[var(--color-text-tertiary)]">|</span>
           <PricingToggle active={priceMode === "auto"} label="авто" onClick={() => onPriceMode("auto")} />
-          <PricingToggle active={priceMode === "cut"} label="звичайна" onClick={() => onPriceMode("cut")} />
+          <PricingToggle active={priceMode === "cut"} label="ціна" onClick={() => onPriceMode("cut")} />
           <PricingToggle
             active={priceMode === "wholesale"}
-            label="гурт"
+            label="опт"
             onClick={() => onPriceMode("wholesale")}
           />
         </>

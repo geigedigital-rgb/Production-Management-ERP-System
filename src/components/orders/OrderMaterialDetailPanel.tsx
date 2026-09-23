@@ -557,7 +557,7 @@ export function OrderMaterialDetailPanel({
                 })()}
               </Section>
 
-              <Section title="Гурт">
+              <Section title="Опт">
                 {(() => {
                   const hasWholesale = Boolean(live.hasWholesalePrice);
                   const hasCut = Boolean(live.hasCutPrice);
@@ -568,12 +568,12 @@ export function OrderMaterialDetailPanel({
                     (threshold != null && live.metersNeeded >= threshold);
                   const modeLabel =
                     !hasCut
-                      ? "Звичайна ціна"
+                      ? "Ціна"
                       : atWholesale
-                        ? "Гурт (опт)"
+                        ? "Ціна опт"
                         : live.pricingMode === "cut"
-                          ? "Звичайна"
-                          : "Звичайна (до межі гурту)";
+                          ? "Ціна"
+                          : "Ціна (до межі опт)";
                   const catalogHint =
                     live.catalogMinWholesaleMeters != null
                       ? `${live.catalogMinWholesaleMeters} м`
@@ -630,11 +630,11 @@ export function OrderMaterialDetailPanel({
                       ) : null}
                       {!hasWholesale ? (
                         <p className="type-caption">
-                          Немає гуртової ціни в каталозі — межу задати неможливо.
+                          Немає ціни опт у каталозі — межу задати неможливо.
                         </p>
                       ) : !hasCut ? (
                         <p className="type-caption">
-                          У каталозі одна (звичайна) ціна — ₴/м не перемикається. Межу все одно можна
+                          У каталозі одна ціна — ₴/м не перемикається. Межу все одно можна
                           зафіксувати для цього замовлення.
                           {threshold != null
                             ? live.metersNeeded >= threshold
@@ -645,8 +645,8 @@ export function OrderMaterialDetailPanel({
                       ) : threshold != null ? (
                         <p className="type-caption">
                           {atWholesale
-                            ? `Витрата ≥ ${threshold} м — гуртова ціна й доставка за партією.`
-                            : `До гурту ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м.`}
+                            ? `Витрата ≥ ${threshold} м — ціна опт і доставка за партією.`
+                            : `До опт ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м.`}
                         </p>
                       ) : (
                         <p className="type-caption">

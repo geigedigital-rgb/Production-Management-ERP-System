@@ -117,13 +117,13 @@ export function DraftMaterialLinePanel({
   const isWholesale =
     hasCut && wholesaleThreshold != null && metersNeeded >= wholesaleThreshold;
   const pricingModeLabel = !hasCut
-    ? "звичайна"
+    ? "ціна"
     : pricing?.pricingMode === "wholesale" || isWholesale
-      ? "гурт"
+      ? "опт"
       : pricing?.pricingMode === "cut"
-        ? "звичайна"
+        ? "ціна"
         : pricing?.pricingMode === "standard"
-          ? "звичайна"
+          ? "ціна"
           : null;
 
   const cargo =
@@ -208,7 +208,7 @@ export function DraftMaterialLinePanel({
               {!vatChosen
                 ? "Оберіть ПДВ — без цього ціна в калькуляції не зафіксована."
                 : priceModeMissing
-                  ? "Оберіть режим ціни (авто / звичайна / гурт)."
+                  ? "Оберіть режим ціни (авто / ціна / опт)."
                   : "ПДВ і режим ціни для цієї позиції."}
             </p>
             <MaterialPricingToggles
@@ -223,14 +223,14 @@ export function DraftMaterialLinePanel({
 
         {enablePricingControls && isFabric ? (
           <section className="space-y-2">
-            <p className="type-group-label">Гурт / партія</p>
+            <p className="type-group-label">Опт / партія</p>
             <dl className="grid gap-2 text-[13px] sm:grid-cols-2">
               <div>
                 <dt className="text-[var(--color-text-tertiary)]">Витрата зараз</dt>
                 <dd className="tabular font-medium">{round1(metersNeeded)} м</dd>
               </div>
               <div>
-                <dt className="text-[var(--color-text-tertiary)]">Межа гурту</dt>
+                <dt className="text-[var(--color-text-tertiary)]">Межа опт</dt>
                 <dd className="tabular font-medium">
                   {wholesaleThreshold != null ? `${wholesaleThreshold} м` : "—"}
                 </dd>
@@ -238,7 +238,7 @@ export function DraftMaterialLinePanel({
               <div className="sm:col-span-2">
                 <dt className="text-[var(--color-text-tertiary)]">Режим</dt>
                 <dd className="font-medium">
-                  {!hasCut ? "Звичайна ціна" : isWholesale ? "Гурт (опт)" : "Звичайна (до межі)"}
+                  {!hasCut ? "Ціна" : isWholesale ? "Ціна опт" : "Ціна (до межі)"}
                   {row.wholesaleNote ? (
                     <span className="type-caption ml-1.5">· {row.wholesaleNote}</span>
                   ) : null}
@@ -247,13 +247,13 @@ export function DraftMaterialLinePanel({
             </dl>
             {!hasCut ? (
               <p className="type-caption">
-                У каталозі одна (звичайна) ціна — межа витрати на ₴/м не впливає.
+                У каталозі одна ціна — межа витрати на ₴/м не впливає.
               </p>
             ) : wholesaleThreshold != null ? (
               <p className="type-caption">
                 {isWholesale
-                  ? `Витрата ≥ ${wholesaleThreshold} м — застосовується гуртова ціна й доставка за партією.`
-                  : `До гурту ще ${round1(Math.max(0, wholesaleThreshold - metersNeeded))} м.`}
+                  ? `Витрата ≥ ${wholesaleThreshold} м — застосовується ціна опт і доставка за партією.`
+                  : `До опт ще ${round1(Math.max(0, wholesaleThreshold - metersNeeded))} м.`}
               </p>
             ) : null}
           </section>

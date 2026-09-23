@@ -10,12 +10,17 @@ import { SupplierPaletteEditor } from "@/components/catalog/SupplierPaletteEdito
 import { DeliveryRatesFields } from "@/components/catalog/DeliveryRatesFields";
 import {
   ModeSegment,
+  PurchaseModeRow,
   inferFabricDeliveryUiMode,
   inferFabricQuoteMode,
   inferFabricTierMode,
+  inferUnitDeliveryUiMode,
+  inferUnitQuoteMode,
   type FabricDeliveryUiMode,
   type FabricQuoteMode,
   type FabricTierMode,
+  type UnitDeliveryUiMode,
+  type UnitQuoteMode,
 } from "@/components/catalog/FabricPurchaseModes";
 import { deriveFabricPricing, type FabricPricingGlobals } from "@/lib/fabric-pricing";
 import {
@@ -131,6 +136,8 @@ export function MaterialSupplierDraftsEditor({
   defaultDeliveryType = "CARGO",
   onEditingChange,
   pricingKind = "fabric",
+  usdUahRate,
+  onUsdUahRateChange,
 }: {
   offers: MaterialSupplierOfferDraft[];
   onChange: (next: MaterialSupplierOfferDraft[]) => void;
@@ -143,6 +150,9 @@ export function MaterialSupplierDraftsEditor({
   onEditingChange: (editing: boolean) => void;
   /** fabric = $/кг + м.п.; unit = ціна ₴/од. (фурнітура / інші матеріали). */
   pricingKind?: "fabric" | "unit";
+  /** Editable company course (₴/$); used in fabric $/кг → ₴ math. */
+  usdUahRate?: number;
+  onUsdUahRateChange?: (next: number) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | "new" | null>(null);
@@ -152,12 +162,25 @@ export function MaterialSupplierDraftsEditor({
   const [quoteMode, setQuoteMode] = useState<FabricQuoteMode>("kg");
   const [tierMode, setTierMode] = useState<FabricTierMode>("single");
   const [deliveryUiMode, setDeliveryUiMode] = useState<FabricDeliveryUiMode>("kg");
+  const [unitQuoteMode, setUnitQuoteMode] = useState<UnitQuoteMode>("each");
+  const [unitDeliveryUiMode, setUnitDeliveryUiMode] = useState<UnitDeliveryUiMode>("pack");
+  const [localUsdRate, setLocalUsdRate] = useState(
+    String(usdUahRate ?? fabricGlobals.usdUahRate),
+  );
 
   function applyModesFromDraft(next: DraftForm) {
     setQuoteMode(inferFabricQuoteMode(next));
     setTierMode(inferFabricTierMode(next));
     setDeliveryUiMode(inferFabricDeliveryUiMode(next));
+    setUnitQuoteMode(inferUnitQuoteMode(next));
+    setUnitDeliveryUiMode(inferUnitDeliveryUiMode(next));
   }
+
+  const effectiveUsdRate = (() => {
+    const n = Number(String(localUsdRate).replace(",", "."));
+    if (Number.isFinite(n) && n > 0) return n;
+    return usdUahRate ?? fabricGlobals.usdUahRate;
+  })();
 
   const liveGlobals = useMemo<FabricPricingGlobals>(() => {
     const resolved = resolveSupplierDeliveryRate(
@@ -173,9 +196,16 @@ export function MaterialSupplierDraftsEditor({
     );
     return {
       ...fabricGlobals,
+      usdUahRate: effectiveUsdRate,
       fabricCargoUsdPerKg: resolved.rateUsdPerKg,
     };
-  }, [fabricGlobals, draft]);
+  }, [fabricGlobals, draft, effectiveUsdRate]);
+
+  function setCourse(next: string) {
+    setLocalUsdRate(next);
+    const n = Number(String(next).replace(",", "."));
+    if (Number.isFinite(n) && n > 0) onUsdUahRateChange?.(n);
+  }
 
   const derived = useMemo(
     () =>
@@ -304,21 +334,21 @@ export function MaterialSupplierDraftsEditor({
     if (pricingKind === "fabric") {
       if (tierMode === "tier") {
         if (!hasCut) {
-          setError("Вкажіть звичайну ціну ₴/м.");
+          setError("Вкажіть ціну ₴/м.");
           return;
         }
         if (!threshold || Number(threshold) <= 0) {
-          setError("Вкажіть межу гурту.");
+          setError("Вкажіть межу опт.");
           return;
         }
         if (!draft.priceMeterUahNoVat.trim()) {
-          setError("Вкажіть гуртову ціну ₴/м.");
+          setError("Вкажіть ціну опт ₴/м.");
           return;
         }
       } else {
         const ordinary = draft.priceMeterUahNoVat.trim();
         if (quoteMode === "meter" && !ordinary) {
-          setError("Вкажіть звичайну ціну ₴/м.");
+          setError("Вкажіть ціну ₴/м.");
           return;
         }
         if (quoteMode === "kg" && !draft.priceKgUsd.trim() && !ordinary) {
@@ -355,11 +385,20 @@ export function MaterialSupplierDraftsEditor({
       supplierName: draft.supplierName.trim(),
       deliveryType: draft.deliveryType,
       cargoUsdPerKg:
-        pricingKind === "unit" || deliveryUiMode === "kg" ? draft.cargoUsdPerKg : "",
+        (pricingKind === "unit" && unitDeliveryUiMode === "pack") ||
+        (pricingKind === "fabric" && deliveryUiMode === "kg")
+          ? draft.cargoUsdPerKg
+          : "",
       npStandardUsdPerKg:
-        pricingKind === "unit" || deliveryUiMode === "kg" ? draft.npStandardUsdPerKg : "",
+        (pricingKind === "unit" && unitDeliveryUiMode === "pack") ||
+        (pricingKind === "fabric" && deliveryUiMode === "kg")
+          ? draft.npStandardUsdPerKg
+          : "",
       npVolumeUsdPerKg:
-        pricingKind === "unit" || deliveryUiMode === "kg" ? draft.npVolumeUsdPerKg : "",
+        (pricingKind === "unit" && unitDeliveryUiMode === "pack") ||
+        (pricingKind === "fabric" && deliveryUiMode === "kg")
+          ? draft.npVolumeUsdPerKg
+          : "",
       priceKgUsd: pricingKind === "fabric" && quoteMode === "kg" ? draft.priceKgUsd : "",
       priceKgUsdVat: draft.priceKgUsdVat,
       priceMeterUahNoVat:
@@ -382,9 +421,10 @@ export function MaterialSupplierDraftsEditor({
           ? threshold
           : "",
       wholesaleNote: draft.wholesaleNote,
-      purchasePackPrice: pricingKind === "unit" ? draft.purchasePackPrice : "",
+      purchasePackPrice:
+        pricingKind === "unit" && unitQuoteMode === "pack" ? draft.purchasePackPrice : "",
       packDeliveryCostUah:
-        pricingKind === "unit"
+        pricingKind === "unit" && unitDeliveryUiMode === "pack"
           ? typedDelivery
             ? String(typedDelivery.rateUah)
             : draft.packDeliveryCostUah
@@ -620,55 +660,62 @@ export function MaterialSupplierDraftsEditor({
           </FormGroup>
 
           {pricingKind === "unit" ? (
-            <FormGroup label="Закупівля і доставка" icon={<IconPurchaseKg size={14} />} columns={3} compact>
-              {unitsPerPack != null && unitsPerPack > 0 ? (
-                <Banner tone="info" className="sm:col-span-3">
-                  Упаковка з картки матеріалу: {unitsPerPack} шт. Ціна упаковки + доставка → ₴/од.
-                </Banner>
-              ) : (
-                <Banner tone="info" className="sm:col-span-3">
-                  Спочатку вкажіть «Шт в упаковці» на кроці Основне — тоді можна задати ціну
-                  упаковки. Або введіть одразу ₴ за 1 шт.
-                </Banner>
-              )}
-              <DeliveryRatesFields
-                mode="trim"
-                draft={draft}
-                onChange={(next) => setDraft((prev) => ({ ...prev, ...next }))}
-              />
+            <>
+            <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={2} compact>
+              <PurchaseModeRow>
+                <ModeSegment
+                  label="Ціна"
+                  value={unitQuoteMode}
+                  options={[
+                    { value: "each", label: "₴/шт" },
+                    { value: "pack", label: "₴/уп." },
+                  ]}
+                  onChange={(next) => {
+                    setUnitQuoteMode(next);
+                    if (next === "each") {
+                      setDraft((prev) => ({ ...prev, purchasePackPrice: "" }));
+                    }
+                  }}
+                />
+              </PurchaseModeRow>
+              {unitQuoteMode === "pack" ? (
+                <Input
+                  label="Ціна упаковки"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  suffix="₴"
+                  value={draft.purchasePackPrice}
+                  onChange={(event) =>
+                    setDraft((prev) => ({ ...prev, purchasePackPrice: event.target.value }))
+                  }
+                  hint={
+                    unitsPerPack != null && unitsPerPack > 0
+                      ? `На ${unitsPerPack} шт → ₴/од. автоматично`
+                      : "Спочатку «Шт в упаковці» на Основному"
+                  }
+                />
+              ) : null}
               <Input
-                label="Ціна упаковки"
+                label="Ціна"
                 type="number"
                 min={0}
                 step="0.01"
                 suffix="₴"
-                optional
-                value={draft.purchasePackPrice}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, purchasePackPrice: event.target.value }))
+                readOnly={
+                  unitQuoteMode === "pack" &&
+                  hasTrimPackQuote({
+                    unitsPerPack,
+                    purchasePackPrice: draft.purchasePackPrice
+                      ? Number(draft.purchasePackPrice)
+                      : null,
+                    packDeliveryCostUah:
+                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ??
+                      (draft.packDeliveryCostUah ? Number(draft.packDeliveryCostUah) : null),
+                  })
                 }
-                hint={
-                  unitsPerPack != null && unitsPerPack > 0
-                    ? `На ${unitsPerPack} шт`
-                    : "Спочатку «Шт в упаковці» на Основному"
-                }
-              />
-              <Input
-                label="Собівартість / од."
-                type="number"
-                min={0}
-                step="0.01"
-                suffix="₴"
-                readOnly={hasTrimPackQuote({
-                  unitsPerPack,
-                  purchasePackPrice: draft.purchasePackPrice
-                    ? Number(draft.purchasePackPrice)
-                    : null,
-                  packDeliveryCostUah:
-                    resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ??
-                    (draft.packDeliveryCostUah ? Number(draft.packDeliveryCostUah) : null),
-                })}
                 value={
+                  unitQuoteMode === "pack" &&
                   hasTrimPackQuote({
                     unitsPerPack,
                     purchasePackPrice: draft.purchasePackPrice
@@ -708,9 +755,45 @@ export function MaterialSupplierDraftsEditor({
                 }
               />
             </FormGroup>
+            <FormGroup label="Доставка" icon={<IconPurchaseKg size={14} />} columns={3} compact>
+              <PurchaseModeRow>
+                <ModeSegment
+                  value={unitDeliveryUiMode}
+                  options={[
+                    { value: "pack", label: "За уп." },
+                    { value: "none", label: "Немає" },
+                  ]}
+                  onChange={(next) => {
+                    setUnitDeliveryUiMode(next);
+                    if (next === "none") {
+                      setDraft((prev) => ({
+                        ...prev,
+                        cargoUsdPerKg: "",
+                        npStandardUsdPerKg: "",
+                        npVolumeUsdPerKg: "",
+                        packDeliveryCostUah: "",
+                      }));
+                    }
+                  }}
+                />
+              </PurchaseModeRow>
+              {unitDeliveryUiMode === "pack" ? (
+                <DeliveryRatesFields
+                  mode="trim"
+                  draft={draft}
+                  onChange={(next) => setDraft((prev) => ({ ...prev, ...next }))}
+                />
+              ) : (
+                <p className="type-caption sm:col-span-3 text-[var(--color-text-tertiary)]">
+                  Доставка не враховується в собівартості.
+                </p>
+              )}
+            </FormGroup>
+            </>
           ) : (
           <>
           <FormGroup label="Закупівля" icon={<IconPurchaseKg size={14} />} columns={2} compact>
+            <PurchaseModeRow>
             <ModeSegment
               label="Ціна"
               value={quoteMode}
@@ -729,8 +812,8 @@ export function MaterialSupplierDraftsEditor({
               label="Тариф"
               value={tierMode}
               options={[
-                { value: "single", label: "Звичайна" },
-                { value: "tier", label: "Звичайна + гурт" },
+                { value: "single", label: "Ціна" },
+                { value: "tier", label: "Ціна + опт" },
               ]}
               onChange={(next) => {
                 setTierMode(next);
@@ -762,25 +845,7 @@ export function MaterialSupplierDraftsEditor({
                 }
               }}
             />
-            <ModeSegment
-              label="Доставка"
-              value={deliveryUiMode}
-              options={[
-                { value: "kg", label: "За кг" },
-                { value: "none", label: "Немає" },
-              ]}
-              onChange={(next) => {
-                setDeliveryUiMode(next);
-                if (next === "none") {
-                  setDraft((prev) => ({
-                    ...prev,
-                    cargoUsdPerKg: "",
-                    npStandardUsdPerKg: "",
-                    npVolumeUsdPerKg: "",
-                  }));
-                }
-              }}
-            />
+          </PurchaseModeRow>
             {quoteMode === "kg" ? (
               <Input
                 label="Прайс постачальника"
@@ -826,7 +891,7 @@ export function MaterialSupplierDraftsEditor({
               />
             ) : null}
             <Input
-              label="Звичайна"
+              label="Ціна"
               type="number"
               min={0}
               step="0.1"
@@ -855,7 +920,7 @@ export function MaterialSupplierDraftsEditor({
             {tierMode === "tier" ? (
               <>
                 <Input
-                  label="Межа гурту"
+                  label="Межа опт"
                   type="number"
                   min={0}
                   step="0.1"
@@ -868,10 +933,10 @@ export function MaterialSupplierDraftsEditor({
                       minWholesaleMeters: value,
                     }));
                   }}
-                  hint="Від цієї кількості м.п. діє гурт"
+                  hint="Після цієї кількості діє ціна опт"
                 />
                 <Input
-                  label="Гурт"
+                  label="Ціна опт"
                   type="number"
                   min={0}
                   step="0.1"
@@ -892,8 +957,8 @@ export function MaterialSupplierDraftsEditor({
                   hint={
                     draft.minWholesaleMeters.trim() === "" ||
                     Number(draft.minWholesaleMeters) <= 0
-                      ? "Спочатку вкажіть межу гурту"
-                      : "Ціна від межі (зазвичай дешевша)"
+                      ? "Спочатку вкажіть межу опт"
+                      : "Ціна після межі (зазвичай дешевша)"
                   }
                 />
               </>
@@ -914,22 +979,55 @@ export function MaterialSupplierDraftsEditor({
                 draft.minWholesaleMeters.trim() !== "" &&
                 Number(draft.minWholesaleMeters) > 0
                   ? draft.priceMeterUahNoVat.trim() && Number(draft.priceMeterUahNoVat) > 0
-                    ? ` · ≥ ${draft.minWholesaleMeters} м → гурт`
-                    : ` · гурт від ${draft.minWholesaleMeters} м`
-                  : " · звичайна ціна"}
+                    ? ` · ≥ ${draft.minWholesaleMeters} → опт`
+                    : ` · опт від ${draft.minWholesaleMeters}`
+                  : " · ціна"}
               </p>
             ) : null}
           </FormGroup>
-          {deliveryUiMode === "kg" ? (
-            <FormGroup label="Доставка ($/кг)" icon={<IconPurchaseKg size={14} />} columns={3} compact>
+          <FormGroup label="Доставка" icon={<IconPurchaseKg size={14} />} columns={3} compact>
+            <PurchaseModeRow>
+              <ModeSegment
+                value={deliveryUiMode}
+                options={[
+                  { value: "kg", label: "За кг ($)" },
+                  { value: "none", label: "Немає" },
+                ]}
+                onChange={(next) => {
+                  setDeliveryUiMode(next);
+                  if (next === "none") {
+                    setDraft((prev) => ({
+                      ...prev,
+                      cargoUsdPerKg: "",
+                      npStandardUsdPerKg: "",
+                      npVolumeUsdPerKg: "",
+                    }));
+                  } else {
+                    setDraft((prev) => ({
+                      ...prev,
+                      cargoUsdPerKg:
+                        prev.cargoUsdPerKg.trim() ||
+                        String(deliveryRateUsdPerKg("CARGO", fabricGlobals)),
+                    }));
+                  }
+                }}
+              />
+            </PurchaseModeRow>
+            {deliveryUiMode === "kg" ? (
               <DeliveryRatesFields
                 mode="fabric"
                 fabricGlobals={fabricGlobals}
+                usdUahRate={localUsdRate}
+                onUsdUahRateChange={setCourse}
                 draft={draft}
                 onChange={(next) => applyDeliveryRates(next)}
               />
-            </FormGroup>
-          ) : null}
+            ) : (
+                <p className="type-caption sm:col-span-3 text-[var(--color-text-tertiary)]">
+                  Тарифи доставки вимкнено.
+                </p>
+            )}
+          </FormGroup>
           </>
           )}
 

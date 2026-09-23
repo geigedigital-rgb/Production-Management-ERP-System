@@ -327,11 +327,11 @@ export function fabricMetersNeeded(input: {
 export function fabricPricingModeLabel(mode: FabricPricingMode): string {
   switch (mode) {
     case "cut":
-      return "звичайна ціна";
+      return "ціна";
     case "wholesale":
-      return "гуртова ціна";
+      return "ціна опт";
     default:
-      return "звичайна ціна";
+      return "ціна";
   }
 }
 
