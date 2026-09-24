@@ -1,0 +1,13 @@
+---
+description: When entities are blocked by product usage or migrated, always name the products with links
+alwaysApply: true
+---
+
+# Name affected products with links
+
+When a handbook/catalog item (size chart, material, etc.) is **in use**, **blocked from delete**, or **migrated/replaced**:
+
+- Always list the **exact products** involved (name + internal code if useful).
+- Always include a **clickable link** to each product: `/products/{id}` (markdown: `[Name](/products/{id})`).
+- Do not only say “N виробів” — name them.
+- Same rule for orders or other entities when the action touches them: name + path link.

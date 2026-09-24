@@ -21,6 +21,7 @@ import { SizeGuideInline } from "@/components/size-charts/SizeGuideHelp";
 import {
   saveSizeChartVariantAction,
   saveVariantSizesAction,
+  archiveSizeChartVariantAction,
 } from "@/server/domains/size-charts/actions";
 import { getSizeGuideForVariant } from "@/server/domains/size-charts/size-instructions";
 import { cn } from "@/lib/utils";
@@ -179,6 +180,41 @@ export function SizeChartsAdminPanel({
     });
   }
 
+  function archiveVariant(row: SizeChartVariantRow) {
+    setError(null);
+    setMessage(null);
+    if (row.productCount > 0) {
+      setError(
+        `«${row.nameUk}» використовується в ${row.productCount} виробах — спочатку змініть сітку на виробах.`,
+      );
+      return;
+    }
+    if (!window.confirm(`Видалити сітку «${row.nameUk}» з довідника?`)) return;
+    const formData = new FormData();
+    formData.set("id", row.id);
+    startTransition(async () => {
+      const result = await archiveSizeChartVariantAction(formData);
+      if (!result.ok) {
+        setError(
+          result.error === "VARIANT_IN_USE"
+            ? "Сітку не можна видалити — вона використовується у виробах."
+            : "Не вдалося видалити сітку.",
+        );
+        return;
+      }
+      setMessage(`«${row.nameUk}» видалено з довідника.`);
+      if (selectedId === row.id) {
+        const next = variants.find((item) => item.id !== row.id && item.status === "ACTIVE");
+        if (next) selectVariant(next);
+        else {
+          setSelectedId("");
+          setSizeDrafts([]);
+        }
+      }
+      router.refresh();
+    });
+  }
+
   const activeVariants = variants.filter((row) => row.status === "ACTIVE");
 
   return (
@@ -197,12 +233,12 @@ export function SizeChartsAdminPanel({
             const active = row.id === selectedId;
             const count = row.sizes.filter((s) => s.status !== "ARCHIVED").length;
             return (
-              <li key={row.id}>
+              <li key={row.id} className="group flex items-stretch gap-0.5">
                 <button
                   type="button"
                   onClick={() => selectVariant(row, "sizes")}
                   className={cn(
-                    "flex w-full items-baseline justify-between gap-2 rounded-[6px] px-2 py-1.5 text-left transition-colors",
+                    "flex min-w-0 flex-1 items-baseline justify-between gap-2 rounded-[6px] px-2 py-1.5 text-left transition-colors",
                     active
                       ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
                       : "hover:bg-[var(--color-surface-subtle)]",
@@ -212,6 +248,23 @@ export function SizeChartsAdminPanel({
                   <span className="shrink-0 type-caption tabular-nums text-[var(--color-text-quiet)]">
                     {count}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  title={
+                    row.productCount > 0
+                      ? `Використовується в ${row.productCount} виробах`
+                      : "Видалити з довідника"
+                  }
+                  aria-label={`Видалити ${row.nameUk}`}
+                  onClick={() => archiveVariant(row)}
+                  className={cn(
+                    "shrink-0 rounded-[6px] px-1.5 text-[14px] leading-none text-[var(--color-text-quiet)] opacity-0 transition-opacity hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-danger)] group-hover:opacity-100 focus-visible:opacity-100",
+                    active && "opacity-100",
+                  )}
+                >
+                  ×
                 </button>
               </li>
             );
@@ -237,31 +290,42 @@ export function SizeChartsAdminPanel({
                   </p>
                 }
                 right={
-                  <div className="inline-flex rounded-[8px] border border-[var(--color-border)] p-0.5">
-                    <button
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="inline-flex rounded-[8px] border border-[var(--color-border)] p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setPanel("sizes")}
+                        className={cn(
+                          "rounded-[6px] px-2.5 py-1 text-[12.5px] font-medium",
+                          panel === "sizes"
+                            ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
+                            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]",
+                        )}
+                      >
+                        Розміри
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPanel("hint")}
+                        className={cn(
+                          "rounded-[6px] px-2.5 py-1 text-[12.5px] font-medium",
+                          panel === "hint"
+                            ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
+                            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]",
+                        )}
+                      >
+                        Підказка
+                      </button>
+                    </div>
+                    <Button
                       type="button"
-                      onClick={() => setPanel("sizes")}
-                      className={cn(
-                        "rounded-[6px] px-2.5 py-1 text-[12.5px] font-medium",
-                        panel === "sizes"
-                          ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
-                          : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]",
-                      )}
+                      size="sm"
+                      variant="ghost"
+                      disabled={pending}
+                      onClick={() => archiveVariant(selected)}
                     >
-                      Розміри
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPanel("hint")}
-                      className={cn(
-                        "rounded-[6px] px-2.5 py-1 text-[12.5px] font-medium",
-                        panel === "hint"
-                          ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
-                          : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]",
-                      )}
-                    >
-                      Підказка
-                    </button>
+                      Видалити
+                    </Button>
                   </div>
                 }
               />

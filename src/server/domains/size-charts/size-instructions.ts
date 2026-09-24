@@ -280,14 +280,18 @@ export function getSizeGuideForVariant(variantCode: string | null | undefined): 
   }
 
   if (code === "INTL_MEN_UA") {
+    const uaMenSizes = Object.keys(UA_CHEST_SIZE_INSTRUCTIONS)
+      .filter((s) => UA_CHEST_SIZE_INSTRUCTIONS[s]?.men)
+      .sort((a, b) => Number(a) - Number(b));
     return {
       variantCode: code,
-      headline: "Чоловіча · міжнар. ↔ укр.",
-      intro: "Орієнтовна відповідність для підбору. Базовий зріст — 176 см. Обхвати в см.",
+      headline: "Міжнар / Чол. укр.",
+      intro:
+        "Відповідність міжнар. літер ↔ укр. розмір + обхвати. Базовий зріст чоловіків — 176 см.",
       tables: [
         {
-          id: "intl-men",
-          title: "Чоловіча розмірна сітка",
+          id: "intl-men-map",
+          title: "Міжнар. ↔ чол. укр.",
           columns: [
             { key: "size", label: "Міжнар." },
             { key: "ua", label: "Укр." },
@@ -298,19 +302,35 @@ export function getSizeGuideForVariant(variantCode: string | null | undefined): 
             cells: { size, ua: row.ua, chest: row.chest, waist: row.waist, hips: row.hips },
           })),
         },
+        {
+          id: "intl-men-body",
+          title: "Таблиця розмірних ознак чоловіків, зріст 176 см",
+          columns: [{ key: "size", label: "Розмір" }, ...MEASURE_COLS],
+          rows: uaMenSizes.map((s) => ({
+            size: s,
+            cells: {
+              size: s,
+              ...tripleCells(UA_CHEST_SIZE_INSTRUCTIONS[s]!.men!),
+            },
+          })),
+        },
       ],
     };
   }
 
   if (code === "INTL_WOMEN_UA") {
+    const uaWomenSizes = Object.keys(UA_CHEST_SIZE_INSTRUCTIONS)
+      .filter((s) => UA_CHEST_SIZE_INSTRUCTIONS[s]?.women)
+      .sort((a, b) => Number(a) - Number(b));
     return {
       variantCode: code,
-      headline: "Жіноча · міжнар. ↔ укр.",
-      intro: "Орієнтовна відповідність для підбору. Базовий зріст — 164 см. Обхвати в см.",
+      headline: "Міжнар / Жін. укр.",
+      intro:
+        "Відповідність міжнар. літер ↔ укр. розмір + обхвати. Базовий зріст жінок — 164 см.",
       tables: [
         {
-          id: "intl-women",
-          title: "Жіноча розмірна сітка",
+          id: "intl-women-map",
+          title: "Міжнар. ↔ жін. укр.",
           columns: [
             { key: "size", label: "Міжнар." },
             { key: "ua", label: "Укр." },
@@ -319,6 +339,18 @@ export function getSizeGuideForVariant(variantCode: string | null | undefined): 
           rows: Object.entries(INTL_WOMEN_SIZE_INSTRUCTIONS).map(([size, row]) => ({
             size,
             cells: { size, ua: row.ua, chest: row.chest, waist: row.waist, hips: row.hips },
+          })),
+        },
+        {
+          id: "intl-women-body",
+          title: "Таблиця розмірних ознак жінок, зріст 164 см",
+          columns: [{ key: "size", label: "Розмір" }, ...MEASURE_COLS],
+          rows: uaWomenSizes.map((s) => ({
+            size: s,
+            cells: {
+              size: s,
+              ...tripleCells(UA_CHEST_SIZE_INSTRUCTIONS[s]!.women!),
+            },
           })),
         },
       ],
