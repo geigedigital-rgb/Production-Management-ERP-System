@@ -814,7 +814,8 @@ export function OrderMaterialDetailPanel({
                   | {
                       deliveryOptions?: Array<{
                         type: string;
-                        rateUah: number;
+                        rateUsdPerKg?: number;
+                        rateUah?: number;
                         label: string;
                       }>;
                       purchasePricePerUnit?: number | null;
@@ -824,6 +825,8 @@ export function OrderMaterialDetailPanel({
                 if (options.length === 0) return null;
                 const active =
                   options.find((opt) => opt.type === deliveryType) ?? options[0]!;
+                const rateUsd =
+                  active.rateUsdPerKg ?? active.rateUah ?? 0;
                 return (
                   <div className="mt-3 space-y-2">
                     <Select
@@ -834,13 +837,13 @@ export function OrderMaterialDetailPanel({
                     >
                       {options.map((opt) => (
                         <option key={opt.type} value={opt.type}>
-                          {opt.label} · {opt.rateUah} ₴/уп.
+                          {opt.label} · {opt.rateUsdPerKg ?? opt.rateUah} $/кг
                         </option>
                       ))}
                     </Select>
                     <p className="type-caption">
-                      Доставка {formatMoneyUah(active.rateUah)} за упаковку · в ₴/од. вже
-                      враховано.
+                      Тариф {rateUsd} $/кг · собівартість ₴/од. з ціни упаковки (без
+                      доставки в тарифі).
                     </p>
                   </div>
                 );
@@ -855,17 +858,10 @@ export function OrderMaterialDetailPanel({
                           (row) => row.supplierId === supplierId,
                         ) as
                           | {
-                              deliveryOptions?: Array<{
-                                type: string;
-                                rateUah: number;
-                              }>;
                               purchasePackPrice?: number | null;
                               purchasePricePerUnit?: number | null;
                             }
                           | undefined;
-                        const options = offer?.deliveryOptions ?? [];
-                        const active =
-                          options.find((opt) => opt.type === deliveryType) ?? options[0];
                         const pack = detail as MaterialDetail & {
                           unitsPerPack?: number | null;
                           purchasePackPrice?: number | null;
@@ -876,11 +872,9 @@ export function OrderMaterialDetailPanel({
                           pack.unitsPerPack > 0
                         ) {
                           const n = Math.floor(pack.unitsPerPack);
-                          const delivery = active?.rateUah ?? 0;
                           return (
-                            Math.round(
-                              ((Number(offer.purchasePackPrice) + delivery) / n) * 10000,
-                            ) / 10000
+                            Math.round((Number(offer.purchasePackPrice) / n) * 10000) /
+                            10000
                           );
                         }
                         return offer?.purchasePricePerUnit ?? detail.purchasePrice;

@@ -40,12 +40,12 @@ export function fabricDeliveryTypeLabel(type: FabricDeliveryTypeCode): string {
   }
 }
 
-/** Unit next to the rate field: fabric $/кг, trim packs ₴/уп. */
+/** Unit next to the rate field — always $/кг (same for м.п. and шт). */
 export function deliveryRateUnitLabel(
-  _type: FabricDeliveryTypeCode | string | null | undefined,
-  mode: "fabric" | "trim" = "fabric",
+  _type?: FabricDeliveryTypeCode | string | null,
+  _mode?: "fabric" | "trim",
 ): string {
-  return mode === "trim" ? "₴/уп." : "$/кг";
+  return "$/кг";
 }
 
 export function deliveryRateUsdPerKg(

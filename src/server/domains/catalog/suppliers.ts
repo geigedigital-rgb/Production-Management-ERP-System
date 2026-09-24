@@ -10,7 +10,6 @@ import { resolveSupplierDeliveryRate } from "@/lib/supplier-delivery-rates";
 import {
   deriveTrimUnitPriceFromSupplier,
   hasTrimPackQuote,
-  resolveTrimPackDeliveryUah,
 } from "@/lib/trim-pack-pricing";
 
 function optionalRate(value: number | null | undefined): number | null {
@@ -301,21 +300,13 @@ export async function upsertMaterialSupplierOffer(
   const cargoUsdPerKg = optionalRate(offer.cargoUsdPerKg);
   const npStandardUsdPerKg = optionalRate(offer.npStandardUsdPerKg);
   const npVolumeUsdPerKg = optionalRate(offer.npVolumeUsdPerKg);
-  const deliveryRates = {
-    deliveryType,
-    cargoUsdPerKg,
-    npStandardUsdPerKg,
-    npVolumeUsdPerKg,
-  };
-  const typedDelivery = resolveTrimPackDeliveryUah(deliveryRates);
-  const packDeliveryCostUah =
-    typedDelivery?.rateUah ?? optionalRate(offer.packDeliveryCostUah);
+  // Typed rates are always $/кг. Legacy fixed ₴/уп. stays on packDeliveryCostUah only.
+  const packDeliveryCostUah = optionalRate(offer.packDeliveryCostUah);
 
   const unitsPerPack = material.unitsPerPack;
   const unitPrice = deriveTrimUnitPriceFromSupplier({
     unitsPerPack,
     purchasePackPrice,
-    deliveryRates,
     packDeliveryCostUah,
     fallbackUnitPrice: optionalRate(offer.priceMeterUahNoVat) ?? 0,
   });

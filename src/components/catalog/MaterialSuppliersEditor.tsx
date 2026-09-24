@@ -27,7 +27,6 @@ import {
 import {
   deriveTrimUnitPriceFromSupplier,
   hasTrimPackQuote,
-  resolveTrimPackDeliveryUah,
   trimConfiguredDeliveryOptions,
 } from "@/lib/trim-pack-pricing";
 import { SupplierPaletteEditor } from "@/components/catalog/SupplierPaletteEditor";
@@ -186,7 +185,7 @@ export function MaterialSuppliersEditor({
   const [tierMode, setTierMode] = useState<FabricTierMode>("single");
   const [deliveryUiMode, setDeliveryUiMode] = useState<FabricDeliveryUiMode>("kg");
   const [unitQuoteMode, setUnitQuoteMode] = useState<UnitQuoteMode>("each");
-  const [unitDeliveryUiMode, setUnitDeliveryUiMode] = useState<UnitDeliveryUiMode>("pack");
+  const [unitDeliveryUiMode, setUnitDeliveryUiMode] = useState<UnitDeliveryUiMode>("kg");
 
   function applyModesFromDraft(next: OfferDraft) {
     setQuoteMode(inferFabricQuoteMode(next));
@@ -278,23 +277,23 @@ export function MaterialSuppliersEditor({
     setEditingId("new");
     const next = emptyDraft(asPrimary || offers.length === 0, fabricGlobals);
     if (pricingKind === "unit") {
-      next.cargoUsdPerKg = "";
+      next.cargoUsdPerKg = String(deliveryRateUsdPerKg("CARGO", fabricGlobals));
       next.npStandardUsdPerKg = "";
       next.npVolumeUsdPerKg = "";
       next.packDeliveryCostUah = "";
+      next.deliveryType = "CARGO";
+      setDraft(next);
+      setUnitQuoteMode("each");
+      setUnitDeliveryUiMode("kg");
+      return;
+    }
+    if (!next.cargoUsdPerKg.trim()) {
+      next.cargoUsdPerKg = String(deliveryRateUsdPerKg("CARGO", fabricGlobals));
     }
     setDraft(next);
-    if (pricingKind === "fabric") {
-      // Ensure $/кг defaults when opening delivery (never UAH pack amounts).
-      if (!next.cargoUsdPerKg.trim()) {
-        next.cargoUsdPerKg = String(deliveryRateUsdPerKg("CARGO", fabricGlobals));
-      }
-      setQuoteMode("meter");
-      setTierMode("single");
-      setDeliveryUiMode("kg");
-    } else {
-      applyModesFromDraft(next);
-    }
+    setQuoteMode("meter");
+    setTierMode("single");
+    setDeliveryUiMode("kg");
   }
 
   function saveDraft() {
@@ -307,20 +306,16 @@ export function MaterialSuppliersEditor({
     const threshold = draft.minWholesaleMeters.trim();
     const hasCut = cut !== "" && Number(cut) > 0;
     if (pricingKind === "unit") {
-      const rates = trimDraftRates(draft);
-      const typed = resolveTrimPackDeliveryUah(rates);
       const packQuote = {
         unitsPerPack,
         purchasePackPrice: draft.purchasePackPrice
           ? Number(draft.purchasePackPrice)
           : null,
-        packDeliveryCostUah: typed?.rateUah ?? null,
       };
       const fromPack = hasTrimPackQuote(packQuote)
         ? deriveTrimUnitPriceFromSupplier({
             unitsPerPack,
             purchasePackPrice: packQuote.purchasePackPrice,
-            deliveryRates: rates,
             fallbackUnitPrice: 0,
           })
         : null;
@@ -358,7 +353,7 @@ export function MaterialSuppliersEditor({
     data.set("isPrimary", draft.asPrimary || offers.length === 0 ? "1" : "0");
     data.set("deliveryType", draft.deliveryType);
     const saveDelivery =
-      (pricingKind === "unit" && unitDeliveryUiMode === "pack") ||
+      (pricingKind === "unit" && unitDeliveryUiMode === "kg") ||
       (pricingKind === "fabric" && deliveryUiMode === "kg");
     if (saveDelivery && draft.cargoUsdPerKg) data.set("cargoUsdPerKg", draft.cargoUsdPerKg);
     else data.set("cargoUsdPerKg", "");
@@ -374,22 +369,13 @@ export function MaterialSuppliersEditor({
       } else {
         data.set("purchasePackPrice", "");
       }
-      const rates = unitDeliveryUiMode === "pack" ? trimDraftRates(draft) : {
-        deliveryType: draft.deliveryType,
-        cargoUsdPerKg: null as number | null,
-        npStandardUsdPerKg: null as number | null,
-        npVolumeUsdPerKg: null as number | null,
-      };
-      const typed = resolveTrimPackDeliveryUah(rates);
-      if (typed) data.set("packDeliveryCostUah", String(typed.rateUah));
-      else data.set("packDeliveryCostUah", "");
+      data.set("packDeliveryCostUah", "");
       const unitPrice = deriveTrimUnitPriceFromSupplier({
         unitsPerPack,
         purchasePackPrice:
           unitQuoteMode === "pack" && draft.purchasePackPrice
             ? Number(draft.purchasePackPrice)
             : null,
-        deliveryRates: rates,
         fallbackUnitPrice: draft.priceMeterUahNoVat
           ? Number(draft.priceMeterUahNoVat)
           : 0,
@@ -401,7 +387,6 @@ export function MaterialSuppliersEditor({
             unitQuoteMode === "pack" && draft.purchasePackPrice
               ? Number(draft.purchasePackPrice)
               : null,
-          packDeliveryCostUah: typed?.rateUah ?? null,
         }) ||
         draft.priceMeterUahNoVat
       ) {
@@ -551,7 +536,7 @@ export function MaterialSuppliersEditor({
                       npVolumeUsdPerKg: row.npVolumeUsdPerKg,
                     }).map((opt) => (
                       <span key={opt.type} className="type-caption ml-2 tabular">
-                        {opt.label} · {opt.rateUah} ₴/уп.
+                        {opt.label} · {opt.rateUsdPerKg} $/кг
                       </span>
                     ))}
                 {(row.availableColors?.length ?? 0) > 0 ? (
@@ -761,8 +746,6 @@ export function MaterialSuppliersEditor({
                     purchasePackPrice: draft.purchasePackPrice
                       ? Number(draft.purchasePackPrice)
                       : null,
-                    packDeliveryCostUah:
-                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ?? null,
                   })
                 }
                 value={
@@ -772,14 +755,11 @@ export function MaterialSuppliersEditor({
                     purchasePackPrice: draft.purchasePackPrice
                       ? Number(draft.purchasePackPrice)
                       : null,
-                    packDeliveryCostUah:
-                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ?? null,
                   })
                     ? String(
                         deriveTrimUnitPriceFromSupplier({
                           unitsPerPack,
                           purchasePackPrice: Number(draft.purchasePackPrice),
-                          deliveryRates: trimDraftRates(draft),
                         }),
                       )
                     : draft.priceMeterUahNoVat
@@ -807,7 +787,7 @@ export function MaterialSuppliersEditor({
                 <ModeSegment
                   value={unitDeliveryUiMode}
                   options={[
-                    { value: "pack", label: "За уп." },
+                    { value: "kg", label: "За кг ($)" },
                     { value: "none", label: "Немає" },
                   ]}
                   onChange={(next) => {
@@ -820,19 +800,34 @@ export function MaterialSuppliersEditor({
                         npVolumeUsdPerKg: "",
                         packDeliveryCostUah: "",
                       }));
+                    } else {
+                      setDraft((prev) => ({
+                        ...prev,
+                        cargoUsdPerKg:
+                          prev.cargoUsdPerKg.trim() ||
+                          String(deliveryRateUsdPerKg("CARGO", fabricGlobals)),
+                        deliveryType: prev.deliveryType || "CARGO",
+                      }));
                     }
                   }}
                 />
               </PurchaseModeRow>
-              {unitDeliveryUiMode === "pack" ? (
+              {unitDeliveryUiMode === "kg" ? (
                 <DeliveryRatesFields
-                  mode="trim"
+                  mode="fabric"
+                  fabricGlobals={fabricGlobals}
+                  usdUahRate={usdUahRateInput}
+                  onUsdUahRateChange={(value) => {
+                    setUsdUahRateInput(value);
+                    const n = Number(String(value).replace(",", "."));
+                    if (Number.isFinite(n) && n > 0) setUsdUahRate(n);
+                  }}
                   draft={draft}
                   onChange={(next) => setDraft((prev) => ({ ...prev, ...next }))}
                 />
               ) : (
                 <p className="type-caption sm:col-span-3 text-[var(--color-text-tertiary)]">
-                  Доставка не враховується в собівартості.
+                  Тарифи доставки вимкнено.
                 </p>
               )}
             </FormGroup>

@@ -73,7 +73,8 @@ export type FabricDeliveryUiMode = "kg" | "none";
 
 /** шт / бобіна: direct unit price vs pack quote. */
 export type UnitQuoteMode = "each" | "pack";
-export type UnitDeliveryUiMode = "pack" | "none";
+/** Same delivery toggle as fabric (тарифи $/кг). */
+export type UnitDeliveryUiMode = FabricDeliveryUiMode;
 
 export function inferFabricQuoteMode(input: {
   priceKgUsd?: string | number | null;
@@ -130,15 +131,12 @@ export function inferUnitQuoteMode(input: {
   return Number.isFinite(n) && n >= 0 ? "pack" : "each";
 }
 
+/** Delivery on for unit materials iff any $/кг tariff is set (same as fabric). */
 export function inferUnitDeliveryUiMode(input: {
   cargoUsdPerKg?: string | number | null;
   npStandardUsdPerKg?: string | number | null;
   npVolumeUsdPerKg?: string | number | null;
   packDeliveryCostUah?: string | number | null;
 }): UnitDeliveryUiMode {
-  if (inferFabricDeliveryUiMode(input) === "kg") return "pack";
-  const raw = input.packDeliveryCostUah;
-  if (raw == null || raw === "") return "none";
-  const n = typeof raw === "number" ? raw : Number(String(raw).replace(",", "."));
-  return Number.isFinite(n) && n >= 0 ? "pack" : "none";
+  return inferFabricDeliveryUiMode(input);
 }

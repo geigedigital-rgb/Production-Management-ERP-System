@@ -213,7 +213,6 @@ export default async function OrderDetailPage({
       colorSnapshot: row.colorSnapshot ?? null,
       supplierOffers:
         row.material?.supplierOffers?.map((offer) => {
-          const mode = row.material?.type === "FABRIC" ? "fabric" : "trim";
           return {
             supplierId: offer.supplierId,
             supplierName: offer.supplier.nameUk,
@@ -225,21 +224,21 @@ export default async function OrderDetailPage({
                 ? {
                     type: "CARGO" as const,
                     label: "CARGO",
-                    rateLabel: `${Number(offer.cargoUsdPerKg)} ${mode === "fabric" ? "$/кг" : "₴/уп."}`,
+                    rateLabel: `${Number(offer.cargoUsdPerKg)} $/кг`,
                   }
                 : null,
               offer.npStandardUsdPerKg != null
                 ? {
                     type: "NP_STANDARD" as const,
                     label: "НП стандарт",
-                    rateLabel: `${Number(offer.npStandardUsdPerKg)} ${mode === "fabric" ? "$/кг" : "₴/уп."}`,
+                    rateLabel: `${Number(offer.npStandardUsdPerKg)} $/кг`,
                   }
                 : null,
               offer.npVolumeUsdPerKg != null
                 ? {
                     type: "NP_VOLUME" as const,
                     label: "НП обʼємні",
-                    rateLabel: `${Number(offer.npVolumeUsdPerKg)} ${mode === "fabric" ? "$/кг" : "₴/уп."}`,
+                    rateLabel: `${Number(offer.npVolumeUsdPerKg)} $/кг`,
                   }
                 : null,
             ].filter(Boolean) as Array<{

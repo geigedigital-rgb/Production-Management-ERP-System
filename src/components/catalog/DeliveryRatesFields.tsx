@@ -41,39 +41,38 @@ function configuredTypes(draft: DeliveryRateDraft): FabricDeliveryTypeCode[] {
 
 /**
  * Delivery methods as tabs (+ dashed tabs to add). Active tab = COGS method;
- * rate field edits that tab only. Fabric rates are always $/кг (+ optional course).
+ * rate field edits that tab only. Rates are always $/кг (+ optional course).
  */
 export function DeliveryRatesFields({
   draft,
   onChange,
-  mode,
+  mode: _mode = "fabric",
   fabricGlobals,
   usdUahRate,
   onUsdUahRateChange,
 }: {
   draft: DeliveryRateDraft;
   onChange: (next: DeliveryRateDraft) => void;
-  mode: "fabric" | "trim";
+  /** @deprecated Always $/кг — kept for call-site compat. */
+  mode?: "fabric" | "trim";
   fabricGlobals?: FabricDeliveryRateGlobals;
-  /** Fabric only: editable ₴/$ course used in $/кг → ₴ calculations. */
+  /** Editable ₴/$ course used in $/кг → ₴ calculations. */
   usdUahRate?: string;
   onUsdUahRateChange?: (next: string) => void;
 }) {
+  void _mode;
   const active = normalizeFabricDeliveryType(draft.deliveryType);
   const configured = configuredTypes(draft);
   const openTabs = FABRIC_DELIVERY_TYPES.filter(
     (type) => configured.includes(type) || type === active,
   );
   const availableToAdd = FABRIC_DELIVERY_TYPES.filter((type) => !openTabs.includes(type));
-  const suffix = deliveryRateUnitLabel(active, mode);
+  const suffix = deliveryRateUnitLabel(active);
   const activeKey = rateKey(active);
-  const companyDefault =
-    mode === "fabric" && fabricGlobals
-      ? String(deliveryRateUsdPerKg(active, fabricGlobals))
-      : mode === "fabric"
-        ? String(DEFAULT_FABRIC_DELIVERY_RATES[active])
-        : undefined;
-  const showCourse = mode === "fabric" && onUsdUahRateChange != null;
+  const companyDefault = fabricGlobals
+    ? String(deliveryRateUsdPerKg(active, fabricGlobals))
+    : String(DEFAULT_FABRIC_DELIVERY_RATES[active]);
+  const showCourse = onUsdUahRateChange != null;
 
   function defaultRateFor(type: FabricDeliveryTypeCode): string {
     if (fabricGlobals) return String(deliveryRateUsdPerKg(type, fabricGlobals));
@@ -83,7 +82,7 @@ export function DeliveryRatesFields({
   function setActiveType(type: FabricDeliveryTypeCode) {
     const key = rateKey(type);
     const next = { ...draft, deliveryType: type };
-    if (!next[key].trim() && mode === "fabric") {
+    if (!next[key].trim()) {
       next[key] = defaultRateFor(type);
     }
     onChange(next);
@@ -96,10 +95,8 @@ export function DeliveryRatesFields({
       const remaining = configuredTypes(next);
       if (remaining[0]) {
         next.deliveryType = remaining[0];
-      } else if (mode === "fabric") {
-        next[rateKey("CARGO")] = defaultRateFor("CARGO");
-        next.deliveryType = "CARGO";
       } else {
+        next[rateKey("CARGO")] = defaultRateFor("CARGO");
         next.deliveryType = "CARGO";
       }
     }
@@ -116,7 +113,7 @@ export function DeliveryRatesFields({
         {openTabs.map((type) => {
           const on = type === active;
           const rate = draft[rateKey(type)].trim();
-          const canRemove = openTabs.length > 1 || (mode === "trim" && hasRate(draft, type));
+          const canRemove = openTabs.length > 1;
           return (
             <button
               key={type}
@@ -139,8 +136,7 @@ export function DeliveryRatesFields({
                     on ? "text-[var(--color-primary-700)]" : "text-[var(--color-text-tertiary)]",
                   )}
                 >
-                  {rate}
-                  {mode === "fabric" ? " $" : ""}
+                  {rate} $
                 </span>
               ) : null}
               {canRemove ? (

@@ -35,7 +35,6 @@ import { getSupplierPaletteAction } from "@/server/domains/catalog/actions";
 import {
   deriveTrimUnitPriceFromSupplier,
   hasTrimPackQuote,
-  resolveTrimPackDeliveryUah,
 } from "@/lib/trim-pack-pricing";
 
 export type MaterialSupplierOfferDraft = {
@@ -163,7 +162,7 @@ export function MaterialSupplierDraftsEditor({
   const [tierMode, setTierMode] = useState<FabricTierMode>("single");
   const [deliveryUiMode, setDeliveryUiMode] = useState<FabricDeliveryUiMode>("kg");
   const [unitQuoteMode, setUnitQuoteMode] = useState<UnitQuoteMode>("each");
-  const [unitDeliveryUiMode, setUnitDeliveryUiMode] = useState<UnitDeliveryUiMode>("pack");
+  const [unitDeliveryUiMode, setUnitDeliveryUiMode] = useState<UnitDeliveryUiMode>("kg");
   const [localUsdRate, setLocalUsdRate] = useState(
     String(usdUahRate ?? fabricGlobals.usdUahRate),
   );
@@ -236,10 +235,12 @@ export function MaterialSupplierDraftsEditor({
     setError(null);
     const next = emptyForm(asPrimary || offers.length === 0, defaultDeliveryType, fabricGlobals);
     if (pricingKind === "unit") {
-      next.cargoUsdPerKg = "";
+      // Same defaults as fabric м.п.: CARGO on, $/кг from company rates.
+      next.cargoUsdPerKg = String(deliveryRateUsdPerKg("CARGO", fabricGlobals));
       next.npStandardUsdPerKg = "";
       next.npVolumeUsdPerKg = "";
       next.packDeliveryCostUah = "";
+      next.deliveryType = "CARGO";
     }
     setDraft(next);
     if (pricingKind === "fabric") {
@@ -247,7 +248,8 @@ export function MaterialSupplierDraftsEditor({
       setTierMode("single");
       setDeliveryUiMode("kg");
     } else {
-      applyModesFromDraft(next);
+      setUnitQuoteMode("each");
+      setUnitDeliveryUiMode("kg");
     }
     setEditing("new");
   }
@@ -359,10 +361,10 @@ export function MaterialSupplierDraftsEditor({
     }
 
     const rates = trimDraftRates(draft);
-    const typedDelivery = resolveTrimPackDeliveryUah(rates);
     const packDelivery =
-      typedDelivery?.rateUah ??
-      (draft.packDeliveryCostUah ? Number(draft.packDeliveryCostUah) : null);
+      draft.packDeliveryCostUah.trim() !== ""
+        ? Number(draft.packDeliveryCostUah)
+        : null;
     const unitFromPack =
       pricingKind === "unit"
         ? deriveTrimUnitPriceFromSupplier({
@@ -371,12 +373,19 @@ export function MaterialSupplierDraftsEditor({
               ? Number(draft.purchasePackPrice)
               : null,
             deliveryRates: rates,
-            packDeliveryCostUah: packDelivery,
+            packDeliveryCostUah:
+              packDelivery != null && Number.isFinite(packDelivery) && packDelivery >= 0
+                ? packDelivery
+                : null,
             fallbackUnitPrice: draft.priceMeterUahNoVat
               ? Number(draft.priceMeterUahNoVat)
               : 0,
           })
         : null;
+
+    const deliveryOn =
+      (pricingKind === "unit" && unitDeliveryUiMode === "kg") ||
+      (pricingKind === "fabric" && deliveryUiMode === "kg");
 
     const wantPrimary = draft.asPrimary || offers.length === 0;
     const row: MaterialSupplierOfferDraft = {
@@ -384,21 +393,9 @@ export function MaterialSupplierDraftsEditor({
       isPrimary: wantPrimary,
       supplierName: draft.supplierName.trim(),
       deliveryType: draft.deliveryType,
-      cargoUsdPerKg:
-        (pricingKind === "unit" && unitDeliveryUiMode === "pack") ||
-        (pricingKind === "fabric" && deliveryUiMode === "kg")
-          ? draft.cargoUsdPerKg
-          : "",
-      npStandardUsdPerKg:
-        (pricingKind === "unit" && unitDeliveryUiMode === "pack") ||
-        (pricingKind === "fabric" && deliveryUiMode === "kg")
-          ? draft.npStandardUsdPerKg
-          : "",
-      npVolumeUsdPerKg:
-        (pricingKind === "unit" && unitDeliveryUiMode === "pack") ||
-        (pricingKind === "fabric" && deliveryUiMode === "kg")
-          ? draft.npVolumeUsdPerKg
-          : "",
+      cargoUsdPerKg: deliveryOn ? draft.cargoUsdPerKg : "",
+      npStandardUsdPerKg: deliveryOn ? draft.npStandardUsdPerKg : "",
+      npVolumeUsdPerKg: deliveryOn ? draft.npVolumeUsdPerKg : "",
       priceKgUsd: pricingKind === "fabric" && quoteMode === "kg" ? draft.priceKgUsd : "",
       priceKgUsdVat: draft.priceKgUsdVat,
       priceMeterUahNoVat:
@@ -423,12 +420,7 @@ export function MaterialSupplierDraftsEditor({
       wholesaleNote: draft.wholesaleNote,
       purchasePackPrice:
         pricingKind === "unit" && unitQuoteMode === "pack" ? draft.purchasePackPrice : "",
-      packDeliveryCostUah:
-        pricingKind === "unit" && unitDeliveryUiMode === "pack"
-          ? typedDelivery
-            ? String(typedDelivery.rateUah)
-            : draft.packDeliveryCostUah
-          : "",
+      packDeliveryCostUah: "",
       availableColors: draft.availableColors,
     };
 
@@ -709,9 +701,6 @@ export function MaterialSupplierDraftsEditor({
                     purchasePackPrice: draft.purchasePackPrice
                       ? Number(draft.purchasePackPrice)
                       : null,
-                    packDeliveryCostUah:
-                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ??
-                      (draft.packDeliveryCostUah ? Number(draft.packDeliveryCostUah) : null),
                   })
                 }
                 value={
@@ -721,18 +710,13 @@ export function MaterialSupplierDraftsEditor({
                     purchasePackPrice: draft.purchasePackPrice
                       ? Number(draft.purchasePackPrice)
                       : null,
-                    packDeliveryCostUah:
-                      resolveTrimPackDeliveryUah(trimDraftRates(draft))?.rateUah ??
-                      (draft.packDeliveryCostUah ? Number(draft.packDeliveryCostUah) : null),
                   })
                     ? String(
                         deriveTrimUnitPriceFromSupplier({
                           unitsPerPack,
                           purchasePackPrice: Number(draft.purchasePackPrice),
                           deliveryRates: trimDraftRates(draft),
-                          packDeliveryCostUah: draft.packDeliveryCostUah
-                            ? Number(draft.packDeliveryCostUah)
-                            : null,
+                          packDeliveryCostUah: null,
                         }),
                       )
                     : draft.priceMeterUahNoVat
@@ -760,7 +744,7 @@ export function MaterialSupplierDraftsEditor({
                 <ModeSegment
                   value={unitDeliveryUiMode}
                   options={[
-                    { value: "pack", label: "За уп." },
+                    { value: "kg", label: "За кг ($)" },
                     { value: "none", label: "Немає" },
                   ]}
                   onChange={(next) => {
@@ -773,19 +757,30 @@ export function MaterialSupplierDraftsEditor({
                         npVolumeUsdPerKg: "",
                         packDeliveryCostUah: "",
                       }));
+                    } else {
+                      setDraft((prev) => ({
+                        ...prev,
+                        cargoUsdPerKg:
+                          prev.cargoUsdPerKg.trim() ||
+                          String(deliveryRateUsdPerKg("CARGO", fabricGlobals)),
+                        deliveryType: prev.deliveryType || "CARGO",
+                      }));
                     }
                   }}
                 />
               </PurchaseModeRow>
-              {unitDeliveryUiMode === "pack" ? (
+              {unitDeliveryUiMode === "kg" ? (
                 <DeliveryRatesFields
-                  mode="trim"
+                  mode="fabric"
+                  fabricGlobals={fabricGlobals}
+                  usdUahRate={localUsdRate}
+                  onUsdUahRateChange={setCourse}
                   draft={draft}
                   onChange={(next) => setDraft((prev) => ({ ...prev, ...next }))}
                 />
               ) : (
                 <p className="type-caption sm:col-span-3 text-[var(--color-text-tertiary)]">
-                  Доставка не враховується в собівартості.
+                  Тарифи доставки вимкнено.
                 </p>
               )}
             </FormGroup>

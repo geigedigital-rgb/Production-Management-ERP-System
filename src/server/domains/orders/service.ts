@@ -35,7 +35,6 @@ import {
   packsToOrder,
   trimPackSpend,
   hasTrimPackQuote,
-  resolveTrimPackDeliveryUah,
   deriveTrimUnitPriceFromSupplier,
   trimConfiguredDeliveryOptions,
 } from "@/lib/trim-pack-pricing";
@@ -1367,36 +1366,15 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
         : row.material?.purchasePackPrice != null
           ? Number(row.material.purchasePackPrice)
           : null;
-    const deliveryRates = {
-      deliveryType:
-        row.deliveryType ??
-        selectedOffer?.deliveryType ??
-        null,
-      cargoUsdPerKg:
-        selectedOffer?.cargoUsdPerKg != null
-          ? Number(selectedOffer.cargoUsdPerKg)
-          : null,
-      npStandardUsdPerKg:
-        selectedOffer?.npStandardUsdPerKg != null
-          ? Number(selectedOffer.npStandardUsdPerKg)
-          : null,
-      npVolumeUsdPerKg:
-        selectedOffer?.npVolumeUsdPerKg != null
-          ? Number(selectedOffer.npVolumeUsdPerKg)
-          : null,
-    };
-    const typedDelivery = resolveTrimPackDeliveryUah(deliveryRates);
     const packDeliveryCostUah =
-      typedDelivery?.rateUah ??
-      (selectedOffer?.packDeliveryCostUah != null
+      selectedOffer?.packDeliveryCostUah != null
         ? Number(selectedOffer.packDeliveryCostUah)
         : row.material?.packDeliveryCostUah != null
           ? Number(row.material.packDeliveryCostUah)
-          : null);
+          : null;
     const purchasePrice = deriveTrimUnitPriceFromSupplier({
       unitsPerPack,
       purchasePackPrice,
-      deliveryRates,
       packDeliveryCostUah,
       fallbackUnitPrice:
         selectedOffer?.priceMeterUahNoVat != null
@@ -1431,7 +1409,7 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
       colorSnapshot: row.colorSnapshot,
       supplierId: row.supplierId,
       materialAvailableColors: row.material?.availableColors ?? [],
-      deliveryType: typedDelivery?.type ?? row.deliveryType ?? selectedOffer?.deliveryType ?? null,
+      deliveryType: row.deliveryType ?? selectedOffer?.deliveryType ?? null,
       offers: supplierRows.map((offer) => {
         const rates = {
           deliveryType: offer.deliveryType,
@@ -1443,7 +1421,6 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
             offer.npVolumeUsdPerKg != null ? Number(offer.npVolumeUsdPerKg) : null,
         };
         const deliveryOptions = trimConfiguredDeliveryOptions(rates);
-        const active = resolveTrimPackDeliveryUah(rates);
         return {
           offerId: offer.id,
           supplierId: offer.supplierId,
@@ -1454,13 +1431,12 @@ export async function getOrderItemMaterialDetail(orderItemMaterialId: string) {
           deliveryOptions,
           purchasePackPrice:
             offer.purchasePackPrice != null ? Number(offer.purchasePackPrice) : null,
-          packDeliveryCostUah: active?.rateUah ??
-            (offer.packDeliveryCostUah != null ? Number(offer.packDeliveryCostUah) : null),
+          packDeliveryCostUah:
+            offer.packDeliveryCostUah != null ? Number(offer.packDeliveryCostUah) : null,
           purchasePricePerUnit: deriveTrimUnitPriceFromSupplier({
             unitsPerPack,
             purchasePackPrice:
               offer.purchasePackPrice != null ? Number(offer.purchasePackPrice) : null,
-            deliveryRates: rates,
             packDeliveryCostUah:
               offer.packDeliveryCostUah != null ? Number(offer.packDeliveryCostUah) : null,
             fallbackUnitPrice:
