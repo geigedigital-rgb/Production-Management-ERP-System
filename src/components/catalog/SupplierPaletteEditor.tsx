@@ -72,21 +72,15 @@ export function SupplierPaletteEditor({
       {colors.length > 0 ? (
         <div className="overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-border)]">
           <table className="w-full text-left text-[13px]">
-            <thead className="bg-[var(--color-surface-subtle)] text-[11px] uppercase tracking-wide text-[var(--color-text-tertiary)]">
-              <tr>
-                <th className="w-12 px-2.5 py-1.5 font-medium">Колір</th>
-                <th className="px-2.5 py-1.5 font-medium">Назва</th>
-              </tr>
-            </thead>
             <tbody>
               {colors.map((label, index) => {
                 const swatch = swatchForColorLabel(label);
                 return (
                   <tr
                     key={`${label}-${index}`}
-                    className="group/color border-t border-[var(--color-divider)]"
+                    className="group/color border-t border-[var(--color-divider)] first:border-t-0"
                   >
-                    <td className="px-2.5 py-1.5 align-middle">
+                    <td className="w-12 px-2.5 py-1.5 align-middle">
                       <span
                         className={cn(
                           "block size-6 rounded-full ring-1 ring-black/15",
@@ -157,23 +151,21 @@ export function SupplierPaletteEditor({
         <p className="mb-1.5 text-[12px] font-medium text-[var(--color-text-primary)]">
           Новий колір
         </p>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="type-label">Колір</span>
-            <input
-              type="color"
-              value={draftSwatch}
-              onChange={(event) => setDraftSwatch(event.target.value)}
-              className="h-10 w-12 cursor-pointer rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-1"
-              aria-label="Колір зразка"
-            />
-          </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="color"
+            value={draftSwatch}
+            onChange={(event) => setDraftSwatch(event.target.value)}
+            className="h-10 w-12 shrink-0 cursor-pointer rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-1"
+            aria-label="Колір зразка"
+            title="Колір"
+          />
           <Input
             className="min-w-[10rem] flex-1"
-            label="Назва"
             value={draftName}
             onChange={(event) => setDraftName(event.target.value)}
             placeholder="Олива"
+            aria-label="Назва кольору"
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();

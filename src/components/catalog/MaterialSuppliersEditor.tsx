@@ -1048,10 +1048,28 @@ export function MaterialSuppliersEditor({
                   onChange={(next) => setDraft((prev) => ({ ...prev, ...next }))}
                 />
               ) : unitDeliveryUiMode === "fixed" ? (
-                <>
-                  <PurchaseModeRow className="sm:col-span-full">
+                <div className="sm:col-span-full flex flex-col gap-1">
+                  <span className="type-label inline-flex flex-wrap items-baseline gap-1.5">
+                    <span>Сума доставки</span>
+                    <span className="text-[10.5px] font-normal normal-case tracking-normal text-[var(--color-text-tertiary)]">
+                      необовʼязково
+                    </span>
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={draft.packDeliveryCostUah}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          packDeliveryCostUah: event.target.value,
+                        }))
+                      }
+                      className="h-10 min-w-[8rem] max-w-[12rem] flex-1 rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-[14px] tabular-nums outline-none focus:border-[var(--color-primary-500)] focus:ring-2 focus:ring-[var(--color-focus-ring)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
                     <ModeSegment
-                      label="Валюта"
                       value={fixedDeliveryCurrency}
                       options={[
                         { value: "uah", label: "₴" },
@@ -1073,31 +1091,15 @@ export function MaterialSuppliersEditor({
                         setFixedDeliveryCurrency(next);
                       }}
                     />
-                  </PurchaseModeRow>
-                  <Input
-                    label="Сума доставки"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    suffix={fixedDeliveryCurrency === "usd" ? "$" : "₴"}
-                    optional
-                    value={draft.packDeliveryCostUah}
-                    onChange={(event) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        packDeliveryCostUah: event.target.value,
-                      }))
-                    }
-                    hint={
-                      unitsPerPack != null && unitsPerPack > 0
-                        ? `Розкладається на ${unitsPerPack} од. у собівартість`
-                        : fixedDeliveryCurrency === "usd"
-                          ? `Курс ${usdUahRate} ₴/$ · фікс за пачку/поставку`
-                          : "Фікс за пачку / поставку · додається до собівартості"
-                    }
-                    className="max-w-[12rem]"
-                  />
-                </>
+                  </div>
+                  <span className="type-caption">
+                    {unitsPerPack != null && unitsPerPack > 0
+                      ? `Розкладається на ${unitsPerPack} од. у собівартість`
+                      : fixedDeliveryCurrency === "usd"
+                        ? `Курс ${usdUahRate} ₴/$ · фікс за пачку/поставку`
+                        : "Фікс за пачку / поставку · додається до собівартості"}
+                  </span>
+                </div>
               ) : (
                 <p className="type-caption sm:col-span-3 text-[var(--color-text-tertiary)]">
                   Тарифи доставки вимкнено.
