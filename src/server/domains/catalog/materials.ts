@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { materialFormSchema, type MaterialFormValues } from "./schemas";
-import type { MaterialCostVatMode, MaterialType, RecordStatus } from "@prisma/client";
+import { Prisma, type MaterialCostVatMode, type MaterialType, type RecordStatus } from "@prisma/client";
 import {
   DEFAULT_FABRIC_PRICING_GLOBALS,
   deriveFabricPricing,
@@ -12,6 +12,14 @@ import {
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
 import { deriveTrimUnitPriceFromSupplier } from "@/lib/trim-pack-pricing";
+
+function prismaMaterialHasField(field: string): boolean {
+  try {
+    return field in (Prisma.MaterialScalarFieldEnum ?? {});
+  } catch {
+    return false;
+  }
+}
 
 export async function getFabricPricingGlobals(): Promise<FabricPricingGlobals> {
   const pricing = await prisma.pricingSettings.findFirst();
@@ -211,7 +219,9 @@ export async function createMaterial(raw: MaterialFormValues) {
       colorOrAttribute: data.colorOrAttribute || null,
       availableColors: data.availableColors ?? [],
       note: data.note || null,
-      tagColor: data.tagColor || null,
+      ...(prismaMaterialHasField("tagColor")
+        ? { tagColor: data.tagColor || null }
+        : {}),
       densityGsm: fabric.densityGsm,
       composition: fabric.composition,
       metersPerKg: fabric.metersPerKg,
@@ -230,7 +240,9 @@ export async function createMaterial(raw: MaterialFormValues) {
       costVatOverride: fabric.costVatOverride,
       deliveryType: fabric.deliveryType,
       unitsPerPack: fabric.unitsPerPack,
-      unitsPerKg: fabric.unitsPerKg,
+      ...(prismaMaterialHasField("unitsPerKg")
+        ? { unitsPerKg: fabric.unitsPerKg }
+        : {}),
       purchasePackPrice: fabric.purchasePackPrice,
       packDeliveryCostUah: fabric.packDeliveryCostUah,
     },
@@ -239,6 +251,16 @@ export async function createMaterial(raw: MaterialFormValues) {
       category: true,
     },
   });
+
+  if (!prismaMaterialHasField("tagColor") || !prismaMaterialHasField("unitsPerKg")) {
+    await prisma.$executeRaw`
+      UPDATE materials
+      SET
+        tag_color = ${data.tagColor || null},
+        units_per_kg = ${fabric.unitsPerKg}
+      WHERE id = ${material.id}
+    `;
+  }
 
   if (data.supplierCode) {
     const { syncPrimarySupplierOfferFromMaterial } = await import(
@@ -305,7 +327,9 @@ export async function updateMaterial(
       colorOrAttribute: data.colorOrAttribute || null,
       availableColors: data.availableColors ?? [],
       note: data.note || null,
-      tagColor: data.tagColor || null,
+      ...(prismaMaterialHasField("tagColor")
+        ? { tagColor: data.tagColor || null }
+        : {}),
       densityGsm: fabric.densityGsm,
       composition: fabric.composition,
       metersPerKg: fabric.metersPerKg,
@@ -317,7 +341,9 @@ export async function updateMaterial(
       costVatOverride: fabric.costVatOverride,
       deliveryType: fabric.deliveryType,
       unitsPerPack: fabric.unitsPerPack,
-      unitsPerKg: fabric.unitsPerKg,
+      ...(prismaMaterialHasField("unitsPerKg")
+        ? { unitsPerKg: fabric.unitsPerKg }
+        : {}),
       purchasePackPrice: fabric.purchasePackPrice,
       packDeliveryCostUah: fabric.packDeliveryCostUah,
       ...(preserve
@@ -339,6 +365,17 @@ export async function updateMaterial(
       category: true,
     },
   });
+
+  // Stale Prisma runtime (cached generate) may omit newer columns — write via SQL.
+  if (!prismaMaterialHasField("tagColor") || !prismaMaterialHasField("unitsPerKg")) {
+    await prisma.$executeRaw`
+      UPDATE materials
+      SET
+        tag_color = ${data.tagColor || null},
+        units_per_kg = ${fabric.unitsPerKg}
+      WHERE id = ${id}
+    `;
+  }
 
   if (!preserve && data.type === "FABRIC" && data.supplierCode) {
     const { syncPrimarySupplierOfferFromMaterial } = await import(
