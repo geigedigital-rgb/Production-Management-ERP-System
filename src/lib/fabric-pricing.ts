@@ -82,6 +82,101 @@ export function meterPriceFromKgUsd(
   return round1((kg * usdUahRate) / mpk);
 }
 
+/** грн/м.п. = (₴/кг) / (м.п. у 1 кг) */
+export function meterPriceFromKgUah(
+  priceKgUah: number | null | undefined,
+  metersPerKg: number | null | undefined,
+) {
+  const kg = num(priceKgUah);
+  const mpk = num(metersPerKg);
+  if (kg == null || mpk == null || mpk <= 0) return null;
+  return round1(kg / mpk);
+}
+
+/** грн/м.п. = $/м × курс */
+export function meterPriceFromMeterUsd(
+  priceMeterUsd: number | null | undefined,
+  usdUahRate: number,
+) {
+  const meter = num(priceMeterUsd);
+  if (meter == null || usdUahRate <= 0) return null;
+  return round1(meter * usdUahRate);
+}
+
+export type FabricQuoteCurrency = "uah" | "usd";
+export type FabricQuoteUnit = "meter" | "kg";
+
+/** Convert supplier list price → ₴/м.п. (без доставки). */
+export function meterUahFromSupplierQuote(args: {
+  currency: FabricQuoteCurrency;
+  unit: FabricQuoteUnit;
+  quote: number | null | undefined;
+  metersPerKg?: number | null;
+  usdUahRate: number;
+}): number | null {
+  const quote = num(args.quote);
+  if (quote == null) return null;
+  if (args.currency === "uah" && args.unit === "meter") return round1(quote);
+  if (args.currency === "usd" && args.unit === "meter") {
+    return meterPriceFromMeterUsd(quote, args.usdUahRate);
+  }
+  if (args.currency === "usd" && args.unit === "kg") {
+    return meterPriceFromKgUsd(quote, args.metersPerKg, args.usdUahRate);
+  }
+  return meterPriceFromKgUah(quote, args.metersPerKg);
+}
+
+/** Reverse: ₴/м.п. → quote in supplier currency/unit (for display). */
+export function supplierQuoteFromMeterUah(args: {
+  currency: FabricQuoteCurrency;
+  unit: FabricQuoteUnit;
+  meterUah: number | null | undefined;
+  metersPerKg?: number | null;
+  usdUahRate: number;
+}): number | null {
+  const meter = num(args.meterUah);
+  if (meter == null) return null;
+  if (args.currency === "uah" && args.unit === "meter") return round1(meter);
+  if (args.currency === "usd" && args.unit === "meter") {
+    if (args.usdUahRate <= 0) return null;
+    return round4(meter / args.usdUahRate);
+  }
+  const mpk = num(args.metersPerKg);
+  if (mpk == null || mpk <= 0) return null;
+  if (args.currency === "usd" && args.unit === "kg") {
+    if (args.usdUahRate <= 0) return null;
+    return round4((meter * mpk) / args.usdUahRate);
+  }
+  return round1(meter * mpk);
+}
+
+export function fabricQuoteSuffix(
+  currency: FabricQuoteCurrency,
+  unit: FabricQuoteUnit,
+): string {
+  if (currency === "usd" && unit === "kg") return "$/кг";
+  if (currency === "usd" && unit === "meter") return "$/м";
+  if (currency === "uah" && unit === "kg") return "₴/кг";
+  return "₴/м";
+}
+
+export function fabricQuoteHint(
+  currency: FabricQuoteCurrency,
+  unit: FabricQuoteUnit,
+): string {
+  if (currency === "usd" && unit === "kg") {
+    return "Авто в ₴/м: $/кг ÷ м.п./кг × курс (без доставки)";
+  }
+  if (currency === "usd" && unit === "meter") {
+    return "Авто в ₴/м: $/м × курс (без доставки)";
+  }
+  if (currency === "uah" && unit === "kg") {
+    return "Авто в ₴/м: ₴/кг ÷ м.п./кг (без доставки)";
+  }
+  return "Базова ціна тканини без доставки";
+}
+
+
 export function metersPerRollFromWeight(
   rollWeightKg: number | null | undefined,
   metersPerKg: number | null | undefined,
@@ -195,7 +290,8 @@ export function resolveMinWholesaleMeters(input: {
 }
 
 /**
- * Pick cut vs wholesale for an order line by fabric meters needed.
+ * Pick retail (cut) vs base price for an order line by fabric meters needed.
+ * Below threshold → retail (priceMeterUahCutVat); at/above → base (priceMeterUahNoVat).
  * Catalog / base model should use resolveCatalogPurchasePrice (always conservative).
  */
 export function resolveOrderFabricPurchasePrice(input: {
@@ -204,26 +300,26 @@ export function resolveOrderFabricPurchasePrice(input: {
   cutPurchasePrice?: number | null;
   minWholesaleMeters?: number | null;
 }): { purchasePrice: number; pricingMode: FabricPricingMode } {
-  const cut = num(input.cutPurchasePrice);
+  const retail = num(input.cutPurchasePrice);
   const minM = num(input.minWholesaleMeters);
-  const wholesale = input.wholesalePurchasePrice;
+  const base = input.wholesalePurchasePrice;
 
-  // Single ₴/m price = звичайна; гурт only exists when cut vs wholesale differ.
-  if (cut == null || cut <= 0) {
+  // Single ₴/m price = базова; роздріб only exists when cut vs base differ.
+  if (retail == null || retail <= 0) {
     return {
-      purchasePrice: wholesale > 0 ? wholesale : 0,
+      purchasePrice: base > 0 ? base : 0,
       pricingMode: "standard",
     };
   }
 
-  const atWholesale =
+  const atBaseVolume =
     minM != null && minM > 0 && Number.isFinite(input.metersNeeded) && input.metersNeeded >= minM;
 
-  if (atWholesale) {
-    return { purchasePrice: wholesale > 0 ? wholesale : cut, pricingMode: "wholesale" };
+  if (atBaseVolume) {
+    return { purchasePrice: base > 0 ? base : retail, pricingMode: "wholesale" };
   }
 
-  return { purchasePrice: cut, pricingMode: "cut" };
+  return { purchasePrice: retail, pricingMode: "cut" };
 }
 
 /** Derive cargo / meter / roll prices and the purchasePrice used by the calc engine. */
@@ -281,7 +377,7 @@ export function deriveFabricPricing(
 
   const cutPurchasePrice = num(inputs.priceMeterUahCutVat);
 
-  // Catalog / base model: conservative cut price when present; else звичайна (not гурт).
+  // Catalog / base model: conservative retail when present; else базова.
   let purchasePrice = wholesalePurchasePrice;
   let pricingMode: FabricPricingMode = "standard";
   if (cutPurchasePrice != null && cutPurchasePrice > 0) {
@@ -327,9 +423,9 @@ export function fabricMetersNeeded(input: {
 export function fabricPricingModeLabel(mode: FabricPricingMode): string {
   switch (mode) {
     case "cut":
-      return "ціна";
+      return "роздріб";
     case "wholesale":
-      return "ціна опт";
+      return "ціна";
     default:
       return "ціна";
   }

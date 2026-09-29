@@ -161,6 +161,8 @@ model Material {
   availableColors    String[]     @default([]) @map("available_colors")
   priceEffectiveDate DateTime?
   note               String?
+  /// Optional catalog color tag (green / blue / amber / rose / slate).
+  tagColor           String?      @map("tag_color")
   status             RecordStatus @default(ACTIVE)
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
@@ -192,6 +194,8 @@ model Material {
 
   /// Trim / hardware: buy by pack, consume by unit (шт). Null = manual purchasePrice only.
   unitsPerPack         Int?      @map("units_per_pack")
+  /// Trim: pieces in 1 kg when buying by weight ($/кг → ₴/шт).
+  unitsPerKg           Decimal?  @db.Decimal(14, 4) @map("units_per_kg")
   /// Supplier quote for one pack (goods only, ₴).
   purchasePackPrice    Decimal?  @db.Decimal(14, 4) @map("purchase_pack_price")
   /// Delivery quoted per pack (₴); folded into purchasePrice / unitsPerPack.

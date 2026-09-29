@@ -116,6 +116,7 @@ export default async function MaterialsSettingsPage({
               .filter(Boolean)
               .join(" · ")
           : [row.colorOrAttribute].filter(Boolean).join(" · "),
+      tagColor: row.tagColor ?? null,
       densityGsm: row.densityGsm ?? "",
       composition: row.composition ?? "",
       metersPerKg: row.metersPerKg != null ? Number(row.metersPerKg) : null,

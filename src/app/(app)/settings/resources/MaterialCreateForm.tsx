@@ -19,6 +19,13 @@ import {
   IconPurchaseKg,
   IconSpec,
 } from "@/components/ui/Icons";
+import { MaterialTagPicker } from "@/components/catalog/MaterialTagPicker";
+import {
+  normalizeMaterialTagColor,
+  type MaterialTagColor,
+} from "@/lib/material-tags";
+import { materialPackLabels } from "@/lib/material-pack-labels";
+import { PanelTabs } from "@/components/ui/Tabs";
 import {
   createMaterialAction,
   getMaterialForEditAction,
@@ -108,6 +115,7 @@ export type MaterialFormDefaults = {
   supplierCode: string;
   colorOrAttribute: string;
   note: string;
+  tagColor?: string | null;
   densityGsm?: string;
   composition?: string;
   metersPerKg?: number | null;
@@ -126,6 +134,7 @@ export type MaterialFormDefaults = {
   costVatOverride?: "NET" | "GROSS" | null;
   deliveryType?: FabricDeliveryTypeCode | null;
   unitsPerPack?: number | null;
+  unitsPerKg?: number | null;
   purchasePackPrice?: number | null;
   packDeliveryCostUah?: number | null;
 };
@@ -235,6 +244,9 @@ function MaterialFields({
   const initialSupplier = resolveSupplierSelect(defaults?.supplierCode, knownSuppliers);
   const [type, setType] = useState(defaults?.type ?? "FABRIC");
   const [nameUk, setNameUk] = useState(defaults?.nameUk ?? "");
+  const [tagColor, setTagColor] = useState<MaterialTagColor | null>(() =>
+    normalizeMaterialTagColor(defaults?.tagColor),
+  );
   const [wizardStep, setWizardStep] = useState(0);
   const [unitOfMeasureId, setUnitOfMeasureId] = useState(
     defaults?.unitOfMeasureId ?? units[0]?.id ?? "",
@@ -280,17 +292,6 @@ function MaterialFields({
   const [minWholesaleMeters, setMinWholesaleMeters] = useState(
     numStr(defaults?.minWholesaleMeters),
   );
-  const [rollWeightKg, setRollWeightKg] = useState(numStr(defaults?.rollWeightKg));
-  const [metersPerRollManual, setMetersPerRollManual] = useState(
-    numStr(defaults?.metersPerRoll),
-  );
-  /** Fixed roll length (e.g. 50 m) — skips weight × м.п./кг auto. */
-  const [rollLengthFixed, setRollLengthFixed] = useState(() => {
-    const hasManualRoll =
-      defaults?.metersPerRoll != null && Number(defaults.metersPerRoll) > 0;
-    const hasWeight = defaults?.rollWeightKg != null && Number(defaults.rollWeightKg) > 0;
-    return hasManualRoll && !hasWeight;
-  });
   const [wholesaleNote, setWholesaleNote] = useState(defaults?.wholesaleNote ?? "");
   const [note, setNote] = useState(defaults?.note ?? "");
   const [costOverride, setCostOverride] = useState(defaults?.costVatOverride ?? "");
@@ -304,8 +305,13 @@ function MaterialFields({
   );
   const [usdUahRate, setUsdUahRate] = useState(fabricGlobals.usdUahRate);
 
+  useEffect(() => {
+    setUsdUahRate(fabricGlobals.usdUahRate);
+  }, [fabricGlobals.usdUahRate]);
+
   const [purchasePrice, setPurchasePrice] = useState(String(defaults?.purchasePrice ?? 0));
   const [unitsPerPack, setUnitsPerPack] = useState(numStr(defaults?.unitsPerPack));
+  const [unitsPerKg, setUnitsPerKg] = useState(numStr(defaults?.unitsPerKg));
   const [purchasePackPrice, setPurchasePackPrice] = useState(numStr(defaults?.purchasePackPrice));
   const [packDeliveryCostUah, setPackDeliveryCostUah] = useState(
     numStr(defaults?.packDeliveryCostUah),
@@ -313,12 +319,12 @@ function MaterialFields({
 
   const selectedUnit = units.find((unit) => unit.id === unitOfMeasureId) ?? units[0];
   const fabricUnitMode = resolveFabricUnitMode(resolveUnitCode(selectedUnit));
+  const packLabels = materialPackLabels(fabricUnitMode);
   const fabricMeterPricing =
     type === "FABRIC" && (fabricUnitMode === "m" || fabricUnitMode === "kg" || fabricUnitMode === "m2");
   const fabricEachPricing =
     type === "FABRIC" && (fabricUnitMode === "pcs" || fabricUnitMode === "cone");
   const pricingInline = fabricMeterPricing && !managePricingSeparately;
-  const showRollParams = type === "FABRIC" && fabricMeterPricing;
   /** Density + width drive м.п./кг when buying in kg. */
   const densityWidthRequired = type === "FABRIC" && fabricUnitMode === "kg";
   /** Density/width visible for all meter-priced fabrics (edit + catalog); required only in kg. */
@@ -330,18 +336,6 @@ function MaterialFields({
   const metersPerKgRequired = type === "FABRIC" && fabricUnitMode === "kg";
   const metersPerKgAutoOnly = type === "FABRIC" && fabricUnitMode === "kg";
   const autoMetersPerKg = metersPerKgFromDensityWidth(densityGsm, widthCm);
-  const effectiveMetersPerRoll = rollLengthFixed
-    ? metersPerRollManual
-      ? Number(metersPerRollManual)
-      : null
-    : null;
-  const metersPerRollReady = Boolean(
-    !rollLengthFixed &&
-      metersPerKg &&
-      Number(metersPerKg) > 0 &&
-      rollWeightKg &&
-      Number(rollWeightKg) > 0,
-  );
 
   const liveGlobals = useMemo<FabricPricingGlobals>(
     () => ({
@@ -372,8 +366,8 @@ function MaterialFields({
           priceMeterUahNoVat: priceMeterNoVat ? Number(priceMeterNoVat) : null,
           priceMeterUahVat: priceMeterVat ? Number(priceMeterVat) : null,
           priceMeterUahCutVat: priceMeterCutVat ? Number(priceMeterCutVat) : null,
-          rollWeightKg: rollLengthFixed ? null : rollWeightKg ? Number(rollWeightKg) : null,
-          metersPerRoll: effectiveMetersPerRoll,
+          rollWeightKg: null,
+          metersPerRoll: null,
           minWholesaleMeters: minWholesaleMeters ? Number(minWholesaleMeters) : null,
           costVatOverride: costOverride === "NET" || costOverride === "GROSS" ? costOverride : null,
         },
@@ -386,9 +380,6 @@ function MaterialFields({
       priceMeterNoVat,
       priceMeterVat,
       priceMeterCutVat,
-      rollWeightKg,
-      rollLengthFixed,
-      effectiveMetersPerRoll,
       minWholesaleMeters,
       costOverride,
       liveGlobals,
@@ -466,7 +457,7 @@ function MaterialFields({
           : null,
         priceMeterUahNoVat: null,
         priceMeterUahVat: null,
-        rollWeightKg: rollWeightKg ? Number(rollWeightKg) : null,
+        rollWeightKg: null,
         costVatOverride: costOverride === "NET" || costOverride === "GROSS" ? costOverride : null,
       },
       globals,
@@ -686,6 +677,7 @@ function MaterialFields({
       ) : null}
 
       <div className={showStep("Основне") ? "space-y-4" : "hidden"}>
+      <MaterialTagPicker value={tagColor} onChange={setTagColor} />
       <FormGroup label={wizard ? undefined : "Основне"} icon={wizard ? undefined : <IconFormTitle size={14} />} columns={2} compact>
         <Input
           className="sm:col-span-2"
@@ -749,20 +741,35 @@ function MaterialFields({
           <>
             <Input
               name="unitsPerPack"
-              label="Шт в упаковці"
+              label={packLabels.contentLabel}
               type="number"
               step="1"
               min="1"
               optional
-              hint="Напр. гудзики — 1000 шт (спільне для всіх постачальників)"
+              hint={packLabels.contentHint}
               value={unitsPerPack}
               onChange={(event) => setUnitsPerPack(event.target.value)}
             />
+            {packLabels.showUnitsPerKg ? (
+              <Input
+                name="unitsPerKg"
+                label="Шт / кг"
+                type="number"
+                step="0.01"
+                min="0"
+                optional
+                hint="Напр. комірці — ~10 шт у 1 кг (для закупівлі $/кг)"
+                value={unitsPerKg}
+                onChange={(event) => setUnitsPerKg(event.target.value)}
+              />
+            ) : (
+              <input type="hidden" name="unitsPerKg" value={unitsPerKg} />
+            )}
             {!trimPricingOnSuppliers ? (
               <>
                 <Input
                   name="purchasePackPrice"
-                  label="Ціна упаковки"
+                  label={packLabels.packPriceLabel}
                   type="number"
                   step="0.01"
                   min="0"
@@ -773,13 +780,13 @@ function MaterialFields({
                 />
                 <Input
                   name="packDeliveryCostUah"
-                  label="Доставка упаковки"
+                  label="Доставка (фікс)"
                   type="number"
                   step="0.01"
                   min="0"
                   optional
                   suffix="₴"
-                  hint="Краще задавати в умовах постачальника"
+                  hint="Фікс за пачку/бобіну · або задайте в умовах постачальника"
                   value={packDeliveryCostUah}
                   onChange={(event) => setPackDeliveryCostUah(event.target.value)}
                 />
@@ -969,86 +976,31 @@ function MaterialFields({
             ) : (
               <input type="hidden" name="metersPerKg" value={metersPerKg} />
             )}
-            {showRollParams ? (
-              <>
-                <Select
-                  label="Метраж рулону"
-                  optional
-                  value={rollLengthFixed ? "fixed" : "auto"}
-                  onChange={(event) => {
-                    const fixed = event.target.value === "fixed";
-                    setRollLengthFixed(fixed);
-                    if (fixed) {
-                      const current =
-                        derived.metersPerRoll != null
-                          ? String(derived.metersPerRoll)
-                          : metersPerRollManual;
-                      setMetersPerRollManual(current);
-                    }
-                  }}
-                >
-                  <option value="auto">З ваги (авто)</option>
-                  <option value="fixed">Фіксована довжина</option>
-                </Select>
-                {rollLengthFixed ? (
-                  <>
-                    <Input
-                      name="metersPerRoll"
-                      label="м.п. / рул."
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      value={metersPerRollManual}
-                      onChange={(event) => setMetersPerRollManual(event.target.value)}
-                      hint="Вручну, наприклад 50"
-                    />
-                    <input type="hidden" name="rollWeightKg" value="" />
-                  </>
-                ) : (
-                  <>
-                    <Input
-                      name="rollWeightKg"
-                      label="Вага рул., кг"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={rollWeightKg}
-                      onChange={(event) => setRollWeightKg(event.target.value)}
-                      hint="Разом з м.п./кг → м.п./рул."
-                    />
-                    <Input
-                      label="м.п. / рул. (авто)"
-                      value={derived.metersPerRoll ?? ""}
-                      readOnly
-                      tabIndex={-1}
-                      hint={
-                        metersPerRollReady
-                          ? "вага рул. × м.п./кг"
-                          : "Потрібні вага рулона і м.п./кг"
-                      }
-                    />
-                    <input
-                      type="hidden"
-                      name="metersPerRoll"
-                      value={derived.metersPerRoll ?? ""}
-                    />
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <input type="hidden" name="rollWeightKg" value={rollWeightKg} />
-                <input
-                  type="hidden"
-                  name="metersPerRoll"
-                  value={
-                    rollLengthFixed
-                      ? metersPerRollManual
-                      : (derived.metersPerRoll ?? "")
+            {type === "FABRIC" ? (
+              <Input
+                name="usdUahRate"
+                label="Курс"
+                type="number"
+                step="0.01"
+                min="0.01"
+                suffix="₴/$"
+                value={String(usdUahRate)}
+                onChange={(event) => {
+                  const raw = event.target.value.trim();
+                  if (raw === "") {
+                    setUsdUahRate(fabricGlobals.usdUahRate);
+                    return;
                   }
-                />
-              </>
+                  const n = Number(raw.replace(",", "."));
+                  if (Number.isFinite(n) && n > 0) setUsdUahRate(n);
+                }}
+                hint="З Ціноутворення · зміна оновить курс у компанії"
+              />
+            ) : (
+              <input type="hidden" name="usdUahRate" value={usdUahRate} />
             )}
+            <input type="hidden" name="rollWeightKg" value="" />
+            <input type="hidden" name="metersPerRoll" value="" />
           </FormGroup>
           </div>
 
@@ -1068,7 +1020,6 @@ function MaterialFields({
                 />
                 <input type="hidden" name="deliveryType" value={deliveryType} />
                 <input type="hidden" name="fabricCargoUsdPerKg" value={fabricCargoUsdPerKg} />
-                <input type="hidden" name="usdUahRate" value={usdUahRate} />
                 {fabricEachPricing ? (
                   <input type="hidden" name="purchasePrice" value={purchaseDisplay} />
                 ) : (
@@ -1098,13 +1049,15 @@ function MaterialFields({
                   onChange={setSupplierDrafts}
                   metersPerKg={metersPerKg ? Number(metersPerKg) : null}
                   unitsPerPack={unitsPerPack ? Number(unitsPerPack) : null}
+                  unitsPerKg={unitsPerKg ? Number(unitsPerKg) : null}
+                  unitMode={fabricUnitMode}
                   fabricGlobals={liveGlobals}
                   knownSuppliers={knownSuppliers}
                   defaultDeliveryType={deliveryType}
                   onEditingChange={setSupplierDraftEditing}
                   pricingKind={supplierPricingKind}
                   usdUahRate={usdUahRate}
-                  onUsdUahRateChange={setUsdUahRate}
+                  /* Курс у «Параметри» — без дубля в тарифах доставки */
                 />
               </>
             ) : managePricingSeparately ? (
@@ -1113,7 +1066,6 @@ function MaterialFields({
                 <input type="hidden" name="supplierCode" value={defaults?.supplierCode ?? ""} />
                 <input type="hidden" name="deliveryType" value={deliveryType} />
                 <input type="hidden" name="fabricCargoUsdPerKg" value={fabricCargoUsdPerKg} />
-                <input type="hidden" name="usdUahRate" value={usdUahRate} />
               </>
             ) : (
               <FormGroup
@@ -1180,7 +1132,6 @@ function MaterialFields({
                   }}
                   hint="Для кількох типів (НП стандарт + обʼємні) — після створення редагуйте в «Умовах» постачальника"
                 />
-                <input type="hidden" name="usdUahRate" value={usdUahRate} />
               </FormGroup>
             )}
           </div>
@@ -1262,18 +1213,14 @@ function MaterialFields({
               ) : null}
 
               <FormGroup
-                label={wizard ? undefined : "Собівартість і гурт"}
+                label={wizard ? undefined : "Собівартість"}
                 icon={wizard ? undefined : <IconMeterPrice size={14} />}
                 columns={2}
                 compact
               >
                 <Input
                   name="priceMeterUahNoVat"
-                  label={
-                    minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
-                      ? "Ціна опт"
-                      : "Ціна"
-                  }
+                  label="Ціна"
                   type="number"
                   step="0.1"
                   min="0"
@@ -1296,14 +1243,14 @@ function MaterialFields({
                       : fabricUnitMode === "m2"
                         ? "Авто з ₴/м² × ширина"
                         : minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
-                          ? `Ціна опт від ${minWholesaleMeters} м`
-                          : "Ціна тканини без доставки"
+                          ? `Базова · від ${minWholesaleMeters} м`
+                          : "Базова ціна тканини без доставки"
                   }
                 />
                 <input type="hidden" name="priceMeterUahVat" value="" />
                 <Input
                   name="minWholesaleMeters"
-                  label="Межа опт"
+                  label="Межа роздробу"
                   type="number"
                   step="0.1"
                   min="0"
@@ -1317,11 +1264,11 @@ function MaterialFields({
                       setPriceMeterCutVat("");
                     }
                   }}
-                  hint="Після цієї кількості діє ціна опт"
+                  hint="Якщо витрата менша за межу — ціна роздробу"
                 />
                 <Input
                   name="priceMeterUahCutVat"
-                  label="Ціна"
+                  label="Ціна роздробу"
                   type="number"
                   step="0.1"
                   min="0"
@@ -1334,8 +1281,8 @@ function MaterialFields({
                   onChange={(event) => setPriceMeterCutVat(event.target.value)}
                   hint={
                     minWholesaleMeters.trim() === "" || Number(minWholesaleMeters) <= 0
-                      ? "Спочатку вкажіть межу опт"
-                      : "Ціна до межі опт (зазвичай дорожча)"
+                      ? "Спочатку вкажіть межу роздробу"
+                      : "До межі (зазвичай дорожча за базову)"
                   }
                 />
                 <Input
@@ -1349,11 +1296,11 @@ function MaterialFields({
                 {derived.purchasePrice > 0 ? (
                   <p className="type-caption sm:col-span-2 tabular">
                     Активна собівартість з цих умов: {formatMoneyUah(derived.purchasePrice)}/м
-                    {derived.pricingMode === "cut" ? " (до опт)" : ""}
+                    {derived.pricingMode === "cut" ? " (роздріб)" : ""}
                     {minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
                       ? priceMeterCutVat.trim() !== "" && Number(priceMeterCutVat) > 0
-                        ? ` · ≥ ${minWholesaleMeters} м → гурт`
-                        : ` · гурт від ${minWholesaleMeters} м`
+                        ? ` · < ${minWholesaleMeters} м → роздріб`
+                        : ` · роздріб до ${minWholesaleMeters} м`
                       : " · ціна"}
                   </p>
                 ) : null}
@@ -1429,6 +1376,8 @@ function MaterialFields({
                 onChange={setSupplierDrafts}
                 metersPerKg={null}
                 unitsPerPack={unitsPerPack ? Number(unitsPerPack) : null}
+                unitsPerKg={unitsPerKg ? Number(unitsPerKg) : null}
+                unitMode={fabricUnitMode}
                 fabricGlobals={liveGlobals}
                 knownSuppliers={knownSuppliers}
                 defaultDeliveryType={deliveryType}
@@ -1718,9 +1667,16 @@ export function MaterialEditPanel({
   }
 
   const tabItems = [
-    { key: "main" as const, label: "Основне" },
-    { key: "suppliers" as const, label: "Постачальники та закупівля" },
+    { key: "main" as const, label: "Основне", icon: <IconFormTitle size={14} /> },
+    {
+      key: "suppliers" as const,
+      label: "Постачальники",
+      icon: <IconClients size={14} />,
+    },
   ];
+
+  const loadedUnit = units.find((u) => u.id === loaded?.unitOfMeasureId);
+  const loadedUnitMode = resolveFabricUnitMode(resolveUnitCode(loadedUnit));
 
   return (
     <>
@@ -1757,32 +1713,11 @@ export function MaterialEditPanel({
             <SidePanelSkeleton sections={4} />
           ) : (
             <>
-              <div
-                className="inline-flex items-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-1"
-                role="tablist"
-                aria-label="Розділи матеріалу"
-              >
-                {tabItems.map((item) => {
-                  const active = tab === item.key;
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => setTab(item.key)}
-                      className={
-                        "inline-flex items-center rounded-[8px] px-3 py-1.5 text-[13px] font-semibold transition-colors " +
-                        (active
-                          ? "bg-[var(--color-tint-sage)] text-[var(--color-primary-800)]"
-                          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]")
-                      }
-                    >
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
+              <PanelTabs
+                items={tabItems}
+                active={tab}
+                onChange={(key) => setTab(key as "main" | "suppliers")}
+              />
 
               <div className={tab === "main" ? "space-y-4" : "hidden"} role="tabpanel">
                 <MaterialFields
@@ -1800,6 +1735,8 @@ export function MaterialEditPanel({
                   materialId={loaded.id}
                   metersPerKg={loaded.metersPerKg}
                   unitsPerPack={loaded.unitsPerPack ?? null}
+                  unitsPerKg={loaded.unitsPerKg ?? null}
+                  unitMode={loadedUnitMode}
                   fabricGlobals={globals}
                   pricingKind={loaded.type === "FABRIC" ? "fabric" : "unit"}
                   embedded

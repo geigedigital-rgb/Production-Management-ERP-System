@@ -33,6 +33,10 @@ export const materialFormSchema = z.object({
     .optional()
     .default([]),
   note: optionalString,
+  tagColor: z.preprocess(
+    emptyToNull,
+    z.enum(["green", "blue", "amber", "rose", "slate"]).nullable().optional(),
+  ),
   densityGsm: optionalString,
   composition: optionalString,
   metersPerKg: optionalNonNeg,
@@ -58,6 +62,8 @@ export const materialFormSchema = z.object({
   ),
   /** Trim pack size (e.g. 1000 buttons). */
   unitsPerPack: z.preprocess(emptyToNull, z.coerce.number().int().positive().nullable().optional()),
+  /** Trim: pieces per kg when buying by weight. */
+  unitsPerKg: optionalNonNeg,
   purchasePackPrice: optionalNonNeg,
   packDeliveryCostUah: optionalNonNeg,
 });

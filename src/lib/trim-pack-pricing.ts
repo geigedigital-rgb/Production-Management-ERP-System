@@ -1,9 +1,13 @@
 /**
- * Trim / hardware pack quotes → per-consumption-unit cost.
- * Example: pack 1000 pcs for 1500 ₴ → 1,50 ₴/шт.
+ * Trim / hardware quotes → per-consumption-unit cost (₴/шт).
  *
- * Delivery tariffs (CARGO / НП…) are always $/кг — same as fabric.
- * They are not folded into ₴/од. from the pack quote; optional legacy
+ * Modes:
+ * - pack: ₴/уп. ÷ шт в упаковці
+ * - kg:   ($/кг × курс) ÷ шт/кг
+ * - each: direct ₴/шт
+ *
+ * Delivery tariffs (CARGO / НП…) are always $/кг for logistics — same as fabric.
+ * They are not folded into ₴/од. from the pack/kg goods quote; optional legacy
  * packDeliveryCostUah still adds a fixed ₴ per pack when set.
  */
 
@@ -18,10 +22,23 @@ export type TrimPackQuote = {
   packDeliveryCostUah?: number | null;
 };
 
+export type TrimKgQuote = {
+  unitsPerKg?: number | null;
+  priceKgUsd?: number | null;
+  usdUahRate?: number | null;
+};
+
 export function hasTrimPackQuote(quote: TrimPackQuote): boolean {
   const n = Math.floor(Number(quote.unitsPerPack) || 0);
   const pack = Number(quote.purchasePackPrice);
   return n > 0 && Number.isFinite(pack) && pack >= 0;
+}
+
+export function hasTrimKgQuote(quote: TrimKgQuote): boolean {
+  const upk = Number(quote.unitsPerKg);
+  const kg = Number(quote.priceKgUsd);
+  const rate = Number(quote.usdUahRate);
+  return upk > 0 && Number.isFinite(kg) && kg >= 0 && rate > 0;
 }
 
 /**
@@ -34,7 +51,19 @@ export function resolveTrimPackDeliveryUah(
   return null;
 }
 
-/** Active calc price ₴ / consumption unit (шт, м.п., …). */
+/** грн/шт = ($/кг × курс) / (шт у 1 кг) */
+export function unitPriceFromKgUsd(
+  priceKgUsd: number | null | undefined,
+  unitsPerKg: number | null | undefined,
+  usdUahRate: number,
+): number | null {
+  const kg = Number(priceKgUsd);
+  const upk = Number(unitsPerKg);
+  if (!(Number.isFinite(kg) && kg >= 0) || !(upk > 0) || !(usdUahRate > 0)) return null;
+  return Math.round(((kg * usdUahRate) / upk) * 10000) / 10000;
+}
+
+/** Active calc price ₴ / consumption unit from pack quote. */
 export function deriveUnitPriceFromPack(
   quote: TrimPackQuote,
   fallbackUnitPrice = 0,
@@ -49,24 +78,57 @@ export function deriveUnitPriceFromPack(
   return Math.round(((pack + delivery) / n) * 10000) / 10000;
 }
 
-/** Derive ₴/од. from pack goods (+ optional legacy packDeliveryCostUah). */
+/**
+ * Derive ₴/од. priority: $/кг+шт/кг → упаковка (+фікс) → пряма ціна (+фікс).
+ */
 export function deriveTrimUnitPriceFromSupplier(args: {
   unitsPerPack?: number | null;
   purchasePackPrice?: number | null;
   deliveryRates?: SupplierDeliveryRates;
-  /** Legacy single pack-delivery field (₴/уп.). */
+  /** Legacy / fixed pack-delivery field (₴). */
   packDeliveryCostUah?: number | null;
+  unitsPerKg?: number | null;
+  priceKgUsd?: number | null;
+  usdUahRate?: number | null;
   fallbackUnitPrice?: number;
 }): number {
   void args.deliveryRates;
-  return deriveUnitPriceFromPack(
-    {
+  const fromKg = unitPriceFromKgUsd(
+    args.priceKgUsd,
+    args.unitsPerKg,
+    Number(args.usdUahRate) || 0,
+  );
+  const fixed = Math.max(0, Number(args.packDeliveryCostUah) || 0);
+  if (fromKg != null) {
+    const n = Math.floor(Number(args.unitsPerPack) || 0);
+    if (fixed > 0 && n > 0) {
+      return Math.round((fromKg + fixed / n) * 10000) / 10000;
+    }
+    return fromKg;
+  }
+  if (
+    hasTrimPackQuote({
       unitsPerPack: args.unitsPerPack,
       purchasePackPrice: args.purchasePackPrice,
       packDeliveryCostUah: args.packDeliveryCostUah,
-    },
-    args.fallbackUnitPrice ?? 0,
-  );
+    })
+  ) {
+    return deriveUnitPriceFromPack({
+      unitsPerPack: args.unitsPerPack,
+      purchasePackPrice: args.purchasePackPrice,
+      packDeliveryCostUah: args.packDeliveryCostUah,
+    });
+  }
+  const fallback = Number(args.fallbackUnitPrice);
+  const base = Number.isFinite(fallback) && fallback >= 0 ? fallback : 0;
+  const n = Math.floor(Number(args.unitsPerPack) || 0);
+  if (fixed > 0 && n > 0) {
+    return Math.round((base + fixed / n) * 10000) / 10000;
+  }
+  if (fixed > 0) {
+    return Math.round((base + fixed) * 10000) / 10000;
+  }
+  return base;
 }
 
 /** Configured $/кг delivery options on a trim/unit supplier offer. */
@@ -86,6 +148,14 @@ export function packsToOrder(unitsNeeded: number, unitsPerPack: number | null | 
   const need = Number(unitsNeeded);
   if (!(n > 0) || !(need > 0) || !Number.isFinite(need)) return 0;
   return Math.ceil(need / n);
+}
+
+/** Kg to buy for a production need when quoted by weight. */
+export function kgToOrder(unitsNeeded: number, unitsPerKg: number | null | undefined): number {
+  const upk = Number(unitsPerKg);
+  const need = Number(unitsNeeded);
+  if (!(upk > 0) || !(need > 0) || !Number.isFinite(need)) return 0;
+  return Math.round((need / upk) * 10000) / 10000;
 }
 
 export function trimPackSpend(args: {

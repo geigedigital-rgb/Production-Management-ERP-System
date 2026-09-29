@@ -255,7 +255,7 @@ export function resolveDraftMaterialPrice(
       ? fabricPricingModeLabel(resolved.pricingMode)
       : priceMode === "cut"
         ? "ціна (вручну)"
-        : "гурт (вручну)";
+        : "ціна (вручну)";
 
   return {
     purchasePrice: resolved.purchasePrice,
@@ -277,7 +277,7 @@ export function draftMaterialChoiceSummary(
     parts.push(vatMode === "GROSS" ? "з ПДВ" : "без ПДВ");
     if (row.priceMode) {
       parts.push(
-        row.priceMode === "cut" ? "ціна" : row.priceMode === "wholesale" ? "опт" : "авто",
+        row.priceMode === "cut" ? "роздріб" : row.priceMode === "wholesale" ? "ціна" : "авто",
       );
     }
   }
@@ -299,7 +299,7 @@ export function draftMaterialPricingChoiceHint(
     parts.push("без ПДВ / з ПДВ");
   }
   if (materialNeedsPriceModeChoice(row) && !row.priceMode) {
-    parts.push("авто / ціна / опт");
+    parts.push("авто / роздріб / ціна");
   }
   if (parts.length === 0) return null;
   return parts.join(" · ");

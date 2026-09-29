@@ -20,19 +20,15 @@ import {
   useTableSort,
 } from "@/components/ui/table-interactions";
 import { BulkDeleteButton } from "@/components/ui/BulkDeleteButton";
-import { formatMoneyUah, formatUnit, cn } from "@/lib/utils";
+import { formatMoneyUah, cn } from "@/lib/utils";
 import { bulkArchiveMaterialsAction } from "@/server/domains/catalog/actions";
 import {
   MaterialEditPanel,
   type MaterialFormDefaults,
 } from "@/app/(app)/settings/resources/MaterialCreateForm";
 import type { FabricPricingGlobals } from "@/lib/fabric-pricing";
-
-const typeLabels: Record<string, string> = {
-  FABRIC: "Тканина",
-  OTHER_MATERIAL: "Інший матеріал",
-  TRIM: "Фурнітура",
-};
+import { MaterialTagDot } from "@/components/catalog/MaterialTagPicker";
+import { normalizeMaterialTagColor } from "@/lib/material-tags";
 
 export type MaterialsTableRow = {
   id: string;
@@ -48,6 +44,7 @@ export type MaterialsTableRow = {
   colorOrAttribute: string;
   note: string;
   details: string;
+  tagColor?: string | null;
   densityGsm?: string;
   composition?: string;
   metersPerKg?: number | null;
@@ -66,7 +63,7 @@ export type MaterialsTableRow = {
   costVatOverride?: "NET" | "GROSS" | null;
 };
 
-type SortKey = "name" | "type" | "unit" | "suppliers" | "density" | "composition" | "price";
+type SortKey = "name" | "density" | "composition" | "suppliers" | "price";
 
 function formatDensity(value?: string) {
   const trimmed = value?.replace(/\s+/g, " ").trim();
@@ -102,21 +99,19 @@ export function MaterialsTable({
     () =>
       sortRows(rows, sort, {
         name: (row) => row.nameUk,
-        type: (row) => typeLabels[row.type] ?? row.type,
-        unit: (row) => row.unitCode,
-        suppliers: (row) => row.supplierNames.join(" ") || row.supplierCode,
         density: (row) => {
           const n = Number(String(row.densityGsm ?? "").replace(",", "."));
           return Number.isFinite(n) && n > 0 ? n : null;
         },
         composition: (row) => row.composition?.trim() || null,
+        suppliers: (row) => row.supplierNames.join(" ") || row.supplierCode,
         price: (row) => row.purchasePrice,
       }),
     [rows, sort],
   );
   const ids = useMemo(() => sorted.map((row) => row.id), [sorted]);
   const selection = useRowSelection(ids);
-  const colSpan = canEdit ? 9 : 8;
+  const colSpan = canEdit ? 7 : 6;
 
   return (
     <div>
@@ -143,22 +138,16 @@ export function MaterialsTable({
             />
           </TH>
           <SortableTH columnKey="name" sort={sort} onSort={toggle} className="min-w-[14rem] w-[28%]">
-            Матеріал
-          </SortableTH>
-          <SortableTH columnKey="type" sort={sort} onSort={toggle}>
-            Тип
-          </SortableTH>
-          <SortableTH columnKey="unit" sort={sort} onSort={toggle} align="center" width="3rem">
-            Од.
-          </SortableTH>
-          <SortableTH columnKey="suppliers" sort={sort} onSort={toggle} className="min-w-[8rem]">
-            Постачальники
+            Назва
           </SortableTH>
           <SortableTH columnKey="density" sort={sort} onSort={toggle} align="right">
             Щільність
           </SortableTH>
           <SortableTH columnKey="composition" sort={sort} onSort={toggle} className="min-w-[7rem]">
             Склад
+          </SortableTH>
+          <SortableTH columnKey="suppliers" sort={sort} onSort={toggle} className="min-w-[8rem]">
+            Постачальник
           </SortableTH>
           <SortableTH columnKey="price" sort={sort} onSort={toggle} align="right">
             Ціна
@@ -188,6 +177,7 @@ export function MaterialsTable({
                 supplierCode: row.supplierCode,
                 colorOrAttribute: row.colorOrAttribute,
                 note: row.note,
+                tagColor: row.tagColor,
                 densityGsm: row.densityGsm,
                 composition: row.composition,
                 metersPerKg: row.metersPerKg,
@@ -205,6 +195,7 @@ export function MaterialsTable({
                 minWholesaleMeters: row.minWholesaleMeters,
                 costVatOverride: row.costVatOverride,
               };
+              const tag = normalizeMaterialTagColor(row.tagColor);
               return (
                 <TR
                   key={row.id}
@@ -220,22 +211,10 @@ export function MaterialsTable({
                     />
                   </TD>
                   <TD className="min-w-[14rem]">
-                    <CellStack title={row.nameUk} subtitle={row.details || undefined} wrap />
-                  </TD>
-                  <TD nowrap className="text-[var(--color-text-secondary)]">
-                    {typeLabels[row.type] ?? row.type}
-                  </TD>
-                  <TD align="center" nowrap className="w-[3rem] type-mono text-[12px] tabular-nums text-[var(--color-text-secondary)]">
-                    {formatUnit(row.unitCode)}
-                  </TD>
-                  <TD className="max-w-[12rem] text-[var(--color-text-secondary)]">
-                    {suppliersLabel ? (
-                      <span className="line-clamp-2" title={row.supplierNames.join(", ")}>
-                        {suppliersLabel}
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-tertiary)]">—</span>
-                    )}
+                    <div className="flex items-start gap-2">
+                      <MaterialTagDot color={tag} className="mt-1.5" />
+                      <CellStack title={row.nameUk} subtitle={row.details || undefined} wrap />
+                    </div>
                   </TD>
                   <TD numeric nowrap className="text-[var(--color-text-secondary)]">
                     {densityLabel ?? <span className="text-[var(--color-text-tertiary)]">—</span>}
@@ -244,6 +223,15 @@ export function MaterialsTable({
                     {composition ? (
                       <span className="line-clamp-2" title={composition}>
                         {composition}
+                      </span>
+                    ) : (
+                      <span className="text-[var(--color-text-tertiary)]">—</span>
+                    )}
+                  </TD>
+                  <TD className="max-w-[12rem] text-[var(--color-text-secondary)]">
+                    {suppliersLabel ? (
+                      <span className="line-clamp-2" title={row.supplierNames.join(", ")}>
+                        {suppliersLabel}
                       </span>
                     ) : (
                       <span className="text-[var(--color-text-tertiary)]">—</span>

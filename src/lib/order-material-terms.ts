@@ -63,8 +63,8 @@ export function fabricFieldsForOrderLine(
 
 /**
  * Product BOM / tirage COGS using the selected supplier's terms.
- * `metersNeeded` null → conservative (ціна до опт when cut exists).
- * With meters → cut vs опт by threshold (Прайс і крій / order).
+ * `metersNeeded` null → conservative (роздріб when cut exists).
+ * With meters → роздріб vs базова by threshold (Прайс і крій / order).
  */
 export function resolveBomMaterialPurchasePrice(input: {
   material: {

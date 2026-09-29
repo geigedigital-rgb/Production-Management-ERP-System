@@ -570,10 +570,10 @@ export function OrderMaterialDetailPanel({
                     !hasCut
                       ? "Ціна"
                       : atWholesale
-                        ? "Ціна опт"
+                        ? "Ціна"
                         : live.pricingMode === "cut"
-                          ? "Ціна"
-                          : "Ціна (до межі опт)";
+                          ? "Роздріб"
+                          : "Ціна";
                   const catalogHint =
                     live.catalogMinWholesaleMeters != null
                       ? `${live.catalogMinWholesaleMeters} м`
@@ -630,7 +630,7 @@ export function OrderMaterialDetailPanel({
                       ) : null}
                       {!hasWholesale ? (
                         <p className="type-caption">
-                          Немає ціни опт у каталозі — межу задати неможливо.
+                          Немає ціни роздробу у каталозі — межу задати неможливо.
                         </p>
                       ) : !hasCut ? (
                         <p className="type-caption">
@@ -645,8 +645,8 @@ export function OrderMaterialDetailPanel({
                       ) : threshold != null ? (
                         <p className="type-caption">
                           {atWholesale
-                            ? `Витрата ≥ ${threshold} м — ціна опт і доставка за партією.`
-                            : `До опт ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м.`}
+                            ? `Витрата ≥ ${threshold} м — базова ціна.`
+                            : `До базової ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м (зараз роздріб).`}
                         </p>
                       ) : (
                         <p className="type-caption">

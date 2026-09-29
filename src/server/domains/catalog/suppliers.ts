@@ -9,6 +9,7 @@ import { normalizeFabricDeliveryType } from "@/lib/fabric-delivery-types";
 import { resolveSupplierDeliveryRate } from "@/lib/supplier-delivery-rates";
 import {
   deriveTrimUnitPriceFromSupplier,
+  hasTrimKgQuote,
   hasTrimPackQuote,
 } from "@/lib/trim-pack-pricing";
 
@@ -302,19 +303,31 @@ export async function upsertMaterialSupplierOffer(
   const npVolumeUsdPerKg = optionalRate(offer.npVolumeUsdPerKg);
   // Typed rates are always $/кг. Legacy fixed ₴/уп. stays on packDeliveryCostUah only.
   const packDeliveryCostUah = optionalRate(offer.packDeliveryCostUah);
+  const priceKgUsd = optionalRate(offer.priceKgUsd);
 
   const unitsPerPack = material.unitsPerPack;
+  const unitsPerKg =
+    material.unitsPerKg != null && Number(material.unitsPerKg) > 0
+      ? Number(material.unitsPerKg)
+      : null;
   const unitPrice = deriveTrimUnitPriceFromSupplier({
     unitsPerPack,
     purchasePackPrice,
     packDeliveryCostUah,
+    unitsPerKg,
+    priceKgUsd,
+    usdUahRate: globals.usdUahRate,
     fallbackUnitPrice: optionalRate(offer.priceMeterUahNoVat) ?? 0,
   });
-  const unitPriceOrNull =
+  const hasDerived =
+    hasTrimKgQuote({
+      unitsPerKg,
+      priceKgUsd,
+      usdUahRate: globals.usdUahRate,
+    }) ||
     hasTrimPackQuote({ unitsPerPack, purchasePackPrice, packDeliveryCostUah }) ||
-    optionalRate(offer.priceMeterUahNoVat) != null
-      ? unitPrice
-      : optionalRate(offer.priceMeterUahNoVat);
+    optionalRate(offer.priceMeterUahNoVat) != null;
+  const unitPriceOrNull = hasDerived ? unitPrice : optionalRate(offer.priceMeterUahNoVat);
 
   if (!isFabric) {
     if (offer.isPrimary) {
@@ -336,8 +349,9 @@ export async function upsertMaterialSupplierOffer(
         cargoUsdPerKg,
         npStandardUsdPerKg,
         npVolumeUsdPerKg,
-        purchasePackPrice,
-        packDeliveryCostUah,
+        purchasePackPrice: priceKgUsd != null ? null : purchasePackPrice,
+        packDeliveryCostUah: priceKgUsd != null ? null : packDeliveryCostUah,
+        priceKgUsd,
         priceMeterUahNoVat: unitPriceOrNull,
         priceMeterUahVat: unitPriceOrNull,
         wholesaleNote: offer.wholesaleNote ?? null,
@@ -349,8 +363,9 @@ export async function upsertMaterialSupplierOffer(
         cargoUsdPerKg,
         npStandardUsdPerKg,
         npVolumeUsdPerKg,
-        purchasePackPrice,
-        packDeliveryCostUah,
+        purchasePackPrice: priceKgUsd != null ? null : purchasePackPrice,
+        packDeliveryCostUah: priceKgUsd != null ? null : packDeliveryCostUah,
+        priceKgUsd,
         priceMeterUahNoVat: unitPriceOrNull,
         priceMeterUahVat: unitPriceOrNull,
         wholesaleNote: offer.wholesaleNote ?? null,
@@ -367,8 +382,9 @@ export async function upsertMaterialSupplierOffer(
         data: {
           supplierCode: supplier.nameUk,
           purchasePrice: unitPriceOrNull,
-          purchasePackPrice,
-          packDeliveryCostUah,
+          purchasePackPrice: priceKgUsd != null ? null : purchasePackPrice,
+          packDeliveryCostUah: priceKgUsd != null ? null : packDeliveryCostUah,
+          priceKgUsd,
           ...(offer.availableColors !== undefined
             ? { availableColors: mergeColorLists(offer.availableColors ?? []) }
             : {}),

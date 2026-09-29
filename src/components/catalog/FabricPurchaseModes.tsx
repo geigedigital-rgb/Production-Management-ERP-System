@@ -67,14 +67,20 @@ export function PurchaseModeRow({
   );
 }
 
+export type { FabricQuoteCurrency, FabricQuoteUnit } from "@/lib/fabric-pricing";
 export type FabricQuoteMode = "meter" | "kg";
 export type FabricTierMode = "single" | "tier";
 export type FabricDeliveryUiMode = "kg" | "none";
 
-/** шт / бобіна: direct unit price vs pack quote. */
-export type UnitQuoteMode = "each" | "pack";
-/** Same delivery toggle as fabric (тарифи $/кг). */
-export type UnitDeliveryUiMode = FabricDeliveryUiMode;
+/** шт / бобіна: direct unit price vs pack quote vs $/кг. */
+export type UnitQuoteMode = "each" | "pack" | "kg";
+/**
+ * Unit-material delivery:
+ * - kg — CARGO / НП тарифи $/кг (як тканина)
+ * - fixed — фікс ₴ на пачку/поставку
+ * - none — без доставки
+ */
+export type UnitDeliveryUiMode = "kg" | "fixed" | "none";
 
 export function inferFabricQuoteMode(input: {
   priceKgUsd?: string | number | null;
@@ -83,6 +89,19 @@ export function inferFabricQuoteMode(input: {
   if (raw == null || raw === "") return "meter";
   const n = typeof raw === "number" ? raw : Number(String(raw).replace(",", "."));
   return Number.isFinite(n) && n > 0 ? "kg" : "meter";
+}
+
+/** Infer currency: $/кг stored → USD, else UAH (₴/м canonical). */
+export function inferFabricQuoteCurrency(input: {
+  priceKgUsd?: string | number | null;
+}): import("@/lib/fabric-pricing").FabricQuoteCurrency {
+  return inferFabricQuoteMode(input) === "kg" ? "usd" : "uah";
+}
+
+export function inferFabricQuoteUnit(input: {
+  priceKgUsd?: string | number | null;
+}): import("@/lib/fabric-pricing").FabricQuoteUnit {
+  return inferFabricQuoteMode(input);
 }
 
 export function inferFabricTierMode(input: {
@@ -124,19 +143,32 @@ export function inferFabricDeliveryUiMode(input: {
 
 export function inferUnitQuoteMode(input: {
   purchasePackPrice?: string | number | null;
+  priceKgUsd?: string | number | null;
 }): UnitQuoteMode {
+  const kgRaw = input.priceKgUsd;
+  if (kgRaw != null && kgRaw !== "") {
+    const kg = typeof kgRaw === "number" ? kgRaw : Number(String(kgRaw).replace(",", "."));
+    if (Number.isFinite(kg) && kg >= 0) return "kg";
+  }
   const raw = input.purchasePackPrice;
   if (raw == null || raw === "") return "each";
   const n = typeof raw === "number" ? raw : Number(String(raw).replace(",", "."));
   return Number.isFinite(n) && n >= 0 ? "pack" : "each";
 }
 
-/** Delivery on for unit materials iff any $/кг tariff is set (same as fabric). */
+function hasNonNeg(raw: string | number | null | undefined): boolean {
+  if (raw == null || raw === "") return false;
+  const n = typeof raw === "number" ? raw : Number(String(raw).replace(",", "."));
+  return Number.isFinite(n) && n >= 0;
+}
+
 export function inferUnitDeliveryUiMode(input: {
   cargoUsdPerKg?: string | number | null;
   npStandardUsdPerKg?: string | number | null;
   npVolumeUsdPerKg?: string | number | null;
   packDeliveryCostUah?: string | number | null;
 }): UnitDeliveryUiMode {
-  return inferFabricDeliveryUiMode(input);
+  if (hasNonNeg(input.packDeliveryCostUah)) return "fixed";
+  if (inferFabricDeliveryUiMode(input) === "kg") return "kg";
+  return "none";
 }

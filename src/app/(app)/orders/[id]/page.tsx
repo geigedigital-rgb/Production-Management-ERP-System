@@ -180,9 +180,9 @@ export default async function OrderDetailPage({
       const nearCut = Math.abs(price - cut) < 0.05;
       pricingHint = nearCut
         ? minM
-          ? `ціна (опт від ${minM} м)`
-          : "ціна"
-        : "ціна опт";
+          ? `роздріб (до ${minM} м)`
+          : "роздріб"
+        : "ціна";
     }
     return {
       id: row.id,

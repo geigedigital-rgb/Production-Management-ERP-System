@@ -100,6 +100,7 @@ export async function getMaterialForEditAction(id: string) {
       supplierCode: row.supplierCode ?? "",
       colorOrAttribute: row.colorOrAttribute ?? "",
       note: row.note ?? "",
+      tagColor: row.tagColor ?? null,
       densityGsm: row.densityGsm ?? "",
       composition: row.composition ?? "",
       metersPerKg: row.metersPerKg != null ? Number(row.metersPerKg) : null,
@@ -121,6 +122,7 @@ export async function getMaterialForEditAction(id: string) {
       costVatOverride: row.costVatOverride,
       deliveryType: row.deliveryType,
       unitsPerPack: row.unitsPerPack,
+      unitsPerKg: row.unitsPerKg != null ? Number(row.unitsPerKg) : null,
       purchasePackPrice:
         row.purchasePackPrice != null ? Number(row.purchasePackPrice) : null,
       packDeliveryCostUah:
@@ -371,6 +373,7 @@ function materialFormData(formData: FormData) {
     supplierCode: formData.get("supplierCode") || null,
     colorOrAttribute: formData.get("colorOrAttribute") || null,
     note: formData.get("note") || null,
+    tagColor: formData.get("tagColor") || null,
     densityGsm: formData.get("densityGsm") || null,
     composition: formData.get("composition") || null,
     metersPerKg: formData.get("metersPerKg"),
@@ -389,6 +392,7 @@ function materialFormData(formData: FormData) {
     costVatOverride: formData.get("costVatOverride") || null,
     deliveryType: formData.get("deliveryType") || "CARGO",
     unitsPerPack: formData.get("unitsPerPack"),
+    unitsPerKg: formData.get("unitsPerKg"),
     purchasePackPrice: formData.get("purchasePackPrice"),
     packDeliveryCostUah: formData.get("packDeliveryCostUah"),
   };

@@ -267,7 +267,7 @@ function previewFabricLineTerms(input: {
   const cutPurchasePrice =
     numField(fields.priceMeterUahCutVat) ?? numField(input.material.priceMeterUahCutVat);
   const hasCutPrice = cutPurchasePrice != null && cutPurchasePrice > 0;
-  // Межа гурту — окремо від відрізу; відріз лише дає іншу ₴/м нижче межі.
+  // Межа роздробу — окремо; роздріб (cut) дає вищу ₴/м нижче межі.
   const minWholesaleMeters =
     override != null && override > 0 ? override : catalogMinWholesale;
 

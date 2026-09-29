@@ -11,7 +11,7 @@ import {
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
-import { deriveUnitPriceFromPack, hasTrimPackQuote } from "@/lib/trim-pack-pricing";
+import { deriveTrimUnitPriceFromSupplier } from "@/lib/trim-pack-pricing";
 
 export async function getFabricPricingGlobals(): Promise<FabricPricingGlobals> {
   const pricing = await prisma.pricingSettings.findFirst();
@@ -50,27 +50,31 @@ function fabricDataFromForm(
   if (data.type !== "FABRIC") {
     const unitsPerPack =
       data.unitsPerPack != null && data.unitsPerPack > 0 ? Math.floor(data.unitsPerPack) : null;
+    const unitsPerKg =
+      data.unitsPerKg != null && Number(data.unitsPerKg) > 0 ? Number(data.unitsPerKg) : null;
     const purchasePackPrice =
       unitsPerPack != null && data.purchasePackPrice != null ? data.purchasePackPrice : null;
     const packDeliveryCostUah =
       unitsPerPack != null && data.packDeliveryCostUah != null ? data.packDeliveryCostUah : null;
-    const purchasePrice = hasTrimPackQuote({
+    const priceKgUsd =
+      unitsPerKg != null && data.priceKgUsd != null && Number(data.priceKgUsd) >= 0
+        ? Number(data.priceKgUsd)
+        : null;
+    const purchasePrice = deriveTrimUnitPriceFromSupplier({
       unitsPerPack,
       purchasePackPrice,
       packDeliveryCostUah,
-    })
-      ? deriveUnitPriceFromPack({
-          unitsPerPack,
-          purchasePackPrice,
-          packDeliveryCostUah,
-        })
-      : data.purchasePrice;
+      unitsPerKg,
+      priceKgUsd,
+      usdUahRate: globals.usdUahRate,
+      fallbackUnitPrice: data.purchasePrice,
+    });
 
     return {
       densityGsm: null,
       composition: null,
       metersPerKg: null,
-      priceKgUsd: null,
+      priceKgUsd,
       priceKgUsdCargo: null,
       priceKgUsdVat: null,
       priceMeterUahNoVat: null,
@@ -85,6 +89,7 @@ function fabricDataFromForm(
       costVatOverride: null,
       deliveryType: "CARGO" as FabricDeliveryTypeCode,
       unitsPerPack,
+      unitsPerKg,
       purchasePackPrice,
       packDeliveryCostUah,
       purchasePrice,
@@ -131,6 +136,7 @@ function fabricDataFromForm(
     costVatOverride: data.costVatOverride ?? null,
     deliveryType,
     unitsPerPack: null,
+    unitsPerKg: null,
     purchasePackPrice: null,
     packDeliveryCostUah: null,
     purchasePrice,
@@ -205,6 +211,7 @@ export async function createMaterial(raw: MaterialFormValues) {
       colorOrAttribute: data.colorOrAttribute || null,
       availableColors: data.availableColors ?? [],
       note: data.note || null,
+      tagColor: data.tagColor || null,
       densityGsm: fabric.densityGsm,
       composition: fabric.composition,
       metersPerKg: fabric.metersPerKg,
@@ -223,6 +230,7 @@ export async function createMaterial(raw: MaterialFormValues) {
       costVatOverride: fabric.costVatOverride,
       deliveryType: fabric.deliveryType,
       unitsPerPack: fabric.unitsPerPack,
+      unitsPerKg: fabric.unitsPerKg,
       purchasePackPrice: fabric.purchasePackPrice,
       packDeliveryCostUah: fabric.packDeliveryCostUah,
     },
@@ -295,6 +303,7 @@ export async function updateMaterial(
       colorOrAttribute: data.colorOrAttribute || null,
       availableColors: data.availableColors ?? [],
       note: data.note || null,
+      tagColor: data.tagColor || null,
       densityGsm: fabric.densityGsm,
       composition: fabric.composition,
       metersPerKg: fabric.metersPerKg,
@@ -306,6 +315,7 @@ export async function updateMaterial(
       costVatOverride: fabric.costVatOverride,
       deliveryType: fabric.deliveryType,
       unitsPerPack: fabric.unitsPerPack,
+      unitsPerKg: fabric.unitsPerKg,
       purchasePackPrice: fabric.purchasePackPrice,
       packDeliveryCostUah: fabric.packDeliveryCostUah,
       ...(preserve
