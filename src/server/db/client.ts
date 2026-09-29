@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool, type PoolClient } from "pg";
 
@@ -12,7 +12,15 @@ const globalForPrisma = globalThis as unknown as {
  * Bump when Prisma schema changes so dev HMR does not keep a stale client.
  * Also bump after `prisma generate` if a previous bump raced ahead of generation.
  */
-const PRISMA_CLIENT_VERSION = "20260929130000_material_tag_color";
+const PRISMA_CLIENT_VERSION = "20260929140000_tag_color_client_guard";
+
+function materialClientHasTagColor(): boolean {
+  try {
+    return "tagColor" in (Prisma.MaterialScalarFieldEnum ?? {});
+  } catch {
+    return false;
+  }
+}
 
 function clientHasCurrentDelegates(client: PrismaClient | undefined): boolean {
   if (!client) return false;
@@ -21,13 +29,15 @@ function clientHasCurrentDelegates(client: PrismaClient | undefined): boolean {
     "fixedCostArticle" in client &&
     "screenPrintPriceCell" in client &&
     "screenPrintCoefficient" in client &&
-    "sizeChartVariant" in client
+    "sizeChartVariant" in client &&
+    materialClientHasTagColor()
   );
 }
 
 function shouldRecreateClient(): boolean {
   if (globalForPrisma.prismaClientVersion !== PRISMA_CLIENT_VERSION) return true;
   if (!clientHasCurrentDelegates(globalForPrisma.prisma)) return true;
+  if (!materialClientHasTagColor()) return true;
   return false;
 }
 
