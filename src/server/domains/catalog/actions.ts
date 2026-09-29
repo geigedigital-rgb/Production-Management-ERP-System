@@ -87,6 +87,11 @@ export async function getMaterialForEditAction(id: string) {
     return { ok: false as const, error: "NOT_FOUND" as const };
   }
 
+  const tagRows = await prisma.$queryRaw<Array<{ tag_color: string | null }>>`
+    SELECT tag_color FROM materials WHERE id = ${id}
+  `;
+  const tagColor = tagRows[0]?.tag_color ?? row.tagColor ?? null;
+
   return {
     ok: true as const,
     fabricGlobals,
@@ -100,7 +105,7 @@ export async function getMaterialForEditAction(id: string) {
       supplierCode: row.supplierCode ?? "",
       colorOrAttribute: row.colorOrAttribute ?? "",
       note: row.note ?? "",
-      tagColor: row.tagColor ?? null,
+      tagColor,
       densityGsm: row.densityGsm ?? "",
       composition: row.composition ?? "",
       metersPerKg: row.metersPerKg != null ? Number(row.metersPerKg) : null,

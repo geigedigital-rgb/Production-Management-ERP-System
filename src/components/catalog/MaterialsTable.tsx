@@ -211,8 +211,12 @@ export function MaterialsTable({
                     />
                   </TD>
                   <TD className="min-w-[14rem]">
-                    <div className="flex items-start gap-2">
-                      <MaterialTagDot color={tag} className="mt-1.5" />
+                    <div className="flex items-start gap-2.5">
+                      {tag ? (
+                        <MaterialTagDot color={tag} />
+                      ) : (
+                        <span className="mt-0.5 inline-flex size-3 shrink-0" aria-hidden />
+                      )}
                       <CellStack title={row.nameUk} subtitle={row.details || undefined} wrap />
                     </div>
                   </TD>

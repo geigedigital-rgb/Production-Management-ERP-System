@@ -247,6 +247,10 @@ function MaterialFields({
   const [tagColor, setTagColor] = useState<MaterialTagColor | null>(() =>
     normalizeMaterialTagColor(defaults?.tagColor),
   );
+
+  useEffect(() => {
+    setTagColor(normalizeMaterialTagColor(defaults?.tagColor));
+  }, [defaults?.id, defaults?.tagColor]);
   const [wizardStep, setWizardStep] = useState(0);
   const [unitOfMeasureId, setUnitOfMeasureId] = useState(
     defaults?.unitOfMeasureId ?? units[0]?.id ?? "",

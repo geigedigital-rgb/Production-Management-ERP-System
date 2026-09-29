@@ -21,6 +21,26 @@ function prismaMaterialHasField(field: string): boolean {
   }
 }
 
+/** Direct column read — works even when a stale Prisma client omits tagColor. */
+async function readMaterialTagColors(ids: string[]): Promise<Map<string, string | null>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const map = new Map<string, string | null>();
+  if (!unique.length) return map;
+  const rows = await prisma.$queryRaw<Array<{ id: string; tag_color: string | null }>>`
+    SELECT id, tag_color FROM materials WHERE id IN (${Prisma.join(unique)})
+  `;
+  for (const row of rows) {
+    map.set(row.id, row.tag_color);
+  }
+  return map;
+}
+
+async function writeMaterialTagColor(id: string, tagColor: string | null | undefined) {
+  await prisma.$executeRaw`
+    UPDATE materials SET tag_color = ${tagColor ?? null} WHERE id = ${id}
+  `;
+}
+
 export async function getFabricPricingGlobals(): Promise<FabricPricingGlobals> {
   const pricing = await prisma.pricingSettings.findFirst();
   return {
@@ -156,7 +176,7 @@ export async function listMaterials(params?: {
   status?: RecordStatus;
 }) {
   const search = params?.search?.trim();
-  return prisma.material.findMany({
+  const rows = await prisma.material.findMany({
     where: {
       status: params?.status ?? "ACTIVE",
       ...(search
@@ -180,6 +200,11 @@ export async function listMaterials(params?: {
     },
     orderBy: { nameUk: "asc" },
   });
+  const tags = await readMaterialTagColors(rows.map((row) => row.id));
+  return rows.map((row) => ({
+    ...row,
+    tagColor: tags.get(row.id) ?? row.tagColor ?? null,
+  }));
 }
 
 export async function findLikelyMaterialDuplicates(input: {
@@ -255,12 +280,11 @@ export async function createMaterial(raw: MaterialFormValues) {
   if (!prismaMaterialHasField("tagColor") || !prismaMaterialHasField("unitsPerKg")) {
     await prisma.$executeRaw`
       UPDATE materials
-      SET
-        tag_color = ${data.tagColor || null},
-        units_per_kg = ${fabric.unitsPerKg}
+      SET units_per_kg = ${fabric.unitsPerKg}
       WHERE id = ${material.id}
     `;
   }
+  await writeMaterialTagColor(material.id, data.tagColor || null);
 
   if (data.supplierCode) {
     const { syncPrimarySupplierOfferFromMaterial } = await import(
@@ -366,16 +390,14 @@ export async function updateMaterial(
     },
   });
 
-  // Stale Prisma runtime (cached generate) may omit newer columns — write via SQL.
-  if (!prismaMaterialHasField("tagColor") || !prismaMaterialHasField("unitsPerKg")) {
+  // Stale Prisma runtime may omit newer columns — write units via SQL when needed.
+  if (!prismaMaterialHasField("unitsPerKg")) {
     await prisma.$executeRaw`
-      UPDATE materials
-      SET
-        tag_color = ${data.tagColor || null},
-        units_per_kg = ${fabric.unitsPerKg}
-      WHERE id = ${id}
+      UPDATE materials SET units_per_kg = ${fabric.unitsPerKg} WHERE id = ${id}
     `;
   }
+  // Always persist tag via SQL so the catalog row stays in sync.
+  await writeMaterialTagColor(id, data.tagColor || null);
 
   if (!preserve && data.type === "FABRIC" && data.supplierCode) {
     const { syncPrimarySupplierOfferFromMaterial } = await import(

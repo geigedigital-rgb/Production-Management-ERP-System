@@ -65,7 +65,7 @@ export function MaterialTagPicker({
   );
 }
 
-/** Dot shown next to material name in the table. */
+/** Colored mark next to material name in the catalog table. */
 export function MaterialTagDot({
   color,
   className,
@@ -77,7 +77,11 @@ export function MaterialTagDot({
   const style = MATERIAL_TAG_STYLES[color];
   return (
     <span
-      className={cn("inline-block size-2.5 shrink-0 rounded-full", style.swatch, className)}
+      className={cn(
+        "mt-0.5 inline-flex size-3 shrink-0 rounded-full ring-2 ring-[var(--color-surface)]",
+        style.swatch,
+        className,
+      )}
       title={style.label}
       aria-label={style.label}
     />
