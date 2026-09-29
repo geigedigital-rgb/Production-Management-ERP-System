@@ -375,7 +375,7 @@ export function Select({
             {required ? <span className="ml-0.5 text-[var(--color-danger-text)]">*</span> : null}
           </span>
           {optional && !required ? (
-            <span className="text-[10.5px] font-normal normal-case tracking-normal text-[var(--color-text-quiet)]">
+            <span className="text-[10.5px] font-normal normal-case tracking-normal text-[var(--color-text-tertiary)]">
               необовʼязково
             </span>
           ) : null}

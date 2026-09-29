@@ -10,9 +10,10 @@
 
   --color-text-primary: #0f1720;
   --color-text-secondary: #5a6570;
-  --color-text-tertiary: #8b949e;
+  /* Was #8b949e / #9aa3ad — too faint on white for labels & «необовʼязково». */
+  --color-text-tertiary: #6a7380;
   --color-text-disabled: #a8b0b8;
-  --color-text-quiet: #9aa3ad;
+  --color-text-quiet: #78828e;
 
   --color-border: #e6eaee;
   --color-border-strong: #d0d6dd;
@@ -293,7 +294,7 @@ table {
   line-height: 16px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-text-quiet);
+  color: var(--color-text-tertiary);
 }
 
 /** In-table section labels (Матеріали, Операції, …). */
