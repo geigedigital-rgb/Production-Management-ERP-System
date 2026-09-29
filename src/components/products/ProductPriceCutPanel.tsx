@@ -29,7 +29,7 @@ import {
   buildTirageFormulaTips,
   buildTirageHeaderTips,
 } from "@/lib/tirage-formula-tips";
-import { cn, formatAmount, formatMoneyUah } from "@/lib/utils";
+import { cn, formatAmountWhole, formatMoneyUah } from "@/lib/utils";
 
 type Row = {
   minQuantity: number;
@@ -63,7 +63,7 @@ function CompactInput({ className, ...props }: ComponentProps<"input">) {
   return <input {...props} className={[DIGIT_INPUT, className ?? ""].join(" ")} />;
 }
 
-/** Dense table cell — no ₴ (unit shown once in the table caption). */
+/** Dense table cell — no ₴ (unit shown once in the table caption). Whole ₴ only. */
 function MoneyCell({
   perUnit,
   total,
@@ -82,10 +82,10 @@ function MoneyCell({
   const body = (
     <div className="flex flex-col items-end gap-0.5">
       <span className={`type-mono text-[12px] tabular-nums ${color}`}>
-        {Number.isFinite(perUnit) ? formatAmount(perUnit) : "—"}
+        {Number.isFinite(perUnit) ? formatAmountWhole(perUnit) : "—"}
       </span>
       <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
-        {Number.isFinite(total) ? formatAmount(total) : "—"}
+        {Number.isFinite(total) ? formatAmountWhole(total) : "—"}
       </span>
     </div>
   );
@@ -850,7 +850,7 @@ export function ProductPriceCutPanel({
                       />
                       <FormulaTip tip={tips.cut}>
                         <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
-                          {formatAmount(sheet.cut)}
+                          {formatAmountWhole(sheet.cut)}
                         </span>
                       </FormulaTip>
                     </div>
@@ -878,7 +878,7 @@ export function ProductPriceCutPanel({
                           />
                           <FormulaTip tip={tips.delivery}>
                             <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
-                              {formatAmount(sheet.delivery)}
+                              {formatAmountWhole(sheet.delivery)}
                             </span>
                           </FormulaTip>
                         </div>
@@ -968,7 +968,7 @@ export function ProductPriceCutPanel({
                       </FormulaTip>
                       <FormulaTip tip={tips.selling}>
                         <span className="type-caption tabular-nums text-[var(--color-text-quiet)]">
-                          {formatAmount(selling)}
+                          {formatAmountWhole(selling)}
                         </span>
                       </FormulaTip>
                     </div>

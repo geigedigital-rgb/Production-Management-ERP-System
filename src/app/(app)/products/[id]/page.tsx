@@ -332,7 +332,9 @@ export default async function ProductDetailPage({
     product,
     sewingPerUnit: economicsSewing,
   });
-  const operationRows = product.operations.map((row) => mapOperationRow(row, product));
+  const operationRows = product.operations
+    .map((row) => mapOperationRow(row, product))
+    .filter((row) => !isFixedCostOperationName(row.name));
   const hasCutOperation = operationRows.some((row) => row.isCut);
   const operationsSubtotalFixed = operationRows
     .filter(

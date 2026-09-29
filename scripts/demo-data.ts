@@ -129,20 +129,14 @@ async function main() {
     note: "Зміна 8 год, розкрійна бригада",
   });
   const stitching = await operation({
-    nameUk: "Пошиття основне",
+    nameUk: "Пошив",
     calculationMethod: "UNIT_RATE",
     baseRate: 96,
   });
-  const finishing = await operation({
-    nameUk: "ВТО та пакування",
+  const packing = await operation({
+    nameUk: "Пакування",
     calculationMethod: "UNIT_RATE",
-    baseRate: 24,
-  });
-  const qc = await operation({
-    nameUk: "Контроль якості",
-    calculationMethod: "SHIFT_OUTPUT",
-    shiftCost: 2400,
-    standardOutputPerShift: 300,
+    baseRate: 4,
   });
 
   async function decoration(data: {
@@ -239,7 +233,7 @@ async function main() {
       { materialId: rib.id, consumptionPerUnit: 0.28 },
       { materialId: label.id, consumptionPerUnit: 2 },
     ],
-    operationIds: [cutting.id, stitching.id, finishing.id, qc.id],
+    operationIds: [cutting.id, stitching.id, packing.id],
     decorationIds: [embroidery.id],
     additionalCosts: [{ nameUk: "Пакування та бирки", amount: 12, isPerUnit: true }],
   });
@@ -255,7 +249,7 @@ async function main() {
       { materialId: rib.id, consumptionPerUnit: 0.05 },
       { materialId: label.id, consumptionPerUnit: 1 },
     ],
-    operationIds: [cutting.id, stitching.id, finishing.id],
+    operationIds: [cutting.id, stitching.id, packing.id],
     decorationIds: [silkscreen.id],
   });
 

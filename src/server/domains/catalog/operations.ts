@@ -6,15 +6,21 @@ import {
   type OperationFormValues,
 } from "./operation-schemas";
 import type { OperationCalcMethod, RecordStatus } from "@prisma/client";
+import { isFixedCostOperationName } from "@/lib/fixed-costs";
 
 const operationListInclude = {
   category: true,
   rateTiers: { orderBy: { minQuantity: "asc" as const } },
 } as const;
 
+/** Catalog leftover: real PV is directory-based, never an addable operation. */
+function isHiddenCatalogOperation(nameUk: string) {
+  return isFixedCostOperationName(nameUk);
+}
+
 export async function listOperations(params?: { search?: string; status?: RecordStatus }) {
   const search = params?.search?.trim();
-  return prisma.operation.findMany({
+  const rows = await prisma.operation.findMany({
     where: {
       status: params?.status ?? "ACTIVE",
       ...(search
@@ -24,6 +30,7 @@ export async function listOperations(params?: { search?: string; status?: Record
     include: operationListInclude,
     orderBy: { nameUk: "asc" },
   });
+  return rows.filter((row) => !isHiddenCatalogOperation(row.nameUk));
 }
 
 async function replaceOperationRateTiers(
@@ -43,6 +50,11 @@ async function replaceOperationRateTiers(
 
 export async function createOperation(raw: OperationFormValues) {
   const data = operationFormSchema.parse(raw);
+  if (isFixedCostOperationName(data.nameUk)) {
+    throw new Error(
+      "«Постійні витрати» — не операція. Налаштуйте їх у довіднику постійних витрат.",
+    );
+  }
   const operation = await prisma.operation.create({
     data: {
       nameUk: data.nameUk,

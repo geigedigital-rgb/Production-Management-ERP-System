@@ -39,6 +39,15 @@ export function formatAmount(value: number | string): string {
   }).format(num);
 }
 
+/** Whole hryvnias for dense price/cut tables (kopiykas kept in calc, hidden in UI). */
+export function formatAmountWhole(value: number | string): string {
+  const num = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(num)) return "—";
+  return new Intl.NumberFormat("uk-UA", {
+    maximumFractionDigits: 0,
+  }).format(Math.round(num));
+}
+
 /** Whole-hryvnia amount for dense table cells, where kopiykas add noise. */
 export function formatMoneyShort(value: number | string): string {
   const num = typeof value === "string" ? Number(value) : value;

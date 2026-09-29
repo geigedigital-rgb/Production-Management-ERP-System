@@ -226,6 +226,51 @@ async function upsertOperation(
   });
 }
 
+/** Detach from products/orders, then hard-delete catalog operations. */
+async function hardDeleteOperations(prisma: PrismaClient, ids: string[]) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return;
+
+  const productOps = await prisma.productOperation.findMany({
+    where: { operationId: { in: unique } },
+    select: { id: true },
+  });
+  const productOpIds = productOps.map((row) => row.id);
+  if (productOpIds.length) {
+    await prisma.productOperationSizeScope.deleteMany({
+      where: { productOperationId: { in: productOpIds } },
+    });
+    await prisma.productOperationRateTier.deleteMany({
+      where: { productOperationId: { in: productOpIds } },
+    });
+    await prisma.productOperation.deleteMany({ where: { id: { in: productOpIds } } });
+  }
+
+  await prisma.orderItemOperation.updateMany({
+    where: { operationId: { in: unique } },
+    data: { operationId: null },
+  });
+  await prisma.operationRateTier.deleteMany({ where: { operationId: { in: unique } } });
+  await prisma.operation.deleteMany({ where: { id: { in: unique } } });
+}
+
+async function purgeCatalogOperations(prisma: PrismaClient, names: string[]) {
+  const variants = [...new Set(names.flatMap((name) => testNameVariants(name)))];
+  if (!variants.length) return;
+  const rows = await prisma.operation.findMany({
+    where: { nameUk: { in: variants } },
+    select: { id: true },
+  });
+  // Also drop order BOM lines that were snapshots of these fake/demo ops
+  await prisma.orderItemOperation.deleteMany({
+    where: { nameSnapshot: { in: variants } },
+  });
+  await hardDeleteOperations(
+    prisma,
+    rows.map((row) => row.id),
+  );
+}
+
 async function upsertDecoration(
   prisma: PrismaClient,
   data: {
@@ -690,7 +735,7 @@ async function main() {
   // --- Operation categories ---
   const catCut = await upsertCategory(prisma, "operation", "Розкрій");
   const catSew = await upsertCategory(prisma, "operation", "Пошив");
-  const catFinish = await upsertCategory(prisma, "operation", "Оздоблення");
+  await upsertCategory(prisma, "operation", "Оздоблення");
   const catPack = await upsertCategory(prisma, "operation", "Пакування");
 
   // --- Operations (ставки по моделях — з CSV через rateOverride) ---
@@ -715,59 +760,27 @@ async function main() {
     baseRate: 4,
     note: "З колонки пакування в каталозі моделей CRM",
   });
-  await upsertOperation(prisma, {
-    nameUk: withTestMarker("Вшивання коміра / планки"),
-    categoryId: catSew.id,
-    calculationMethod: "UNIT_RATE",
-    baseRate: 18,
-    note: "Демо-операція — додавайте на моделі за потреби",
-  });
-  await upsertOperation(prisma, {
-    nameUk: withTestMarker("ВТО"),
-    categoryId: catFinish.id,
-    calculationMethod: "UNIT_RATE",
-    baseRate: 8,
-    note: "Демо-операція",
-  });
-  await upsertOperation(prisma, {
-    nameUk: withTestMarker("Контроль якості"),
-    categoryId: catFinish.id,
-    calculationMethod: "UNIT_RATE",
-    baseRate: 6,
-    note: "Демо-операція",
-  });
-  // Archive legacy combined QC+pack if still present under old name
+  // Demo ops + fake «Постійні витрати» as operation — remove from catalog & BOMs
+  // (real PV comes from fixed-costs directory, not an operation line).
+  await purgeCatalogOperations(prisma, [
+    "Вшивання коміра / планки",
+    "ВТО",
+    "Контроль якості",
+    "Контроль якості + пакування",
+    "ВТО та пакування",
+    "Пошиття основне",
+    "Постійні витрати",
+  ]);
   {
-    const legacyQc = await prisma.operation.findFirst({
-      where: { nameUk: { in: testNameVariants("Контроль якості + пакування") } },
+    const leftoverPv = await prisma.operation.findMany({
+      where: { nameUk: { contains: "остійні витрат", mode: "insensitive" } },
+      select: { id: true },
     });
-    if (legacyQc) {
-      await prisma.operation.update({
-        where: { id: legacyQc.id },
-        data: {
-          nameUk: withTestMarker("Контроль якості + пакування"),
-          status: "ARCHIVED",
-          note: "Замінено на окремі «[ТЕСТ] Контроль якості» та «Пакування»",
-        },
-      });
-    }
-  }
-
-  // Pre-CSV leftover ops that are not part of CRM core set → mark [ТЕСТ] + archive
-  const legacyDemoOps = ["ВТО та пакування", "Пошиття основне"];
-  for (const nameUk of legacyDemoOps) {
-    const existing = await prisma.operation.findFirst({
-      where: { nameUk: { in: testNameVariants(nameUk) } },
-    });
-    if (existing) {
-      await prisma.operation.update({
-        where: { id: existing.id },
-        data: {
-          nameUk: withTestMarker(nameUk),
-          status: "ARCHIVED",
-          note: "Демо до CSV · не з каталогу CRM",
-        },
-      });
+    if (leftoverPv.length) {
+      await hardDeleteOperations(
+        prisma,
+        leftoverPv.map((row) => row.id),
+      );
     }
   }
 
