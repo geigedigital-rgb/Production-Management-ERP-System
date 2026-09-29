@@ -58,7 +58,7 @@ export async function createOperation(raw: OperationFormValues) {
   const operation = await prisma.operation.create({
     data: {
       nameUk: data.nameUk,
-      categoryId: data.categoryId || null,
+      category: data.categoryId ? { connect: { id: data.categoryId } } : undefined,
       calculationMethod: data.calculationMethod as OperationCalcMethod,
       baseRate: data.baseRate ?? null,
       shiftCost: data.shiftCost ?? null,
@@ -81,7 +81,9 @@ export async function updateOperation(id: string, raw: OperationFormValues) {
     where: { id },
     data: {
       nameUk: data.nameUk,
-      categoryId: data.categoryId || null,
+      category: data.categoryId
+        ? { connect: { id: data.categoryId } }
+        : { disconnect: true },
       calculationMethod: data.calculationMethod as OperationCalcMethod,
       baseRate: data.baseRate ?? null,
       shiftCost: data.shiftCost ?? null,

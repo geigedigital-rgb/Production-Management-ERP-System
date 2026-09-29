@@ -203,8 +203,8 @@ export async function createMaterial(raw: MaterialFormValues) {
     data: {
       nameUk: data.nameUk,
       type: data.type as MaterialType,
-      categoryId: data.categoryId || null,
-      unitOfMeasureId: data.unitOfMeasureId,
+      category: data.categoryId ? { connect: { id: data.categoryId } } : undefined,
+      unitOfMeasure: { connect: { id: data.unitOfMeasureId } },
       purchasePrice: fabric.purchasePrice,
       defaultWastePercent: data.defaultWastePercent,
       supplierCode: data.supplierCode || null,
@@ -297,8 +297,10 @@ export async function updateMaterial(
     data: {
       nameUk: data.nameUk,
       type: data.type as MaterialType,
-      categoryId: data.categoryId || null,
-      unitOfMeasureId: data.unitOfMeasureId,
+      category: data.categoryId
+        ? { connect: { id: data.categoryId } }
+        : { disconnect: true },
+      unitOfMeasure: { connect: { id: data.unitOfMeasureId } },
       defaultWastePercent: data.defaultWastePercent,
       colorOrAttribute: data.colorOrAttribute || null,
       availableColors: data.availableColors ?? [],
