@@ -6,59 +6,84 @@ export function materialPackLabels(unitMode: FabricUnitMode | string) {
     case "m":
     case "m2":
       return {
-        contentLabel: "м в бобіні / рулоні",
-        contentHint: "Напр. стрічка — 50 м · опційно, якщо купуєте бобіною",
-        eachQuote: "₴/м",
-        packQuote: "₴/уп.",
-        packPriceLabel: "Ціна бобіни",
-        packPriceHint: (n: number) => `На ${n} м → ₴/м автоматично`,
-        packPriceEmptyHint: "Спочатку вкажіть «м в бобіні» на матеріалі",
-        unitSuffix: "₴/м",
-        derivedHintPack: "₴/м з бобіни",
+        contentLabel: "Довжина",
+        contentHint: "Метрів у пачці / на бобіні · необовʼязково",
+        eachQuote: "м",
+        packQuote: "уп.",
+        packPriceLabel: "Ціна упаковки",
+        packPriceHint: (n: number) => `На ${n} м → ціна за м автоматично`,
+        packPriceEmptyHint: "Спочатку вкажіть довжину на матеріалі",
+        unitSuffixUah: "₴/м",
+        unitSuffixUsd: "$/м",
+        packSuffixUah: "₴",
+        packSuffixUsd: "$",
+        derivedHintPack: "ціна за м з упаковки",
         derivedHintKg: "₴/м = ($/кг × курс) / шт/кг",
         showUnitsPerKg: false,
       };
     case "cone":
       return {
-        contentLabel: "Од. в бобіні",
-        contentHint: "Опційно · якщо купуєте пачкою бобін",
-        eachQuote: "₴/боб",
-        packQuote: "₴/уп.",
+        contentLabel: "Од. в упаковці",
+        contentHint: "Скільки одиниць у пачці · необовʼязково",
+        eachQuote: "од.",
+        packQuote: "уп.",
         packPriceLabel: "Ціна упаковки",
-        packPriceHint: (n: number) => `На ${n} боб. → ₴/боб автоматично`,
+        packPriceHint: (n: number) => `На ${n} од. → ціна за од. автоматично`,
         packPriceEmptyHint: "Спочатку вкажіть вміст упаковки на матеріалі",
-        unitSuffix: "₴/боб",
-        derivedHintPack: "₴/боб з упаковки",
+        unitSuffixUah: "₴/од.",
+        unitSuffixUsd: "$/од.",
+        packSuffixUah: "₴",
+        packSuffixUsd: "$",
+        derivedHintPack: "ціна за од. з упаковки",
         derivedHintKg: "₴/од. з $/кг",
         showUnitsPerKg: false,
       };
     case "kg":
       return {
         contentLabel: "Од. в упаковці",
-        contentHint: "Опційно · якщо купуєте пачкою",
-        eachQuote: "₴/кг",
-        packQuote: "₴/уп.",
+        contentHint: "Скільки одиниць у пачці · необовʼязково",
+        eachQuote: "кг",
+        packQuote: "уп.",
         packPriceLabel: "Ціна упаковки",
-        packPriceHint: (n: number) => `На ${n} од. → ₴/кг автоматично`,
+        packPriceHint: (n: number) => `На ${n} од. → ціна за кг автоматично`,
         packPriceEmptyHint: "Спочатку вкажіть вміст упаковки на матеріалі",
-        unitSuffix: "₴/кг",
-        derivedHintPack: "₴/кг з упаковки",
+        unitSuffixUah: "₴/кг",
+        unitSuffixUsd: "$/кг",
+        packSuffixUah: "₴",
+        packSuffixUsd: "$",
+        derivedHintPack: "ціна за кг з упаковки",
         derivedHintKg: "₴/од. з $/кг",
         showUnitsPerKg: false,
       };
     default:
       return {
         contentLabel: "Шт в упаковці",
-        contentHint: "Напр. гудзики — 1000 шт · опційно",
-        eachQuote: "₴/шт",
-        packQuote: "₴/уп.",
+        contentHint: "Напр. гудзики — 1000 шт · необовʼязково",
+        eachQuote: "шт",
+        packQuote: "уп.",
         packPriceLabel: "Ціна упаковки",
-        packPriceHint: (n: number) => `На ${n} шт → ₴/шт автоматично`,
+        packPriceHint: (n: number) => `На ${n} шт → ціна за шт автоматично`,
         packPriceEmptyHint: "Спочатку вкажіть «Шт в упаковці» на матеріалі",
-        unitSuffix: "₴/шт",
-        derivedHintPack: "₴/шт з упаковки",
+        unitSuffixUah: "₴/шт",
+        unitSuffixUsd: "$/шт",
+        packSuffixUah: "₴",
+        packSuffixUsd: "$",
+        derivedHintPack: "ціна за шт з упаковки",
         derivedHintKg: "₴/шт = ($/кг × курс) / шт/кг",
         showUnitsPerKg: true,
       };
   }
+}
+
+/** Hide archived/demo units from pickers (бобіна → use м + довжина). */
+export function isSelectableMaterialUnit(unit: { label: string; code?: string | null }) {
+  const code = String(unit.code ?? "")
+    .trim()
+    .toLowerCase();
+  const label = String(unit.label ?? "")
+    .trim()
+    .toLowerCase();
+  if (code === "cone") return false;
+  if (label.includes("бобін")) return false;
+  return true;
 }

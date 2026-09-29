@@ -24,7 +24,7 @@ import {
   normalizeMaterialTagColor,
   type MaterialTagColor,
 } from "@/lib/material-tags";
-import { materialPackLabels } from "@/lib/material-pack-labels";
+import { materialPackLabels, isSelectableMaterialUnit } from "@/lib/material-pack-labels";
 import { PanelTabs } from "@/components/ui/Tabs";
 import {
   createMaterialAction,
@@ -324,6 +324,13 @@ function MaterialFields({
   const selectedUnit = units.find((unit) => unit.id === unitOfMeasureId) ?? units[0];
   const fabricUnitMode = resolveFabricUnitMode(resolveUnitCode(selectedUnit));
   const packLabels = materialPackLabels(fabricUnitMode);
+  const unitOptions = useMemo(() => {
+    const selectable = units.filter(isSelectableMaterialUnit);
+    if (selectedUnit && !selectable.some((unit) => unit.id === selectedUnit.id)) {
+      return [selectedUnit, ...selectable];
+    }
+    return selectable;
+  }, [units, selectedUnit]);
   const fabricMeterPricing =
     type === "FABRIC" && (fabricUnitMode === "m" || fabricUnitMode === "kg" || fabricUnitMode === "m2");
   const fabricEachPricing =
@@ -715,7 +722,7 @@ function MaterialFields({
           onChange={(event) => setUnitOfMeasureId(event.target.value)}
           hint={type === "FABRIC" ? fabricUnitTip(fabricUnitMode) : undefined}
         >
-          {units.map((unit) => (
+          {unitOptions.map((unit) => (
             <option key={unit.id} value={unit.id}>
               {unit.label}
             </option>
@@ -790,7 +797,7 @@ function MaterialFields({
                   min="0"
                   optional
                   suffix="₴"
-                  hint="Фікс за пачку/бобіну · або задайте в умовах постачальника"
+                  hint="Фікс за пачку · або задайте в умовах постачальника"
                   value={packDeliveryCostUah}
                   onChange={(event) => setPackDeliveryCostUah(event.target.value)}
                 />

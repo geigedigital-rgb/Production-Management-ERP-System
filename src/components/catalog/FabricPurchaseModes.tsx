@@ -72,15 +72,44 @@ export type FabricQuoteMode = "meter" | "kg";
 export type FabricTierMode = "single" | "tier";
 export type FabricDeliveryUiMode = "kg" | "none";
 
-/** шт / бобіна: direct unit price vs pack quote vs $/кг. */
 export type UnitQuoteMode = "each" | "pack" | "kg";
 /**
  * Unit-material delivery:
  * - kg — CARGO / НП тарифи $/кг (як тканина)
- * - fixed — фікс ₴ на пачку/поставку
+ * - fixed — фікс сума на пачку/поставку (₴ або $ → зберігається в ₴)
  * - none — без доставки
  */
 export type UnitDeliveryUiMode = "kg" | "fixed" | "none";
+
+export type MoneyCurrency = "uah" | "usd";
+
+/** Convert entered amount to stored ₴. */
+export function amountToUah(
+  amount: number,
+  currency: MoneyCurrency,
+  usdUahRate: number,
+): number {
+  if (!(Number.isFinite(amount) && amount >= 0)) return 0;
+  if (currency === "usd") {
+    if (!(usdUahRate > 0)) return amount;
+    return Math.round(amount * usdUahRate * 10000) / 10000;
+  }
+  return amount;
+}
+
+/** Show stored ₴ in the active currency. */
+export function amountFromUah(
+  uah: number,
+  currency: MoneyCurrency,
+  usdUahRate: number,
+): number {
+  if (!(Number.isFinite(uah) && uah >= 0)) return 0;
+  if (currency === "usd") {
+    if (!(usdUahRate > 0)) return uah;
+    return Math.round((uah / usdUahRate) * 10000) / 10000;
+  }
+  return uah;
+}
 
 export function inferFabricQuoteMode(input: {
   priceKgUsd?: string | number | null;

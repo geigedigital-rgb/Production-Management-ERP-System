@@ -505,13 +505,14 @@ async function main() {
     { code: "m2", nameUk: "м²" },
     { code: "pcs", nameUk: "шт" },
     { code: "kg", nameUk: "кг" },
-    { code: "cone", nameUk: "бобіна" },
+    { code: "cone", nameUk: "бобіна", status: "ARCHIVED" as const },
   ];
   for (const unit of units) {
+    const status = "status" in unit && unit.status ? unit.status : "ACTIVE";
     await prisma.unitOfMeasure.upsert({
       where: { code: unit.code },
-      update: { nameUk: unit.nameUk, status: "ACTIVE" },
-      create: unit,
+      update: { nameUk: unit.nameUk, status },
+      create: { code: unit.code, nameUk: unit.nameUk, status },
     });
   }
 
