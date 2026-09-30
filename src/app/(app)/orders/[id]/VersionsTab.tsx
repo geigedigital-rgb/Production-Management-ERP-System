@@ -36,6 +36,9 @@ export function VersionsTab({
   orderTotalValue,
   status,
   canApprove,
+  sizesReady = true,
+  sizesPendingCount = 0,
+  configurationHref,
   specificationLockedAt,
   readiness,
   autoSave = false,
@@ -52,6 +55,10 @@ export function VersionsTab({
   orderTotalValue: number;
   status: string;
   canApprove: boolean;
+  sizesReady?: boolean;
+  sizesPendingCount?: number;
+  /** Where to send the admin when size layout is required before production. */
+  configurationHref?: string;
   specificationLockedAt: string | null;
   readiness: ReadinessCheck[];
   autoSave?: boolean;
@@ -68,6 +75,9 @@ export function VersionsTab({
   const handedOver = status === "HANDED_TO_PRODUCTION";
   const handoverReady = readiness.every((check) => check.done);
   const needsApproval = Boolean(latestComplete) && !approved && canApprove && !handedOver;
+  const needsSizeBeforeHandover =
+    Boolean(approved) && !handedOver && !sizesReady;
+  const sizesHref = configurationHref ?? `/orders/${orderId}?tab=configuration`;
 
   function approve(proposal: OrderProposalGroup) {
     if (proposal.revision == null) return;
@@ -253,6 +263,18 @@ export function VersionsTab({
                     ? `Погоджено пропозицію v${approved!.revision} на ${formatMoneyUah(approved!.totalSellingValue)}. Натисніть «Передати у виробництво».`
                     : `Пропозицію v${approved!.revision} погоджено. Закрийте умови передачі — якщо є нанесення, додайте макет у «Документах».`}
               </p>
+              {needsSizeBeforeHandover ? (
+                <Banner tone="warning" title="Потрібна розкладка розмірів" className="mt-3">
+                  Перед передачею в цех розкладіть тираж по розмірах у Комплектації.
+                  {sizesPendingCount > 0 ? ` Залишилось позицій: ${sizesPendingCount}.` : ""}{" "}
+                  <a
+                    href={sizesHref}
+                    className="font-semibold underline underline-offset-2"
+                  >
+                    Відкрити Комплектацію
+                  </a>
+                </Banner>
+              ) : null}
             </div>
             {handedOver ? (
               <StatusBadge tone="info">
@@ -310,9 +332,9 @@ export function VersionsTab({
                 </thead>
                 <tbody>
                   {approveTarget.lines.map((line) => (
-                    <tr key={line.id} className="border-b border-[var(--color-divider)]">
+                    <tr key={line.id} className="border-b border-[var(--color-divider)] last:border-0">
                       <td className="px-3 py-2">{line.itemNameUk}</td>
-                      <td className="px-3 py-2 text-right tabular">{line.totalQuantity} шт</td>
+                      <td className="px-3 py-2 text-right tabular">{line.totalQuantity}</td>
                       <td className="px-3 py-2 text-right tabular">
                         {formatMoneyUah(line.sellingPricePerUnit)}
                       </td>
@@ -322,23 +344,14 @@ export function VersionsTab({
                     </tr>
                   ))}
                 </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={3} className="px-3 py-2 text-right font-semibold">
-                      Разом замовлення
-                    </td>
-                    <td className="px-3 py-2 text-right font-semibold tabular">
-                      {formatMoneyUah(approveTarget.totalSellingValue)}
-                    </td>
-                  </tr>
-                </tfoot>
               </table>
             </div>
-            {approved && approved.key !== approveTarget.key ? (
-              <Banner tone="warning" title={`Пропозицію v${approved.revision} буде знято з погодження`}>
-                Одночасно погодженою може бути лише одна пропозиція на замовлення.
-              </Banner>
-            ) : null}
+            <p className="type-body-secondary text-right">
+              Разом:{" "}
+              <span className="font-semibold text-[var(--color-text-primary)] tabular">
+                {formatMoneyUah(approveTarget.totalSellingValue)}
+              </span>
+            </p>
           </div>
         ) : null}
       </Modal>

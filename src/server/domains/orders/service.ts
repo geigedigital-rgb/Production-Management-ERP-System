@@ -61,6 +61,13 @@ import {
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
+import {
+  itemNeedsSizeBreakdown,
+  itemSizeBreakdownReady,
+  isRealSizeCode,
+  sizesQuantitySum,
+  type OrderSizeLine,
+} from "@/lib/order-item-sizes";
 
 type FabricMaterialFields = {
   type?: string | null;
@@ -405,10 +412,12 @@ export async function getOrder(id: string) {
         include: {
           product: {
             select: {
+              imageUrl: true,
               optimalQty: true,
               isBaseModel: true,
               cutRateTiers: { orderBy: { minQuantity: "asc" } },
               commercialPriceTiers: { orderBy: { minQuantity: "asc" } },
+              _count: { select: { sizes: true } },
               operations: {
                 select: {
                   operationId: true,
@@ -1825,6 +1834,126 @@ export async function updateOrderItemSizes(
   });
 }
 
+export type OrderItemSizeReadiness = {
+  orderItemId: string;
+  nameUk: string;
+  needsBreakdown: boolean;
+  ready: boolean;
+  targetTirage: number;
+  brokenDownQty: number;
+};
+
+/** Load size-breakdown readiness for every line on the order. */
+export async function getOrderSizeBreakdownStatus(
+  orderId: string,
+): Promise<OrderItemSizeReadiness[]> {
+  const items = await prisma.orderItem.findMany({
+    where: { orderId },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      nameUk: true,
+      totalQuantity: true,
+      sizes: { select: { sizeCode: true, sizeNameUk: true, quantity: true } },
+      product: { select: { _count: { select: { sizes: true } } } },
+    },
+  });
+
+  return items.map((item) => {
+    const catalogHasSizes = (item.product?._count.sizes ?? 0) > 0;
+    const sizes: OrderSizeLine[] = item.sizes;
+    const needsBreakdown = itemNeedsSizeBreakdown(sizes, { catalogHasSizes });
+    const brokenDownQty = sizes
+      .filter((row) => isRealSizeCode(row.sizeCode))
+      .reduce((sum, row) => sum + row.quantity, 0);
+    return {
+      orderItemId: item.id,
+      nameUk: item.nameUk,
+      needsBreakdown,
+      ready: itemSizeBreakdownReady(sizes, item.totalQuantity, { catalogHasSizes }),
+      targetTirage: item.totalQuantity,
+      brokenDownQty,
+    };
+  });
+}
+
+/** Throws SIZES_REQUIRED when any line still needs a size breakdown before production. */
+export async function assertOrderSizesReady(orderId: string) {
+  const status = await getOrderSizeBreakdownStatus(orderId);
+  const blocked = status.filter((row) => !row.ready);
+  if (blocked.length > 0) {
+    throw new Error("SIZES_REQUIRED");
+  }
+}
+
+/**
+ * Replace orientative ONE tirage with a real size grid.
+ * Sum of quantities must equal the current OrderItem.totalQuantity.
+ */
+export async function applyOrderItemSizeBreakdown(
+  orderItemId: string,
+  sizes: Array<{ sizeCode: string; sizeNameUk: string; quantity: number }>,
+) {
+  await assertOrderItemEditable(orderItemId);
+  const item = await prisma.orderItem.findUniqueOrThrow({
+    where: { id: orderItemId },
+    select: {
+      id: true,
+      totalQuantity: true,
+      product: { select: { _count: { select: { sizes: true } } } },
+    },
+  });
+
+  const targetTirage = item.totalQuantity;
+  const cleaned = sizes
+    .map((row) => ({
+      sizeCode: row.sizeCode.trim(),
+      sizeNameUk: (row.sizeNameUk || row.sizeCode).trim(),
+      quantity: Number.isFinite(row.quantity) ? Math.max(0, Math.floor(row.quantity)) : 0,
+    }))
+    .filter((row) => row.quantity > 0 && isRealSizeCode(row.sizeCode));
+
+  // Deduplicate by sizeCode (mix of charts → one row per code).
+  const byCode = new Map<string, { sizeCode: string; sizeNameUk: string; quantity: number }>();
+  for (const row of cleaned) {
+    const prev = byCode.get(row.sizeCode);
+    if (prev) {
+      prev.quantity += row.quantity;
+    } else {
+      byCode.set(row.sizeCode, { ...row });
+    }
+  }
+  const nextSizes = [...byCode.values()];
+  const sum = sizesQuantitySum(nextSizes);
+
+  if (nextSizes.length === 0) {
+    throw new Error("SIZES_EMPTY");
+  }
+  if (sum !== targetTirage) {
+    throw new Error("SIZES_SUM_MISMATCH");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orderItemSize.deleteMany({ where: { orderItemId } });
+    await tx.orderItemSize.createMany({
+      data: nextSizes.map((row) => ({
+        orderItemId,
+        sizeCode: row.sizeCode,
+        sizeNameUk: row.sizeNameUk,
+        quantity: row.quantity,
+      })),
+    });
+    await tx.orderItem.update({
+      where: { id: orderItemId },
+      data: { totalQuantity: targetTirage },
+    });
+    await syncCutRatesForOrderItem(orderItemId, targetTirage, tx);
+    await syncOrderItemFabricPricing(orderItemId, tx);
+  });
+
+  return { targetTirage, sizes: nextSizes };
+}
+
 export async function setOrderItemMaterialActualPrice(input: {
   id: string;
   actualPurchasePrice: number | null;
@@ -2669,6 +2798,8 @@ export async function handOverToProduction(orderId: string, userId?: string) {
   const order = await getOrder(orderId);
   if (!order) throw new Error("ORDER_NOT_FOUND");
   if (order.items.length === 0) throw new Error("NO_ITEM");
+
+  await assertOrderSizesReady(orderId);
 
   const lines = order.items.map((item) => {
     const approved = item.versions.find((v) => v.isApproved);

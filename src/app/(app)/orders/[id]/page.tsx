@@ -55,7 +55,9 @@ import { listEntityActivity } from "@/server/domains/activity/service";
 import { ActivityTimeline, mapActivityEvents } from "@/components/activity/ActivityTimeline";
 import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import { listProducts } from "@/server/domains/products/service";
+import { listSizeChartVariants } from "@/server/domains/size-charts/service";
 import { publicUploadUrl } from "@/lib/supabase/client";
+import { itemNeedsSizeBreakdown, itemSizeBreakdownReady } from "@/lib/order-item-sizes";
 import { ConfigurationTab } from "./ConfigurationTab";
 import { CalculationTab } from "./CalculationTab";
 import { VersionsTab } from "./VersionsTab";
@@ -96,8 +98,18 @@ export default async function OrderDetailPage({
   const tabHref = (key: string) =>
     `/orders/${order.id}?tab=${key}${order.items.length > 1 ? `&item=${item.id}` : ""}`;
 
-  const [materials, units, operationsCatalog, pricing, projectPricing, activityEvents, catalogProducts, fixedCosts, screenPrintCatalog] =
-    await Promise.all([
+  const [
+    materials,
+    units,
+    operationsCatalog,
+    pricing,
+    projectPricing,
+    activityEvents,
+    catalogProducts,
+    fixedCosts,
+    screenPrintCatalog,
+    sizeChartVariants,
+  ] = await Promise.all([
       listMaterials(),
       listUnits(),
       listOperations(),
@@ -107,7 +119,32 @@ export default async function OrderDetailPage({
       listProducts(),
       fixedCostOptionsFromDb(),
       getScreenPrintCatalog(),
+      listSizeChartVariants(),
     ]);
+
+  const sizeCharts = sizeChartVariants.map((variant) => ({
+    id: variant.id,
+    nameUk: variant.nameUk,
+    sizes: variant.sizes.map((size) => ({ code: size.code, nameUk: size.nameUk })),
+  }));
+
+  const itemSizeFlags = order.items.map((row) => {
+    const catalogHasSizes = (row.product?._count?.sizes ?? 0) > 0;
+    const sizeLines = row.sizes.map((size) => ({
+      sizeCode: size.sizeCode,
+      sizeNameUk: size.sizeNameUk,
+      quantity: size.quantity,
+    }));
+    return {
+      id: row.id,
+      catalogHasSizes,
+      needsSizeBreakdown: itemNeedsSizeBreakdown(sizeLines, { catalogHasSizes }),
+      sizesReady: itemSizeBreakdownReady(sizeLines, row.totalQuantity, { catalogHasSizes }),
+    };
+  });
+  const orderSizesReady = itemSizeFlags.every((row) => row.sizesReady);
+  const activeItemNeedsSizeBreakdown =
+    itemSizeFlags.find((row) => row.id === item.id)?.needsSizeBreakdown ?? false;
 
   const itemCalcOptions = {
     ...calcOptionsFromProduct(item.product),
@@ -400,6 +437,14 @@ export default async function OrderDetailPage({
   const hasApprovedProposal = Boolean(approvedProposalGroup);
   const orderApprovedTotal = approvedProposalGroup?.totalSellingValue ?? orderDraftTotal;
 
+  const sizesPendingCount = itemSizeFlags.filter((row) => !row.sizesReady).length;
+  const sizesFocusItemId =
+    itemSizeFlags.find((row) => !row.sizesReady)?.id ?? item.id;
+  const configurationHrefForSizes =
+    `/orders/${order.id}?tab=configuration${
+      order.items.length > 1 ? `&item=${sizesFocusItemId}` : ""
+    }`;
+  const needsSizeAttention = order.status === "APPROVED" && !orderSizesReady;
   const readiness: ReadinessCheck[] = [
     {
       key: "version",
@@ -413,6 +458,14 @@ export default async function OrderDetailPage({
         : latestProposal
           ? `Пропозиція v${latestProposal.revision} збережена — потрібне погодження`
           : "Збережіть пропозицію у вкладці «Пропозиції»",
+    },
+    {
+      key: "sizes",
+      label: "Розміри по позиціях",
+      done: orderSizesReady,
+      hint: orderSizesReady
+        ? "Тираж розкладено по розмірах"
+        : `${sizesPendingCount} поз. — розкладіть у Комплектації`,
     },
     {
       key: "quantity",
@@ -460,6 +513,7 @@ export default async function OrderDetailPage({
       href: tabHref("configuration"),
       icon: <IconProducts size={15} />,
       count: materialRows.length + operationRows.length + decorationRows.length,
+      attention: needsSizeAttention,
     },
     ...(canViewCosts
       ? [
@@ -493,18 +547,23 @@ export default async function OrderDetailPage({
     filesCount: order.files.length,
     hasCompleteProposal,
     hasApprovedProposal,
-    items: order.items.map((row) => ({
-      id: row.id,
-      nameUk: row.nameUk,
-      totalQuantity: row.totalQuantity,
-      materialsCount: row.materials.length,
-      operationsCount: row.operations.length,
-      decorationsCount: row.decorations.length,
-      versionCount: row.versions.length,
-      hasApprovedVersion: row.versions.some((version) => version.isApproved),
-      specificationLocked: Boolean(row.specification),
-      inLatestProposal: latestProposal?.lines.some((line) => line.orderItemId === row.id) ?? false,
-    })),
+    sizesReady: orderSizesReady,
+    items: order.items.map((row) => {
+      const flags = itemSizeFlags.find((entry) => entry.id === row.id);
+      return {
+        id: row.id,
+        nameUk: row.nameUk,
+        totalQuantity: row.totalQuantity,
+        materialsCount: row.materials.length,
+        operationsCount: row.operations.length,
+        decorationsCount: row.decorations.length,
+        versionCount: row.versions.length,
+        hasApprovedVersion: row.versions.some((version) => version.isApproved),
+        specificationLocked: Boolean(row.specification),
+        inLatestProposal: latestProposal?.lines.some((line) => line.orderItemId === row.id) ?? false,
+        needsSizeBreakdown: flags?.needsSizeBreakdown ?? false,
+      };
+    }),
   });
   const orderFlags = { hasCompleteProposal, hasApprovedProposal };
   const nextHref = corridorHref(order.id, action);
@@ -525,6 +584,7 @@ export default async function OrderDetailPage({
     return {
       id: row.id,
       nameUk: row.nameUk,
+      imageUrl: row.product?.imageUrl ?? null,
       quantity: row.totalQuantity,
       sizeRun: formatSizeRun(row.sizes),
       materialsCount: uniqueBomCount(
@@ -876,6 +936,8 @@ export default async function OrderDetailPage({
               sizeNameUk: size.sizeNameUk,
               quantity: size.quantity,
             }))}
+            needsSizeBreakdown={activeItemNeedsSizeBreakdown}
+            sizeCharts={sizeCharts}
             materials={materialRows}
             operations={operationRows}
             decorations={decorationRows}
@@ -976,6 +1038,9 @@ export default async function OrderDetailPage({
                 orderTotalValue={orderDraftTotal}
                 status={order.status}
                 canApprove={canApprove}
+                sizesReady={orderSizesReady}
+                sizesPendingCount={sizesPendingCount}
+                configurationHref={configurationHrefForSizes}
                 specificationLockedAt={item.specification?.lockedAt.toISOString() ?? null}
                 readiness={readiness}
                 autoSave={actionParam === "save"}

@@ -8,6 +8,8 @@ export type TabItem = {
   icon?: React.ReactNode;
   count?: number;
   disabled?: boolean;
+  /** Yellow attention marker — action needed on this tab. */
+  attention?: boolean;
 };
 
 /** Segmented pill tabs (ref3): used for switching context inside one object. */
@@ -118,6 +120,14 @@ export function ViewTabs({
             )}
           >
             {item.label}
+            {item.attention ? (
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-[var(--color-warning-text)] ring-[3px] ring-[var(--color-warning-text)]/20"
+                aria-label="Потрібна дія"
+                title="Потрібна дія"
+                role="status"
+              />
+            ) : null}
             {typeof item.count === "number" ? (
               <span className="tabular text-[11.5px] font-semibold text-[var(--color-text-tertiary)]">
                 {item.count}

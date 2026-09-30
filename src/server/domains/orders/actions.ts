@@ -31,6 +31,7 @@ import {
   updateOrderItemMaterialTerms,
   getOrderItemMaterialDetail,
   updateOrderItemSizes,
+  applyOrderItemSizeBreakdown,
   updateOrderStatus,
   updateOrderTargetMargin,
 } from "@/server/domains/orders/service";
@@ -284,6 +285,48 @@ export async function updateOrderSizesAction(formData: FormData) {
       quantity: Number.isFinite(sizeQtys[i]) ? Math.max(0, sizeQtys[i]) : 0,
     })),
   );
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true as const };
+}
+
+export async function applyOrderItemSizeBreakdownAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("manageOrders");
+
+  const orderId = String(formData.get("orderId") ?? "");
+  const orderItemId = String(formData.get("orderItemId") ?? "");
+  if (!orderId || !orderItemId) {
+    return { ok: false as const, error: "VALIDATION" as const };
+  }
+  await assertCanEditOrderComposition(orderId);
+
+  const sizeCodes = formData.getAll("sizeCode").map(String);
+  const sizeNames = formData.getAll("sizeNameUk").map(String);
+  const sizeQtys = formData.getAll("sizeQty").map((value) => Number(value));
+
+  try {
+    await applyOrderItemSizeBreakdown(
+      orderItemId,
+      sizeCodes.map((code, index) => ({
+        sizeCode: code,
+        sizeNameUk: sizeNames[index] || code,
+        quantity: Number.isFinite(sizeQtys[index]) ? Math.max(0, Math.floor(sizeQtys[index])) : 0,
+      })),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ERROR";
+    if (
+      message === "SIZES_SUM_MISMATCH" ||
+      message === "SIZES_EMPTY" ||
+      message === "ORDER_LOCKED" ||
+      message === "ORDER_ITEM_LOCKED"
+    ) {
+      return { ok: false as const, error: message };
+    }
+    throw error;
+  }
 
   revalidatePath(`/orders/${orderId}`);
   return { ok: true as const };
@@ -929,7 +972,11 @@ export async function approveProposalAction(formData: FormData) {
 
   try {
     await approveProposal(orderId, proposalRevision, session.user.id);
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ERROR";
+    if (message === "INCOMPLETE_PROPOSAL") {
+      return { ok: false as const, error: "INCOMPLETE_PROPOSAL" as const };
+    }
     return { ok: false as const, error: "APPROVE_FAILED" as const };
   }
   revalidatePath(`/orders/${orderId}`);
@@ -944,7 +991,11 @@ export async function approveVersionAction(formData: FormData) {
 
   const orderId = String(formData.get("orderId") ?? "");
   const versionId = String(formData.get("versionId") ?? "");
-  await approveVersion(versionId, session.user.id);
+  try {
+    await approveVersion(versionId, session.user.id);
+  } catch (error) {
+    throw error;
+  }
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/overview");
   return { ok: true as const };

@@ -13,6 +13,7 @@ import { ClientCreatePanel } from "@/components/clients/ClientCreateForm";
 import { ProductCreatePanel } from "@/components/products/ProductCreatePanel";
 import {
   ProductCatalogPanel,
+  ProductThumb,
   type CatalogProduct,
   type DraftComposition,
 } from "@/components/orders/ProductCatalogPanel";
@@ -614,15 +615,27 @@ export function OrderCreateForm({
                               {index + 1}
                             </td>
                             <td className="px-3 py-2">
-                              <p className="font-medium">{line.label}</p>
-                              {line.comment ? (
-                                <p className="type-caption">{line.comment}</p>
-                              ) : null}
-                              {editing ? (
-                                <p className="type-caption text-[var(--color-primary-700)]">
-                                  Редагується зліва
-                                </p>
-                              ) : null}
+                              <div className="flex min-w-0 items-start gap-2.5">
+                                <ProductThumb
+                                  imageUrl={
+                                    products.find((row) => row.id === line.productId)?.imageUrl
+                                  }
+                                  label={line.label}
+                                  active={editing}
+                                  size="sm"
+                                />
+                                <div className="min-w-0">
+                                  <p className="font-medium">{line.label}</p>
+                                  {line.comment ? (
+                                    <p className="type-caption">{line.comment}</p>
+                                  ) : null}
+                                  {editing ? (
+                                    <p className="type-caption text-[var(--color-primary-700)]">
+                                      Редагується зліва
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
                             </td>
                             <td className="px-3 py-2 text-right tabular">{qty} шт</td>
                             <td className="px-3 py-2 text-[var(--color-text-secondary)]">

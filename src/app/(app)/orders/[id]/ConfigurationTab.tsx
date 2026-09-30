@@ -10,6 +10,10 @@ import { MaterialCreatePanel } from "@/app/(app)/settings/resources/MaterialCrea
 import { OperationCreatePanel } from "@/app/(app)/settings/operations/OperationCreateForm";
 import { SizeRun } from "@/components/orders/SizeRun";
 import {
+  OrderItemSizeBreakdown,
+  type SizeChartOption,
+} from "@/components/orders/OrderItemSizeBreakdown";
+import {
   CellStack,
   Table,
   TableCard,
@@ -157,6 +161,8 @@ export function ConfigurationTab({
   canEditFixedCosts = false,
   screenPrintCells = [],
   screenPrintCoefficients = [],
+  needsSizeBreakdown = false,
+  sizeCharts = [],
 }: {
   orderId: string;
   itemId: string;
@@ -176,6 +182,8 @@ export function ConfigurationTab({
   }>;
   operationOptions: Array<{ id: string; label: string }>;
   unitOptions: Array<{ id: string; label: string }>;
+  needsSizeBreakdown?: boolean;
+  sizeCharts?: SizeChartOption[];
   materialsSubtotal: number;
   operationsSubtotal: number;
   decorationsSubtotal: number;
@@ -348,14 +356,22 @@ export function ConfigurationTab({
                 {locked ? " · зафіксовано" : ""}
               </p>
             </div>
-            {!locked && dirty ? (
+            {!locked && dirty && !needsSizeBreakdown ? (
               <Button size="sm" onClick={saveSizes} disabled={pending} loading={isBusy("sizes")}>
                 Зберегти к-сть
               </Button>
             ) : null}
           </div>
           <div className="px-3 py-2.5">
-            {sizes.length === 0 ? (
+            {needsSizeBreakdown && !locked ? (
+              <OrderItemSizeBreakdown
+                orderId={orderId}
+                orderItemId={itemId}
+                targetTirage={sizes.reduce((sum, size) => sum + size.quantity, 0)}
+                sizeCharts={sizeCharts}
+                disabled={isBusy("sizes")}
+              />
+            ) : sizes.length === 0 ? (
               <p className="type-caption">Розміри не задані.</p>
             ) : (
               <SizeRun
@@ -368,7 +384,7 @@ export function ConfigurationTab({
                 }
               />
             )}
-            {dirty && !locked ? (
+            {dirty && !locked && !needsSizeBreakdown ? (
               <p className="type-caption mt-2 text-[var(--color-warning-text)]">
                 К-сть змінено — збережіть, щоб перерахувати калькуляцію.
               </p>

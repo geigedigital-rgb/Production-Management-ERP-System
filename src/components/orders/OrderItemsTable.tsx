@@ -22,10 +22,12 @@ import { formatMoneyUah, cn } from "@/lib/utils";
 import { itemNeedLabel, itemNeedTone, type ItemNeed } from "@/lib/order-corridor";
 import { removeOrderItemAction } from "@/server/domains/orders/actions";
 import { AddOrderItemPanel, type AddableProduct } from "@/components/orders/AddOrderItemPanel";
+import { ProductThumb } from "@/components/orders/ProductCatalogPanel";
 
 export type OrderItemRow = {
   id: string;
   nameUk: string;
+  imageUrl?: string | null;
   quantity: number;
   sizeRun?: string;
   materialsCount: number;
@@ -139,25 +141,33 @@ export function OrderItemsTable({
                   {index + 1}
                 </TD>
                 <TD>
-                  <div className="min-w-0">
-                    <p className="font-medium text-[var(--color-text-primary)]">
-                      {row.nameUk}
-                      <RowBusyMark busy={rowBusy} />
-                    </p>
-                    {row.sizeRun ? (
-                      <p className="type-caption tabular">{row.sizeRun}</p>
-                    ) : null}
-                    {row.sourceProductId ? (
-                      <Link
-                        href={`/products/${row.sourceProductId}`}
-                        onClick={(event) => event.stopPropagation()}
-                        className="type-caption text-[var(--color-primary-700)] hover:underline"
-                      >
-                        Еталон у довіднику
-                      </Link>
-                    ) : (
-                      <p className="type-caption">Без еталона</p>
-                    )}
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <ProductThumb
+                      imageUrl={row.imageUrl}
+                      label={row.nameUk}
+                      active={active}
+                      size="sm"
+                    />
+                    <div className="min-w-0">
+                      <p className="font-medium text-[var(--color-text-primary)]">
+                        {row.nameUk}
+                        <RowBusyMark busy={rowBusy} />
+                      </p>
+                      {row.sizeRun ? (
+                        <p className="type-caption tabular">{row.sizeRun}</p>
+                      ) : null}
+                      {row.sourceProductId ? (
+                        <Link
+                          href={`/products/${row.sourceProductId}`}
+                          onClick={(event) => event.stopPropagation()}
+                          className="type-caption text-[var(--color-primary-700)] hover:underline"
+                        >
+                          Еталон у довіднику
+                        </Link>
+                      ) : (
+                        <p className="type-caption">Без еталона</p>
+                      )}
+                    </div>
                   </div>
                 </TD>
                 <TD numeric nowrap>

@@ -40,6 +40,7 @@ export type CorridorItemFacts = {
   hasApprovedVersion: boolean;
   specificationLocked: boolean;
   inLatestProposal?: boolean;
+  needsSizeBreakdown?: boolean;
 };
 
 export type CorridorFacts = {
@@ -49,6 +50,8 @@ export type CorridorFacts = {
   items: CorridorItemFacts[];
   hasCompleteProposal?: boolean;
   hasApprovedProposal?: boolean;
+  /** False while any line still has orientative ONE tirage / missing real sizes. */
+  sizesReady?: boolean;
 };
 
 const LIVE_STEPS = 5;
@@ -214,6 +217,25 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
   }
 
   if (input.status !== "HANDED_TO_PRODUCTION") {
+    if (input.sizesReady === false) {
+      const sizesFocus =
+        input.items.find((item) => item.needsSizeBreakdown)?.id ?? focusItemId;
+      return {
+        key: "compose",
+        index: 4,
+        of: LIVE_STEPS,
+        label: "Розкласти розміри",
+        title: "Розміри перед цехом",
+        detail: many
+          ? "Перед передачею у виробництво розкладіть загальний тираж по реальних розмірах у Комплектації для кожної позиції."
+          : "Перед передачею у виробництво розкладіть загальний тираж по реальних розмірах у Комплектації.",
+        tab: "configuration",
+        focusItemId: sizesFocus,
+        quotationReady,
+        specificationReady: false,
+      };
+    }
+
     if (needsDecorationFile && input.filesCount === 0) {
       return {
         key: "artwork",
