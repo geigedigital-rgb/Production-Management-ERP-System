@@ -42,15 +42,21 @@ export async function updatePricingSettingsAction(formData: FormData) {
   });
 
   if (!parsed.success) return { ok: false as const, error: "VALIDATION" as const };
-  if (parsed.data.minimumMarginPercent > parsed.data.targetMarginPercent) {
-    return { ok: false as const, error: "MIN_ABOVE_TARGET" as const };
-  }
 
   const existing = await prisma.pricingSettings.findFirst();
+  // targetMarginPercent на формі зафіксовано як 0 (націнка в прайсі виробу).
+  // Не порівнюємо з minimumMarginPercent — інакше збереження завжди падає (15 > 0).
+  const data = {
+    ...parsed.data,
+    targetMarginPercent: existing
+      ? Number(existing.targetMarginPercent)
+      : parsed.data.targetMarginPercent,
+  };
+
   if (existing) {
-    await prisma.pricingSettings.update({ where: { id: existing.id }, data: parsed.data });
+    await prisma.pricingSettings.update({ where: { id: existing.id }, data });
   } else {
-    await prisma.pricingSettings.create({ data: parsed.data });
+    await prisma.pricingSettings.create({ data });
   }
 
   await resyncFabricPurchasePrices();

@@ -139,7 +139,7 @@ export function ConfigurationTab({
   orderId,
   itemId,
   locked,
-  productName,
+  productName: _productName,
   comment,
   sizes,
   materials,
@@ -344,53 +344,49 @@ export function ConfigurationTab({
       ) : null}
 
       <SoftBusy busy={isBusy("sizes")} label="Оновлення кількостей…">
-        <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-[13.5px] font-semibold text-[var(--color-text-primary)]">
-                {productName}
-              </p>
-              <p className="type-caption">
-                {totalQuantity} шт · {materials.length} мат. · {operations.length} оп. ·{" "}
-                {decorations.length} нанес.
-                {locked ? " · зафіксовано" : ""}
-              </p>
-            </div>
-            {!locked && dirty && !needsSizeBreakdown ? (
-              <Button size="sm" onClick={saveSizes} disabled={pending} loading={isBusy("sizes")}>
-                Зберегти к-сть
-              </Button>
-            ) : null}
-          </div>
-          <div className="px-3 py-2.5">
-            {needsSizeBreakdown && !locked ? (
-              <OrderItemSizeBreakdown
-                orderId={orderId}
-                orderItemId={itemId}
-                targetTirage={sizes.reduce((sum, size) => sum + size.quantity, 0)}
-                sizeCharts={sizeCharts}
-                disabled={isBusy("sizes")}
-              />
-            ) : sizes.length === 0 ? (
+        {needsSizeBreakdown && !locked ? (
+          <OrderItemSizeBreakdown
+            orderId={orderId}
+            orderItemId={itemId}
+            targetTirage={sizes.reduce((sum, size) => sum + size.quantity, 0)}
+            sizeCharts={sizeCharts}
+            disabled={isBusy("sizes")}
+          />
+        ) : (
+          <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5">
+            {sizes.length === 0 ? (
               <p className="type-caption">Розміри не задані.</p>
             ) : (
-              <SizeRun
-                sizes={sizes.map((size) => ({ code: size.sizeCode, nameUk: size.sizeNameUk }))}
-                quantities={quantities}
-                disabled={locked || isBusy("sizes")}
-                quiet
-                onChange={(code, quantity) =>
-                  setQuantities((prev) => ({ ...prev, [code]: quantity }))
-                }
-              />
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="type-caption tabular">
+                    {totalQuantity} шт
+                    {locked ? " · зафіксовано" : ""}
+                  </p>
+                  {!locked && dirty ? (
+                    <Button size="sm" onClick={saveSizes} disabled={pending} loading={isBusy("sizes")}>
+                      Зберегти к-сть
+                    </Button>
+                  ) : null}
+                </div>
+                <SizeRun
+                  sizes={sizes.map((size) => ({ code: size.sizeCode, nameUk: size.sizeNameUk }))}
+                  quantities={quantities}
+                  disabled={locked || isBusy("sizes")}
+                  quiet
+                  onChange={(code, quantity) =>
+                    setQuantities((prev) => ({ ...prev, [code]: quantity }))
+                  }
+                />
+                {dirty && !locked ? (
+                  <p className="type-caption text-[var(--color-warning-text)]">
+                    К-сть змінено — збережіть, щоб перерахувати калькуляцію.
+                  </p>
+                ) : null}
+              </div>
             )}
-            {dirty && !locked && !needsSizeBreakdown ? (
-              <p className="type-caption mt-2 text-[var(--color-warning-text)]">
-                К-сть змінено — збережіть, щоб перерахувати калькуляцію.
-              </p>
-            ) : null}
           </div>
-        </div>
+        )}
       </SoftBusy>
 
       <div className="flex flex-wrap items-center gap-2 px-0.5">

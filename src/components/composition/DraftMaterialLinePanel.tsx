@@ -20,6 +20,8 @@ import {
   colorsForSupplier,
   reconcileColorForSupplier,
 } from "@/lib/supplier-colors";
+import { materialQtyUnitShort } from "@/lib/material-pack-labels";
+import { resolveFabricUnitMode } from "@/lib/fabric-pricing";
 import { cn, formatMoneyUah, formatUnit } from "@/lib/utils";
 
 function round1(value: number) {
@@ -100,6 +102,7 @@ export function DraftMaterialLinePanel({
         : "");
   const showColorPicker = enablePricingControls && draftMaterialNeedsColor(line);
   const isFabric = line.materialType === "FABRIC";
+  const qtyUnit = materialQtyUnitShort(resolveFabricUnitMode(line.unit));
   const offers = line.supplierOffers ?? [];
   const supplierMissing = showColorPicker && offers.length > 0 && !line.supplierId;
   const colorMissing =
@@ -227,12 +230,14 @@ export function DraftMaterialLinePanel({
             <dl className="grid gap-2 text-[13px] sm:grid-cols-2">
               <div>
                 <dt className="text-[var(--color-text-tertiary)]">Витрата зараз</dt>
-                <dd className="tabular font-medium">{round1(metersNeeded)} м</dd>
+                <dd className="tabular font-medium">
+                  {round1(metersNeeded)} {qtyUnit}
+                </dd>
               </div>
               <div>
                 <dt className="text-[var(--color-text-tertiary)]">Межа роздробу</dt>
                 <dd className="tabular font-medium">
-                  {wholesaleThreshold != null ? `${wholesaleThreshold} м` : "—"}
+                  {wholesaleThreshold != null ? `${wholesaleThreshold} ${qtyUnit}` : "—"}
                 </dd>
               </div>
               <div className="sm:col-span-2">
@@ -247,13 +252,13 @@ export function DraftMaterialLinePanel({
             </dl>
             {!hasCut ? (
               <p className="type-caption">
-                У каталозі одна ціна — межа витрати на ₴/м не впливає.
+                У каталозі одна ціна — межа витрати на ₴/{qtyUnit} не впливає.
               </p>
             ) : wholesaleThreshold != null ? (
               <p className="type-caption">
                 {isWholesale
-                  ? `Витрата ≥ ${wholesaleThreshold} м — базова ціна.`
-                  : `До базової ціни ще ${round1(Math.max(0, wholesaleThreshold - metersNeeded))} м (зараз роздріб).`}
+                  ? `Витрата ≥ ${wholesaleThreshold} ${qtyUnit} — базова ціна.`
+                  : `До базової ціни ще ${round1(Math.max(0, wholesaleThreshold - metersNeeded))} ${qtyUnit} (зараз роздріб).`}
               </p>
             ) : null}
           </section>
@@ -263,7 +268,7 @@ export function DraftMaterialLinePanel({
           <section className="space-y-2">
             <p className="type-group-label">Доставка</p>
             <p className="type-caption">
-              Окремий рядок у калькуляції (не входить у ₴/м). Впливає на кінцеву ціну.
+              Окремий рядок у калькуляції (не входить у ₴/{qtyUnit}). Впливає на кінцеву ціну.
             </p>
             <dl className="grid gap-2 text-[13px] sm:grid-cols-2">
               <div>

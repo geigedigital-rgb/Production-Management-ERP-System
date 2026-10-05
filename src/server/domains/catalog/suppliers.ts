@@ -337,6 +337,20 @@ export async function upsertMaterialSupplierOffer(
       });
     }
 
+    const cutPrice =
+      offer.priceMeterUahCutVat != null &&
+      Number.isFinite(offer.priceMeterUahCutVat) &&
+      offer.priceMeterUahCutVat > 0
+        ? offer.priceMeterUahCutVat
+        : null;
+    const minWholesale =
+      cutPrice != null &&
+      offer.minWholesaleMeters != null &&
+      Number.isFinite(offer.minWholesaleMeters) &&
+      offer.minWholesaleMeters > 0
+        ? offer.minWholesaleMeters
+        : null;
+
     const row = await prisma.materialSupplier.upsert({
       where: {
         materialId_supplierId: { materialId, supplierId: supplier.id },
@@ -354,6 +368,8 @@ export async function upsertMaterialSupplierOffer(
         priceKgUsd,
         priceMeterUahNoVat: unitPriceOrNull,
         priceMeterUahVat: unitPriceOrNull,
+        priceMeterUahCutVat: cutPrice,
+        minWholesaleMeters: minWholesale,
         wholesaleNote: offer.wholesaleNote ?? null,
         availableColors: offer.availableColors ?? [],
       },
@@ -368,6 +384,8 @@ export async function upsertMaterialSupplierOffer(
         priceKgUsd,
         priceMeterUahNoVat: unitPriceOrNull,
         priceMeterUahVat: unitPriceOrNull,
+        priceMeterUahCutVat: cutPrice,
+        minWholesaleMeters: minWholesale,
         wholesaleNote: offer.wholesaleNote ?? null,
         ...(offer.availableColors !== undefined
           ? { availableColors: offer.availableColors ?? [] }
@@ -385,6 +403,11 @@ export async function upsertMaterialSupplierOffer(
           purchasePackPrice: priceKgUsd != null ? null : purchasePackPrice,
           packDeliveryCostUah: priceKgUsd != null ? null : packDeliveryCostUah,
           priceKgUsd,
+          priceMeterUahNoVat: unitPriceOrNull,
+          priceMeterUahVat: unitPriceOrNull,
+          priceMeterUahCutVat: cutPrice,
+          minWholesaleMeters: minWholesale,
+          wholesaleNote: offer.wholesaleNote ?? undefined,
           ...(offer.availableColors !== undefined
             ? { availableColors: mergeColorLists(offer.availableColors ?? []) }
             : {}),

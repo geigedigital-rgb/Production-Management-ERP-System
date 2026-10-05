@@ -446,16 +446,9 @@ export function resolveMaterialLinePurchasePrice(input: {
   metersNeeded?: number | null;
 }): { purchasePrice: number; pricingMode: FabricPricingMode; wholesalePurchasePrice: number; cutPurchasePrice: number | null } {
   const catalogPrice = num(input.purchasePrice) ?? 0;
-  if (input.type && input.type !== "FABRIC") {
-    return {
-      purchasePrice: catalogPrice,
-      pricingMode: "standard",
-      wholesalePurchasePrice: catalogPrice,
-      cutPurchasePrice: null,
-    };
-  }
-
   const costMode = resolveCostMode(input.companyCostMode, input.costVatOverride);
+  // Тканина й фурнітура: одна логіка «ціна / ціна+роздріб».
+  // Межа порівнюється з витратою в од. виміру матеріалу (м, шт, кг…).
   const wholesalePurchasePrice = resolveMaterialCostPrice({
     mode: costMode,
     priceMeterUahNoVat: input.priceMeterUahNoVat,
@@ -465,8 +458,9 @@ export function resolveMaterialLinePurchasePrice(input: {
   const cutPurchasePrice = num(input.priceMeterUahCutVat);
   const minWholesaleMeters = resolveMinWholesaleMeters({
     minWholesaleMeters: input.minWholesaleMeters,
-    metersPerRoll: input.metersPerRoll,
+    metersPerRoll: input.type === "FABRIC" ? input.metersPerRoll : null,
   });
+  const basePrice = wholesalePurchasePrice > 0 ? wholesalePurchasePrice : catalogPrice;
 
   if (input.metersNeeded == null) {
     // Catalog / base model path
@@ -474,21 +468,21 @@ export function resolveMaterialLinePurchasePrice(input: {
       return {
         purchasePrice: cutPurchasePrice,
         pricingMode: "cut",
-        wholesalePurchasePrice,
+        wholesalePurchasePrice: basePrice,
         cutPurchasePrice,
       };
     }
     return {
-      purchasePrice: wholesalePurchasePrice > 0 ? wholesalePurchasePrice : catalogPrice,
+      purchasePrice: basePrice,
       pricingMode: "standard",
-      wholesalePurchasePrice,
+      wholesalePurchasePrice: basePrice,
       cutPurchasePrice,
     };
   }
 
   const resolved = resolveOrderFabricPurchasePrice({
     metersNeeded: input.metersNeeded,
-    wholesalePurchasePrice: wholesalePurchasePrice > 0 ? wholesalePurchasePrice : catalogPrice,
+    wholesalePurchasePrice: basePrice,
     cutPurchasePrice,
     minWholesaleMeters,
   });
@@ -496,7 +490,7 @@ export function resolveMaterialLinePurchasePrice(input: {
   return {
     purchasePrice: resolved.purchasePrice,
     pricingMode: resolved.pricingMode,
-    wholesalePurchasePrice,
+    wholesalePurchasePrice: basePrice,
     cutPurchasePrice,
   };
 }

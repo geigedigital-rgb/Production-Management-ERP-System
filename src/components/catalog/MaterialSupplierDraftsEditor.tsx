@@ -50,7 +50,7 @@ import {
   hasTrimPackQuote,
   unitPriceFromKgUsd,
 } from "@/lib/trim-pack-pricing";
-import { materialPackLabels } from "@/lib/material-pack-labels";
+import { materialPackLabels, materialQtyUnitShort } from "@/lib/material-pack-labels";
 
 export type MaterialSupplierOfferDraft = {
   key: string;
@@ -155,6 +155,7 @@ export function MaterialSupplierDraftsEditor({
   pricingKind = "fabric",
   usdUahRate,
   onUsdUahRateChange,
+  allowPackQuote = true,
 }: {
   offers: MaterialSupplierOfferDraft[];
   onChange: (next: MaterialSupplierOfferDraft[]) => void;
@@ -169,8 +170,11 @@ export function MaterialSupplierDraftsEditor({
   pricingKind?: "fabric" | "unit";
   usdUahRate?: number;
   onUsdUahRateChange?: (next: number) => void;
+  /** False for «Інший матеріал» — only ₴/од., no pack / $/кг modes. */
+  allowPackQuote?: boolean;
 }) {
   const packLabels = materialPackLabels(unitMode);
+  const qtyUnit = materialQtyUnitShort(unitMode);
   const [error, setError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<DraftForm>(() =>
@@ -194,12 +198,24 @@ export function MaterialSupplierDraftsEditor({
     }
   }, [usdUahRate]);
 
+  useEffect(() => {
+    if (!allowPackQuote && unitQuoteMode !== "each") {
+      setUnitQuoteMode("each");
+      setDraft((prev) => ({
+        ...prev,
+        purchasePackPrice: "",
+        priceKgUsd: "",
+        priceKgUsdVat: "",
+      }));
+    }
+  }, [allowPackQuote, unitQuoteMode]);
+
   function applyModesFromDraft(next: DraftForm) {
     setQuoteCurrency(inferFabricQuoteCurrency(next));
     setQuoteUnit(inferFabricQuoteUnit(next));
     setTierMode(inferFabricTierMode(next));
     setDeliveryUiMode(inferFabricDeliveryUiMode(next));
-    setUnitQuoteMode(inferUnitQuoteMode(next));
+    setUnitQuoteMode(allowPackQuote ? inferUnitQuoteMode(next) : "each");
     setUnitDeliveryUiMode(inferUnitDeliveryUiMode(next));
     setUnitQuoteCurrency("uah");
     setFixedDeliveryCurrency("uah");
@@ -275,6 +291,7 @@ export function MaterialSupplierDraftsEditor({
       setUnitDeliveryUiMode("kg");
       setUnitQuoteCurrency("uah");
       setFixedDeliveryCurrency("uah");
+      setTierMode("single");
     }
     setEditing("new");
   }
@@ -373,8 +390,20 @@ export function MaterialSupplierDraftsEditor({
         unitQuoteMode === "each" &&
         (!(unit >= 0) || draft.priceMeterUahNoVat.trim() === "")
       ) {
-        setError("Вкажіть ціну закупки (₴/шт).");
+        setError(`Вкажіть ціну закупки (${packLabels.unitSuffixUah}).`);
         return;
+      }
+      if (tierMode === "tier") {
+        const cutCheck = draft.priceMeterUahCutVat.trim();
+        const thresholdCheck = draft.minWholesaleMeters.trim();
+        if (!thresholdCheck || Number(thresholdCheck) <= 0) {
+          setError("Вкажіть межу роздробу.");
+          return;
+        }
+        if (!(cutCheck !== "" && Number(cutCheck) > 0)) {
+          setError("Вкажіть ціну роздробу.");
+          return;
+        }
       }
     }
     const cut = draft.priceMeterUahCutVat.trim();
@@ -494,15 +523,9 @@ export function MaterialSupplierDraftsEditor({
           ? String(unitFromQuote)
           : draft.priceMeterUahVat ||
             (derived.priceMeterUahVat != null ? String(derived.priceMeterUahVat) : ""),
-      priceMeterUahCutVat:
-        pricingKind === "fabric" && tierMode === "tier" && hasCut ? cut : "",
+      priceMeterUahCutVat: tierMode === "tier" && hasCut ? cut : "",
       minWholesaleMeters:
-        pricingKind === "fabric" &&
-        tierMode === "tier" &&
-        threshold &&
-        Number(threshold) > 0
-          ? threshold
-          : "",
+        tierMode === "tier" && threshold && Number(threshold) > 0 ? threshold : "",
       wholesaleNote: draft.wholesaleNote,
       purchasePackPrice:
         pricingKind === "unit" && packPriceUah != null ? String(packPriceUah) : "",
@@ -595,7 +618,7 @@ export function MaterialSupplierDraftsEditor({
                             row.priceMeterUahNoVat
                               ? formatMoneyUah(Number(row.priceMeterUahNoVat))
                               : "—"
-                          }/шт`
+                          }/${qtyUnit}`
                         : row.priceMeterUahNoVat
                           ? formatMoneyUah(Number(row.priceMeterUahNoVat))
                           : "без ціни"
@@ -800,8 +823,10 @@ export function MaterialSupplierDraftsEditor({
                   value={unitQuoteMode}
                   options={[
                     { value: "each", label: packLabels.eachQuote },
-                    { value: "pack", label: packLabels.packQuote },
-                    ...(packLabels.showUnitsPerKg
+                    ...(allowPackQuote
+                      ? [{ value: "pack" as const, label: packLabels.packQuote }]
+                      : []),
+                    ...(allowPackQuote && packLabels.showUnitsPerKg
                       ? [{ value: "kg" as const, label: "$/кг" }]
                       : []),
                   ]}
@@ -815,8 +840,26 @@ export function MaterialSupplierDraftsEditor({
                     }));
                   }}
                 />
+                <ModeSegment
+                  label="Тариф"
+                  value={tierMode}
+                  options={[
+                    { value: "single", label: "Ціна" },
+                    { value: "tier", label: "Ціна + роздріб" },
+                  ]}
+                  onChange={(next) => {
+                    setTierMode(next);
+                    if (next !== "tier") {
+                      setDraft((prev) => ({
+                        ...prev,
+                        priceMeterUahCutVat: "",
+                        minWholesaleMeters: "",
+                      }));
+                    }
+                  }}
+                />
               </PurchaseModeRow>
-              {unitQuoteMode === "pack" ? (
+              {allowPackQuote && unitQuoteMode === "pack" ? (
                 <Input
                   label={packLabels.packPriceLabel}
                   type="number"
@@ -838,7 +881,7 @@ export function MaterialSupplierDraftsEditor({
                   }
                 />
               ) : null}
-              {unitQuoteMode === "kg" ? (
+              {allowPackQuote && unitQuoteMode === "kg" ? (
                 <Input
                   label="Прайс"
                   type="number"
@@ -933,15 +976,61 @@ export function MaterialSupplierDraftsEditor({
                   }))
                 }
                 hint={
-                  unitQuoteMode === "kg"
-                    ? packLabels.derivedHintKg
-                    : unitQuoteMode === "pack"
-                      ? packLabels.derivedHintPack
-                      : unitQuoteCurrency === "usd"
-                        ? `Курс ${effectiveUsdRate} ₴/$ · у собівартість піде в гривнях`
-                        : undefined
+                  tierMode === "tier"
+                    ? "Базова ціна (коли витрата ≥ межі роздробу)"
+                    : unitQuoteMode === "kg"
+                      ? packLabels.derivedHintKg
+                      : unitQuoteMode === "pack"
+                        ? packLabels.derivedHintPack
+                        : unitQuoteCurrency === "usd"
+                          ? `Курс ${effectiveUsdRate} ₴/$ · у собівартість піде в гривнях`
+                          : undefined
                 }
               />
+              {tierMode === "tier" ? (
+                <>
+                  <Input
+                    label="Межа роздробу"
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    suffix={qtyUnit}
+                    value={draft.minWholesaleMeters}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setDraft((prev) => ({
+                        ...prev,
+                        minWholesaleMeters: value,
+                      }));
+                    }}
+                    hint={`Якщо витрата < межі — ціна роздробу (${qtyUnit})`}
+                  />
+                  <Input
+                    label="Ціна роздробу"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    suffix={packLabels.unitSuffixUah}
+                    disabled={
+                      draft.minWholesaleMeters.trim() === "" ||
+                      Number(draft.minWholesaleMeters) <= 0
+                    }
+                    value={draft.priceMeterUahCutVat}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        priceMeterUahCutVat: event.target.value,
+                      }))
+                    }
+                    hint={
+                      draft.minWholesaleMeters.trim() === "" ||
+                      Number(draft.minWholesaleMeters) <= 0
+                        ? "Спочатку вкажіть межу роздробу"
+                        : "До межі (зазвичай дорожча за базову)"
+                    }
+                  />
+                </>
+              ) : null}
               <Input
                 className="sm:col-span-2"
                 label="Примітка"
@@ -1183,7 +1272,7 @@ export function MaterialSupplierDraftsEditor({
                         type="number"
                         min={0}
                         step="0.1"
-                        suffix="м"
+                        suffix={qtyUnit}
                         value={draft.minWholesaleMeters}
                         onChange={(event) => {
                           const value = event.target.value;
@@ -1192,7 +1281,7 @@ export function MaterialSupplierDraftsEditor({
                             minWholesaleMeters: value,
                           }));
                         }}
-                        hint="Якщо витрата менша за межу — ціна роздробу"
+                        hint={`Якщо витрата < межі — ціна роздробу (${qtyUnit})`}
                       />
                       <Input
                         label="Ціна роздробу"
@@ -1229,13 +1318,13 @@ export function MaterialSupplierDraftsEditor({
             />
             {derived.purchasePrice > 0 ? (
               <p className="type-caption sm:col-span-2 tabular">
-                Собівартість: {formatMoneyUah(derived.purchasePrice)}/м
+                Собівартість: {formatMoneyUah(derived.purchasePrice)}/{qtyUnit}
                 {tierMode === "tier" &&
                 draft.minWholesaleMeters.trim() !== "" &&
                 Number(draft.minWholesaleMeters) > 0
                   ? draft.priceMeterUahCutVat.trim() && Number(draft.priceMeterUahCutVat) > 0
-                    ? ` · < ${draft.minWholesaleMeters} м → роздріб`
-                    : ` · роздріб до ${draft.minWholesaleMeters} м`
+                    ? ` · < ${draft.minWholesaleMeters} ${qtyUnit} → роздріб`
+                    : ` · роздріб до ${draft.minWholesaleMeters} ${qtyUnit}`
                   : " · ціна"}
                 {quoteCurrency === "usd" ? ` · курс ${effectiveUsdRate} ₴/$` : ""}
               </p>

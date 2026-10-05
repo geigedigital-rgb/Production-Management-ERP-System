@@ -29,8 +29,8 @@ import {
 import { prisma } from "@/server/db/client";
 import { materialFormSchema } from "@/server/domains/catalog/schemas";
 import {
+  DEFAULT_FABRIC_DELIVERY_RATES,
   normalizeFabricDeliveryType,
-  pricingSettingsRatePatch,
 } from "@/lib/fabric-delivery-types";
 import {
   decorationFormSchema,
@@ -321,7 +321,10 @@ export async function updateMaterialAvailableColorsAction(
   };
 }
 
-/** Persist course/delivery rates from the material form into shared PricingSettings. */
+/**
+ * Persist course (+ CARGO only) from the material form into shared PricingSettings.
+ * НП стандарт / НП обʼємні — лише з «Ціноутворення» (НП стандарт завжди 0.4 $/кг).
+ */
 async function syncFabricGlobalsFromForm(formData: FormData) {
   const access = await getCurrentUserAccess();
   if (!access) return;
@@ -341,13 +344,17 @@ async function syncFabricGlobalsFromForm(formData: FormData) {
   const existing = await prisma.pricingSettings.findFirst();
   if (!existing) return;
 
-  const ratePatch = pricingSettingsRatePatch(deliveryType, deliveryRate);
+  // Do not let a material tariff overwrite company НП rates (was corrupting 0.4 → 1.7).
   const nextCargo =
-    ratePatch.fabricCargoUsdPerKg ?? Number(existing.fabricCargoUsdPerKg);
-  const nextNpStandard =
-    ratePatch.npStandardUsdPerKg ?? Number(existing.npStandardUsdPerKg ?? 0.4);
-  const nextNpVolume =
-    ratePatch.npVolumeUsdPerKg ?? Number(existing.npVolumeUsdPerKg ?? 0.8);
+    deliveryType === "CARGO"
+      ? deliveryRate
+      : Number(existing.fabricCargoUsdPerKg);
+  const nextNpStandard = Number(
+    existing.npStandardUsdPerKg ?? DEFAULT_FABRIC_DELIVERY_RATES.NP_STANDARD,
+  );
+  const nextNpVolume = Number(
+    existing.npVolumeUsdPerKg ?? DEFAULT_FABRIC_DELIVERY_RATES.NP_VOLUME,
+  );
 
   const sameRate = Number(existing.usdUahRate) === usdUahRate;
   const sameCargo = Number(existing.fabricCargoUsdPerKg) === nextCargo;

@@ -9,6 +9,7 @@ import { SidePanelSkeleton } from "@/components/ui/Skeleton";
 import { Select } from "@/components/ui/Field";
 import { Banner } from "@/components/ui/Banner";
 import { formatMoneyUah, formatUnit } from "@/lib/utils";
+import { materialQtyUnitShort } from "@/lib/material-pack-labels";
 import {
   effectiveOversizeConsumption,
   isOversizeCode,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/size-coeffs";
 import {
   fabricPricingModeLabel,
+  resolveFabricUnitMode,
   resolveOrderFabricPurchasePrice,
 } from "@/lib/fabric-pricing";
 import {
@@ -409,6 +411,9 @@ export function OrderMaterialDetailPanel({
   }
 
   const open = Boolean(orderItemMaterialId);
+  const qtyUnit = detail
+    ? materialQtyUnitShort(resolveFabricUnitMode(detail.unit))
+    : "м";
 
   return (
     <SidePanel
@@ -484,7 +489,9 @@ export function OrderMaterialDetailPanel({
 
                 <dl className="grid gap-2 text-[13px]">
                   <div>
-                    <dt className="text-[var(--color-text-tertiary)]">₴/м (без доставки)</dt>
+                    <dt className="text-[var(--color-text-tertiary)]">
+                      ₴/{qtyUnit} (без доставки)
+                    </dt>
                     <dd className="tabular text-[15px] font-semibold">
                       {formatMoneyUah(live.purchasePrice)}
                       <span className="ml-1.5 text-[11px] font-normal text-[var(--color-text-tertiary)]">
@@ -510,8 +517,10 @@ export function OrderMaterialDetailPanel({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-[var(--color-text-tertiary)]">Метраж партії</dt>
-                    <dd className="tabular font-medium">{live.metersNeeded} м</dd>
+                    <dt className="text-[var(--color-text-tertiary)]">Витрата партії</dt>
+                    <dd className="tabular font-medium">
+                      {live.metersNeeded} {qtyUnit}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-[var(--color-text-tertiary)]">Вага партії</dt>
@@ -528,7 +537,7 @@ export function OrderMaterialDetailPanel({
                 </dl>
                 <p className="type-caption">
                   {detail.consumption} {formatUnit(detail.unit)}/од. × (1 + {detail.waste}%) ×{" "}
-                  {lineQuantity(detail)} шт = {live.metersNeeded} м
+                  {lineQuantity(detail)} шт = {live.metersNeeded} {qtyUnit}
                 </p>
                 {(() => {
                   const oversizeQty = Object.entries(detail.quantitiesBySize ?? {}).filter(
@@ -576,7 +585,7 @@ export function OrderMaterialDetailPanel({
                           : "Ціна";
                   const catalogHint =
                     live.catalogMinWholesaleMeters != null
-                      ? `${live.catalogMinWholesaleMeters} м`
+                      ? `${live.catalogMinWholesaleMeters} ${qtyUnit}`
                       : "не задана";
 
                   return (
@@ -585,7 +594,7 @@ export function OrderMaterialDetailPanel({
                         <div>
                           <dt className="text-[var(--color-text-tertiary)]">Межа зараз</dt>
                           <dd className="tabular font-medium">
-                            {threshold != null ? `${threshold} м` : "—"}
+                            {threshold != null ? `${threshold} ${qtyUnit}` : "—"}
                             {live.thresholdIsOverride ? (
                               <span className="ml-1.5 text-[11px] font-normal text-[var(--color-text-tertiary)]">
                                 · для замовлення
@@ -599,7 +608,9 @@ export function OrderMaterialDetailPanel({
                         </div>
                         <div>
                           <dt className="text-[var(--color-text-tertiary)]">Витрата партії</dt>
-                          <dd className="tabular font-medium">{live.metersNeeded} м</dd>
+                          <dd className="tabular font-medium">
+                            {live.metersNeeded} {qtyUnit}
+                          </dd>
                         </div>
                       </dl>
 
@@ -613,7 +624,7 @@ export function OrderMaterialDetailPanel({
                                 ? String(live.catalogMinWholesaleMeters)
                                 : "напр. 50"
                             }
-                            suffix="м"
+                            suffix={qtyUnit}
                             step="0.1"
                             disabled={pending}
                             onChange={setThresholdOverride}
@@ -634,19 +645,19 @@ export function OrderMaterialDetailPanel({
                         </p>
                       ) : !hasCut ? (
                         <p className="type-caption">
-                          У каталозі одна ціна — ₴/м не перемикається. Межу все одно можна
+                          У каталозі одна ціна — ₴/{qtyUnit} не перемикається. Межу все одно можна
                           зафіксувати для цього замовлення.
                           {threshold != null
                             ? live.metersNeeded >= threshold
-                              ? ` Витрата ≥ ${threshold} м.`
-                              : ` До межі ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м.`
+                              ? ` Витрата ≥ ${threshold} ${qtyUnit}.`
+                              : ` До межі ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} ${qtyUnit}.`
                             : ""}
                         </p>
                       ) : threshold != null ? (
                         <p className="type-caption">
                           {atWholesale
-                            ? `Витрата ≥ ${threshold} м — базова ціна.`
-                            : `До базової ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} м (зараз роздріб).`}
+                            ? `Витрата ≥ ${threshold} ${qtyUnit} — базова ціна.`
+                            : `До базової ще ${Math.round((threshold - live.metersNeeded) * 10) / 10} ${qtyUnit} (зараз роздріб).`}
                         </p>
                       ) : (
                         <p className="type-caption">

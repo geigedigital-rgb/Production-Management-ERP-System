@@ -213,11 +213,12 @@ export default async function OrderDetailPage({
           ? Number(row.material.metersPerRoll)
           : null;
     let pricingHint: string | null = null;
-    if (row.material?.type === "FABRIC" && cut != null && cut > 0) {
+    if (cut != null && cut > 0) {
+      const qtyUnit = formatUnit(row.unitCodeSnapshot);
       const nearCut = Math.abs(price - cut) < 0.05;
       pricingHint = nearCut
         ? minM
-          ? `роздріб (до ${minM} м)`
+          ? `роздріб (до ${minM} ${qtyUnit})`
           : "роздріб"
         : "ціна";
     }

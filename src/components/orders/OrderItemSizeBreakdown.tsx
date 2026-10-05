@@ -106,13 +106,10 @@ export function OrderItemSizeBreakdown({
   }
 
   return (
-    <div className="mt-3 space-y-2.5 rounded-[var(--radius-control)] border border-[var(--color-warning-text)]/25 bg-[var(--color-warning-bg)]/50 px-3 py-2.5">
+    <div className="space-y-2.5 rounded-[var(--radius-control)] border border-[var(--color-warning-text)]/25 bg-[var(--color-warning-bg)]/50 px-3 py-2.5">
       <div>
         <p className="text-[13px] font-semibold text-[var(--color-text-primary)]">
           Задано загальний тираж {targetTirage} шт.
-        </p>
-        <p className="type-caption mt-0.5">
-          Розкладіть по розмірах перед передачею у виробництво. Можна додати розміри з кількох сіток.
         </p>
       </div>
 

@@ -91,14 +91,7 @@ export function OrderItemsTable({
   return (
     <TableCard>
       <TableToolbar
-        left={
-          <div className="min-w-0">
-            <p className="type-subsection">Позиції замовлення</p>
-            <p className="type-caption mt-0.5">
-              Кожен рядок — окремий виріб. Натисніть рядок, щоб переглянути або змінити склад.
-            </p>
-          </div>
-        }
+        left={<p className="type-subsection">Позиції замовлення</p>}
         right={
           locked ? (
             <span className="type-caption">Зафіксовано</span>

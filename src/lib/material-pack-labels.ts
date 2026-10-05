@@ -1,5 +1,20 @@
 import type { FabricUnitMode } from "@/lib/fabric-pricing";
 
+/** Short unit for thresholds / qty captions (Межа роздробу), from BOM unit. */
+export function materialQtyUnitShort(unitMode: FabricUnitMode | string): string {
+  switch (unitMode) {
+    case "m":
+    case "m2":
+      return "м";
+    case "kg":
+      return "кг";
+    case "cone":
+      return "од.";
+    default:
+      return "шт";
+  }
+}
+
 /** Labels for pack content + purchase quote, driven by BOM consumption unit. */
 export function materialPackLabels(unitMode: FabricUnitMode | string) {
   switch (unitMode) {

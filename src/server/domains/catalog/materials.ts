@@ -97,6 +97,27 @@ function fabricDataFromForm(
       usdUahRate: globals.usdUahRate,
       fallbackUnitPrice: data.purchasePrice,
     });
+    const cutPrice =
+      data.priceMeterUahCutVat != null &&
+      Number.isFinite(data.priceMeterUahCutVat) &&
+      data.priceMeterUahCutVat > 0
+        ? data.priceMeterUahCutVat
+        : null;
+    const minWholesale =
+      cutPrice != null &&
+      data.minWholesaleMeters != null &&
+      Number.isFinite(data.minWholesaleMeters) &&
+      data.minWholesaleMeters > 0
+        ? data.minWholesaleMeters
+        : null;
+    const unitMeterPrice =
+      data.priceMeterUahNoVat != null &&
+      Number.isFinite(data.priceMeterUahNoVat) &&
+      data.priceMeterUahNoVat > 0
+        ? data.priceMeterUahNoVat
+        : purchasePrice > 0
+          ? purchasePrice
+          : null;
 
     return {
       densityGsm: null,
@@ -105,16 +126,16 @@ function fabricDataFromForm(
       priceKgUsd,
       priceKgUsdCargo: null,
       priceKgUsdVat: null,
-      priceMeterUahNoVat: null,
-      priceMeterUahVat: null,
-      priceMeterUahCutVat: null,
+      priceMeterUahNoVat: unitMeterPrice,
+      priceMeterUahVat: unitMeterPrice,
+      priceMeterUahCutVat: cutPrice,
       fabricKindUk: null,
       widthCm: null,
-      wholesaleNote: null,
+      wholesaleNote: data.wholesaleNote || null,
       rollWeightKg: null,
       metersPerRoll: null,
-      minWholesaleMeters: null,
-      costVatOverride: null,
+      minWholesaleMeters: minWholesale,
+      costVatOverride: data.costVatOverride ?? null,
       deliveryType: "CARGO" as FabricDeliveryTypeCode,
       unitsPerPack,
       unitsPerKg,
@@ -144,6 +165,20 @@ function fabricDataFromForm(
 
   const purchasePrice =
     derived.purchasePrice > 0 ? derived.purchasePrice : data.purchasePrice;
+  const unitsPerPack =
+    data.unitsPerPack != null && data.unitsPerPack > 0 ? Math.floor(data.unitsPerPack) : null;
+  const unitsPerKg =
+    data.unitsPerKg != null && Number(data.unitsPerKg) > 0 ? Number(data.unitsPerKg) : null;
+  const purchasePackPrice =
+    unitsPerPack != null && data.purchasePackPrice != null ? data.purchasePackPrice : null;
+  const packDeliveryCostUah =
+    unitsPerPack != null && data.packDeliveryCostUah != null ? data.packDeliveryCostUah : null;
+  const meterPrice =
+    derived.priceMeterUahNoVat != null && derived.priceMeterUahNoVat > 0
+      ? derived.priceMeterUahNoVat
+      : purchasePrice > 0
+        ? purchasePrice
+        : null;
 
   return {
     densityGsm: data.densityGsm || null,
@@ -152,8 +187,8 @@ function fabricDataFromForm(
     priceKgUsd: data.priceKgUsd ?? null,
     priceKgUsdCargo: derived.priceKgUsdCargo,
     priceKgUsdVat: data.priceKgUsdVat ?? null,
-    priceMeterUahNoVat: derived.priceMeterUahNoVat,
-    priceMeterUahVat: derived.priceMeterUahVat,
+    priceMeterUahNoVat: meterPrice,
+    priceMeterUahVat: derived.priceMeterUahVat ?? meterPrice,
     priceMeterUahCutVat: data.priceMeterUahCutVat ?? null,
     fabricKindUk: data.fabricKindUk || null,
     widthCm: data.widthCm || null,
@@ -163,10 +198,10 @@ function fabricDataFromForm(
     minWholesaleMeters: data.minWholesaleMeters ?? derived.minWholesaleMeters,
     costVatOverride: data.costVatOverride ?? null,
     deliveryType,
-    unitsPerPack: null,
-    unitsPerKg: null,
-    purchasePackPrice: null,
-    packDeliveryCostUah: null,
+    unitsPerPack,
+    unitsPerKg,
+    purchasePackPrice,
+    packDeliveryCostUah,
     purchasePrice,
   };
 }

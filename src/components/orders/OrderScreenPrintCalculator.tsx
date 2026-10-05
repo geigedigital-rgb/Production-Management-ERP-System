@@ -310,11 +310,7 @@ export function OrderScreenPrintCalculator({
               )}
             </div>
           </>
-        ) : (
-          <p className="type-caption text-[var(--color-text-quiet)]">
-            Спочатку оберіть шовкодрук — зʼявляться коефіцієнти, потім «Додати».
-          </p>
-        )}
+        ) : null}
 
         {error ? <p className="type-caption text-[var(--color-danger-text)]">{error}</p> : null}
       </div>

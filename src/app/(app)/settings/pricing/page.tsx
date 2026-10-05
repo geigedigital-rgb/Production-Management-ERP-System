@@ -93,6 +93,7 @@ export default async function PricingSettingsPage() {
                   step="0.01"
                   min="0"
                   defaultValue={Number(pricing?.npStandardUsdPerKg ?? 0.4)}
+                  hint="Завжди 0,4 $/кг · не змінювати без потреби"
                 />
                 <Input
                   name="npVolumeUsdPerKg"

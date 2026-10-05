@@ -24,7 +24,13 @@ import {
   normalizeMaterialTagColor,
   type MaterialTagColor,
 } from "@/lib/material-tags";
-import { materialPackLabels, isSelectableMaterialUnit } from "@/lib/material-pack-labels";
+import { materialPackLabels, materialQtyUnitShort, isSelectableMaterialUnit } from "@/lib/material-pack-labels";
+import {
+  ModeSegment,
+  PurchaseModeRow,
+  inferFabricTierMode,
+  type FabricTierMode,
+} from "@/components/catalog/FabricPurchaseModes";
 import { PanelTabs } from "@/components/ui/Tabs";
 import {
   createMaterialAction,
@@ -296,6 +302,12 @@ function MaterialFields({
   const [minWholesaleMeters, setMinWholesaleMeters] = useState(
     numStr(defaults?.minWholesaleMeters),
   );
+  const [tierMode, setTierMode] = useState<FabricTierMode>(() =>
+    inferFabricTierMode({
+      minWholesaleMeters: defaults?.minWholesaleMeters,
+      priceMeterUahCutVat: defaults?.priceMeterUahCutVat,
+    }),
+  );
   const [wholesaleNote, setWholesaleNote] = useState(defaults?.wholesaleNote ?? "");
   const [note, setNote] = useState(defaults?.note ?? "");
   const [costOverride, setCostOverride] = useState(defaults?.costVatOverride ?? "");
@@ -324,6 +336,7 @@ function MaterialFields({
   const selectedUnit = units.find((unit) => unit.id === unitOfMeasureId) ?? units[0];
   const fabricUnitMode = resolveFabricUnitMode(resolveUnitCode(selectedUnit));
   const packLabels = materialPackLabels(fabricUnitMode);
+  const qtyUnit = materialQtyUnitShort(fabricUnitMode);
   const unitOptions = useMemo(() => {
     const selectable = units.filter(isSelectableMaterialUnit);
     if (selectedUnit && !selectable.some((unit) => unit.id === selectedUnit.id)) {
@@ -484,34 +497,35 @@ function MaterialFields({
   const supplierValue =
     supplierSelect === SUPPLIER_OTHER ? supplierOther.trim() : supplierSelect;
 
+  /** Тканина в шт/од. — ті самі поля упаковки, що й «Інший матеріал». */
+  const unitLikeMaterial = type !== "FABRIC" || fabricEachPricing;
   const trimPackQuote = {
     unitsPerPack: unitsPerPack ? Number(unitsPerPack) : null,
     purchasePackPrice: purchasePackPrice !== "" ? Number(purchasePackPrice) : null,
     packDeliveryCostUah: packDeliveryCostUah !== "" ? Number(packDeliveryCostUah) : null,
   };
-  const trimPackActive = type !== "FABRIC" && hasTrimPackQuote(trimPackQuote);
+  const trimPackActive = unitLikeMaterial && hasTrimPackQuote(trimPackQuote);
   const trimUnitFromPack = deriveUnitPriceFromPack(
     trimPackQuote,
     Number(purchasePrice) || 0,
   );
 
   const purchaseDisplay =
-    type === "FABRIC"
-      ? fabricEachPricing
-        ? purchasePrice
-        : managePricingSeparately
-          ? String(defaults?.purchasePrice ?? purchasePrice)
-          : derived.purchasePrice > 0
-            ? String(derived.purchasePrice)
-            : purchasePrice
+    type === "FABRIC" && !fabricEachPricing
+      ? managePricingSeparately
+        ? String(defaults?.purchasePrice ?? purchasePrice)
+        : derived.purchasePrice > 0
+          ? String(derived.purchasePrice)
+          : purchasePrice
       : trimPackActive
         ? String(trimUnitFromPack)
         : purchasePrice;
 
   const policyLabel =
     liveGlobals.materialCostVatMode === "GROSS" ? "GROSS" : "NET";
-  const purchaseReadOnly =
-    (type === "FABRIC" && !fabricEachPricing) || trimPackActive;
+  const purchaseReadOnly = trimPackActive;
+  /** Тканина м/кг/м² — ₴/м у постачальника / «Ціни», не дубль на «Основне». */
+  const showPurchasePriceOnMain = unitLikeMaterial;
 
   const wizardSteps = useMemo(() => {
     if (type !== "FABRIC") {
@@ -541,9 +555,9 @@ function MaterialFields({
   const stepKey = wizardSteps[wizardStep] ?? "Основне";
 
   const wizardMultiSuppliers = wizard && !managePricingSeparately;
-  /** Pack quote lives on supplier offers (create drafts or edit editor). */
+  /** Unit/pack quote lives on supplier offers (create drafts or edit editor). */
   const trimPricingOnSuppliers =
-    type !== "FABRIC" && (managePricingSeparately || wizardMultiSuppliers);
+    unitLikeMaterial && (managePricingSeparately || wizardMultiSuppliers);
   const supplierPricingKind = type === "FABRIC" && !fabricEachPricing ? "fabric" : "unit";
 
   /** Mirror primary draft into classic form fields so createMaterial still syncs primary. */
@@ -565,6 +579,14 @@ function MaterialFields({
       if (primary.purchasePackPrice) setPurchasePackPrice(primary.purchasePackPrice);
       if (primary.packDeliveryCostUah) setPackDeliveryCostUah(primary.packDeliveryCostUah);
       if (primary.priceMeterUahNoVat) setPurchasePrice(primary.priceMeterUahNoVat);
+      if (primary.priceMeterUahCutVat) setPriceMeterCutVat(primary.priceMeterUahCutVat);
+      if (primary.minWholesaleMeters) setMinWholesaleMeters(primary.minWholesaleMeters);
+      setTierMode(
+        inferFabricTierMode({
+          minWholesaleMeters: primary.minWholesaleMeters,
+          priceMeterUahCutVat: primary.priceMeterUahCutVat,
+        }),
+      );
       return;
     }
     if (primary.priceKgUsd) setPriceKgUsd(primary.priceKgUsd);
@@ -573,6 +595,12 @@ function MaterialFields({
     if (primary.priceMeterUahVat) setPriceMeterVat(primary.priceMeterUahVat);
     if (primary.priceMeterUahCutVat) setPriceMeterCutVat(primary.priceMeterUahCutVat);
     if (primary.minWholesaleMeters) setMinWholesaleMeters(primary.minWholesaleMeters);
+    setTierMode(
+      inferFabricTierMode({
+        minWholesaleMeters: primary.minWholesaleMeters,
+        priceMeterUahCutVat: primary.priceMeterUahCutVat,
+      }),
+    );
     if (primary.wholesaleNote) setWholesaleNote(primary.wholesaleNote);
     if (primary.cargoUsdPerKg) setFabricCargoUsdPerKg(primary.cargoUsdPerKg);
     if (primary.deliveryType) {
@@ -731,15 +759,10 @@ function MaterialFields({
       </FormGroup>
       </div>
 
-      {/* Calc fields: always in edit; on create for шт — on «Основне» (same as edit). */}
+      {/* Calc fields: always in edit; create wizard — on «Основне» for all types. */}
       <div
         className={
-          !wizard ||
-          showStep("Ціна") ||
-          showStep("Готово") ||
-          (type !== "FABRIC" && showStep("Основне"))
-            ? "space-y-4"
-            : "hidden"
+          !wizard || showStep("Ціна") || showStep("Основне") ? "space-y-4" : "hidden"
         }
       >
       <FormGroup
@@ -748,7 +771,7 @@ function MaterialFields({
         columns={2}
         compact
       >
-        {type !== "FABRIC" ? (
+        {unitLikeMaterial ? (
           <>
             <Input
               name="unitsPerPack"
@@ -769,7 +792,7 @@ function MaterialFields({
                 step="0.01"
                 min="0"
                 optional
-                hint="Напр. комірці — ~10 шт у 1 кг (для закупівлі $/кг)"
+                hint="Напр. комірці — ~35 шт у 1 кг (для закупівлі $/кг)"
                 value={unitsPerKg}
                 onChange={(event) => setUnitsPerKg(event.target.value)}
               />
@@ -809,8 +832,17 @@ function MaterialFields({
               </>
             )}
           </>
-        ) : null}
-        {!trimPricingOnSuppliers && !(wizardMultiSuppliers && fabricEachPricing) ? (
+        ) : (
+          <>
+            <input type="hidden" name="unitsPerPack" value={unitsPerPack} />
+            <input type="hidden" name="unitsPerKg" value={unitsPerKg} />
+            <input type="hidden" name="purchasePackPrice" value={purchasePackPrice} />
+            <input type="hidden" name="packDeliveryCostUah" value={packDeliveryCostUah} />
+          </>
+        )}
+        {showPurchasePriceOnMain &&
+        !trimPricingOnSuppliers &&
+        !(wizardMultiSuppliers && unitLikeMaterial) ? (
           <Input
             name={wizardMultiSuppliers && !trimPackActive ? undefined : "purchasePrice"}
             label="Ціна"
@@ -818,24 +850,14 @@ function MaterialFields({
             step="0.01"
             min="0"
             required
-            suffix={
-              fabricEachPricing
-                ? fabricUnitMode === "cone"
-                  ? "₴/боб"
-                  : "₴/шт"
-                : type === "FABRIC"
-                  ? "₴/м"
-                  : "₴"
-            }
+            suffix={packLabels.unitSuffixUah}
             value={purchaseDisplay}
             readOnly={purchaseReadOnly}
             tabIndex={purchaseReadOnly ? -1 : undefined}
             hint={
               trimPackActive
-                ? `(ціна + доставка) ÷ ${Math.floor(Number(unitsPerPack))} шт`
-                : type !== "FABRIC"
-                  ? "Або вкажіть упаковку — ₴/од. порахуємо самі"
-                  : undefined
+                ? `(ціна + доставка) ÷ ${Math.floor(Number(unitsPerPack))} ${packLabels.eachQuote}`
+                : "Або вкажіть упаковку / шт·кг — ₴/од. порахуємо самі"
             }
             onChange={
               purchaseReadOnly
@@ -857,7 +879,7 @@ function MaterialFields({
           defaultValue={defaults?.defaultWastePercent ?? 0}
         />
       </FormGroup>
-      {type !== "FABRIC" && wizard && showStep("Основне") ? (
+      {wizard && showStep("Основне") ? (
         <FormGroup columns={2} compact>
           <Input
             name="colorOrAttribute"
@@ -1068,6 +1090,7 @@ function MaterialFields({
                   onEditingChange={setSupplierDraftEditing}
                   pricingKind={supplierPricingKind}
                   usdUahRate={usdUahRate}
+                  allowPackQuote={unitLikeMaterial}
                   /* Курс у «Параметри» — без дубля в тарифах доставки */
                 />
               </>
@@ -1229,13 +1252,30 @@ function MaterialFields({
                 columns={2}
                 compact
               >
+                <PurchaseModeRow>
+                  <ModeSegment
+                    label="Тариф"
+                    value={tierMode}
+                    options={[
+                      { value: "single", label: "Ціна" },
+                      { value: "tier", label: "Ціна + роздріб" },
+                    ]}
+                    onChange={(next) => {
+                      setTierMode(next);
+                      if (next !== "tier") {
+                        setMinWholesaleMeters("");
+                        setPriceMeterCutVat("");
+                      }
+                    }}
+                  />
+                </PurchaseModeRow>
                 <Input
                   name="priceMeterUahNoVat"
                   label="Ціна"
                   type="number"
                   step="0.1"
                   min="0"
-                  suffix="₴/м"
+                  suffix={`₴/${qtyUnit}`}
                   required={fabricUnitMode === "m" || fabricUnitMode === "m2"}
                   value={priceMeterNoVat}
                   readOnly={fabricUnitMode === "kg" || fabricUnitMode === "m2"}
@@ -1253,49 +1293,60 @@ function MaterialFields({
                       ? "Авто: $/кг ÷ м.п./кг × курс"
                       : fabricUnitMode === "m2"
                         ? "Авто з ₴/м² × ширина"
-                        : minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
-                          ? `Базова · від ${minWholesaleMeters} м`
+                        : tierMode === "tier" &&
+                            minWholesaleMeters.trim() !== "" &&
+                            Number(minWholesaleMeters) > 0
+                          ? `Базова · від ${minWholesaleMeters} ${qtyUnit}`
                           : "Базова ціна тканини без доставки"
                   }
                 />
                 <input type="hidden" name="priceMeterUahVat" value="" />
-                <Input
-                  name="minWholesaleMeters"
-                  label="Межа роздробу"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  suffix="м"
-                  optional
-                  value={minWholesaleMeters}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setMinWholesaleMeters(value);
-                    if (value.trim() === "" || Number(value) <= 0) {
-                      setPriceMeterCutVat("");
-                    }
-                  }}
-                  hint="Якщо витрата менша за межу — ціна роздробу"
-                />
-                <Input
-                  name="priceMeterUahCutVat"
-                  label="Ціна роздробу"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  suffix="₴/м"
-                  optional
-                  disabled={
-                    minWholesaleMeters.trim() === "" || Number(minWholesaleMeters) <= 0
-                  }
-                  value={priceMeterCutVat}
-                  onChange={(event) => setPriceMeterCutVat(event.target.value)}
-                  hint={
-                    minWholesaleMeters.trim() === "" || Number(minWholesaleMeters) <= 0
-                      ? "Спочатку вкажіть межу роздробу"
-                      : "До межі (зазвичай дорожча за базову)"
-                  }
-                />
+                {tierMode === "tier" ? (
+                  <>
+                    <Input
+                      name="minWholesaleMeters"
+                      label="Межа роздробу"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      suffix={qtyUnit}
+                      optional
+                      value={minWholesaleMeters}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setMinWholesaleMeters(value);
+                        if (value.trim() === "" || Number(value) <= 0) {
+                          setPriceMeterCutVat("");
+                        }
+                      }}
+                      hint={`Якщо витрата < межі — ціна роздробу (${qtyUnit})`}
+                    />
+                    <Input
+                      name="priceMeterUahCutVat"
+                      label="Ціна роздробу"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      suffix={`₴/${qtyUnit}`}
+                      optional
+                      disabled={
+                        minWholesaleMeters.trim() === "" || Number(minWholesaleMeters) <= 0
+                      }
+                      value={priceMeterCutVat}
+                      onChange={(event) => setPriceMeterCutVat(event.target.value)}
+                      hint={
+                        minWholesaleMeters.trim() === "" || Number(minWholesaleMeters) <= 0
+                          ? "Спочатку вкажіть межу роздробу"
+                          : "До межі (зазвичай дорожча за базову)"
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input type="hidden" name="minWholesaleMeters" value="" />
+                    <input type="hidden" name="priceMeterUahCutVat" value="" />
+                  </>
+                )}
                 <Input
                   name="wholesaleNote"
                   label="Примітка"
@@ -1306,12 +1357,14 @@ function MaterialFields({
                 />
                 {derived.purchasePrice > 0 ? (
                   <p className="type-caption sm:col-span-2 tabular">
-                    Активна собівартість з цих умов: {formatMoneyUah(derived.purchasePrice)}/м
+                    Активна собівартість з цих умов: {formatMoneyUah(derived.purchasePrice)}/{qtyUnit}
                     {derived.pricingMode === "cut" ? " (роздріб)" : ""}
-                    {minWholesaleMeters.trim() !== "" && Number(minWholesaleMeters) > 0
+                    {tierMode === "tier" &&
+                    minWholesaleMeters.trim() !== "" &&
+                    Number(minWholesaleMeters) > 0
                       ? priceMeterCutVat.trim() !== "" && Number(priceMeterCutVat) > 0
-                        ? ` · < ${minWholesaleMeters} м → роздріб`
-                        : ` · роздріб до ${minWholesaleMeters} м`
+                        ? ` · < ${minWholesaleMeters} ${qtyUnit} → роздріб`
+                        : ` · роздріб до ${minWholesaleMeters} ${qtyUnit}`
                       : " · ціна"}
                   </p>
                 ) : null}
@@ -1333,32 +1386,42 @@ function MaterialFields({
                     : ""}
                 {` · ${fabricDeliveryTypeLabel(deliveryType)}`}
                 {derived.purchasePrice > 0
-                  ? ` · ${formatMoneyUah(derived.purchasePrice)}/м`
+                  ? ` · ${formatMoneyUah(derived.purchasePrice)}/${qtyUnit}`
                   : ""}
               </p>
             </div>
           ) : null}
 
-          <FormGroup
-            label={wizard ? undefined : "ПДВ у калькуляції"}
-            icon={wizard ? undefined : <IconCalc size={14} />}
-            columns={1}
-            compact
-          >
-            <Select
-              name="costVatOverride"
-              label="Яку ціну брати в собівартість"
-              optional
-              value={costOverride}
-              onChange={(event) => setCostOverride(event.target.value)}
-              hint="За замовчуванням — без ПДВ. Окрему ціну «з ПДВ» вводити не потрібно."
+          {wizard ? (
+            <input type="hidden" name="costVatOverride" value={costOverride} />
+          ) : (
+            <FormGroup
+              label="ПДВ у калькуляції"
+              icon={<IconCalc size={14} />}
+              columns={1}
+              compact
             >
-              <option value="">{`Як у налаштуваннях (${policyLabel})`}</option>
-              <option value="NET">Завжди без ПДВ</option>
-              <option value="GROSS">Завжди з ПДВ</option>
-            </Select>
-          </FormGroup>
-          <input type="hidden" name="colorOrAttribute" value={defaults?.colorOrAttribute ?? ""} />
+              <Select
+                name="costVatOverride"
+                label="Яку ціну брати в собівартість"
+                optional
+                value={costOverride}
+                onChange={(event) => setCostOverride(event.target.value)}
+                hint="За замовчуванням — без ПДВ. Окрему ціну «з ПДВ» вводити не потрібно."
+              >
+                <option value="">{`Як у налаштуваннях (${policyLabel})`}</option>
+                <option value="NET">Завжди без ПДВ</option>
+                <option value="GROSS">Завжди з ПДВ</option>
+              </Select>
+            </FormGroup>
+          )}
+          {!wizard ? (
+            <input
+              type="hidden"
+              name="colorOrAttribute"
+              value={defaults?.colorOrAttribute ?? ""}
+            />
+          ) : null}
           </div>
         </>
       ) : (
@@ -1396,6 +1459,7 @@ function MaterialFields({
                 pricingKind="unit"
                 usdUahRate={usdUahRate}
                 onUsdUahRateChange={setUsdUahRate}
+                allowPackQuote
               />
               {!wizard ? (
                 <Input
@@ -1749,7 +1813,18 @@ export function MaterialEditPanel({
                   unitsPerKg={loaded.unitsPerKg ?? null}
                   unitMode={loadedUnitMode}
                   fabricGlobals={globals}
-                  pricingKind={loaded.type === "FABRIC" ? "fabric" : "unit"}
+                  pricingKind={
+                    loaded.type === "FABRIC" &&
+                    loadedUnitMode !== "pcs" &&
+                    loadedUnitMode !== "cone"
+                      ? "fabric"
+                      : "unit"
+                  }
+                  allowPackQuote={
+                    loaded.type !== "FABRIC" ||
+                    loadedUnitMode === "pcs" ||
+                    loadedUnitMode === "cone"
+                  }
                   embedded
                   onPrimaryChanged={() => {
                     void (async () => {
