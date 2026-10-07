@@ -17,6 +17,7 @@ import {
   archiveMaterial,
   archiveMaterials,
   createMaterial,
+  duplicateMaterial,
   getFabricPricingGlobals,
   listCompositionNames,
   listMaterials,
@@ -32,6 +33,7 @@ import {
   DEFAULT_FABRIC_DELIVERY_RATES,
   normalizeFabricDeliveryType,
 } from "@/lib/fabric-delivery-types";
+import { parseMaterialUrlsJson } from "@/lib/material-links";
 import {
   decorationFormSchema,
   operationFormSchema,
@@ -105,6 +107,8 @@ export async function getMaterialForEditAction(id: string) {
       supplierCode: row.supplierCode ?? "",
       colorOrAttribute: row.colorOrAttribute ?? "",
       note: row.note ?? "",
+      referenceUrls: Array.isArray(row.referenceUrls) ? row.referenceUrls : [],
+      updatedAt: row.updatedAt.toISOString(),
       tagColor,
       densityGsm: row.densityGsm ?? "",
       composition: row.composition ?? "",
@@ -385,6 +389,7 @@ function materialFormData(formData: FormData) {
     supplierCode: formData.get("supplierCode") || null,
     colorOrAttribute: formData.get("colorOrAttribute") || null,
     note: formData.get("note") || null,
+    referenceUrls: parseMaterialUrlsJson(formData.get("referenceUrlsJson")),
     tagColor: formData.get("tagColor") || null,
     densityGsm: formData.get("densityGsm") || null,
     composition: formData.get("composition") || null,
@@ -418,6 +423,28 @@ export async function archiveMaterialAction(id: string) {
   await archiveMaterial(id);
   revalidatePath("/settings/resources");
   return { ok: true as const };
+}
+
+export async function duplicateMaterialAction(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error("UNAUTHORIZED");
+  await assertSessionPermission("createInlineCatalog");
+
+  const materialId = String(formData.get("materialId") ?? "").trim();
+  const nameUk = String(formData.get("nameUk") ?? "").trim();
+  if (!materialId) return { ok: false as const, error: "NOT_FOUND" as const };
+  if (!nameUk) return { ok: false as const, error: "NAME_REQUIRED" as const };
+
+  try {
+    const copy = await duplicateMaterial(materialId, { nameUk });
+    revalidatePath("/settings/resources");
+    return { ok: true as const, materialId: copy.id };
+  } catch (error) {
+    if (error instanceof Error && error.message === "MATERIAL_NOT_FOUND") {
+      return { ok: false as const, error: "NOT_FOUND" as const };
+    }
+    throw error;
+  }
 }
 
 export async function createOperationAction(formData: FormData) {

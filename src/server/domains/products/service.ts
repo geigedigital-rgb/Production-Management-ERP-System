@@ -412,6 +412,9 @@ export function toCompositionTemplate(product: NonNullable<Awaited<ReturnType<ty
       sizeWaste: sizeWasteFromNorms(row.sizeNorms),
       materialType: row.material.type,
       supplierId: row.supplierId,
+      deliveryType: row.deliveryType ?? null,
+      colorSnapshot: row.colorSnapshot ?? null,
+      lineColor: row.colorSnapshot ?? null,
       priceMeterUahNoVat: merged.priceMeterUahNoVat,
       priceMeterUahVat: merged.priceMeterUahVat,
       priceMeterUahCutVat: merged.priceMeterUahCutVat,
@@ -421,6 +424,12 @@ export function toCompositionTemplate(product: NonNullable<Awaited<ReturnType<ty
       wholesaleNote: row.material.wholesaleNote ?? null,
       costVatMode: row.material.costVatOverride,
       availableColors: row.material.availableColors ?? [],
+      supplierOffers: (row.material.supplierOffers ?? []).map((offer) => ({
+        supplierId: offer.supplierId,
+        supplierName: offer.supplier.nameUk,
+        isPrimary: offer.isPrimary,
+        availableColors: offer.availableColors ?? [],
+      })),
     };
     }),
     operations: product.operations.map((row) => ({

@@ -41,7 +41,11 @@ export function SizeScopeTabs({
           <button
             key={size.code}
             type="button"
-            title={oversize ? "Крупний розмір: автонадбавка в розрахунку" : undefined}
+            title={
+              oversize
+                ? "Крупний розмір: націнка застосовується лише в замовленні"
+                : undefined
+            }
             onClick={() => onChange(size.code)}
             className={cn(
               "inline-flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-[12.5px] font-semibold transition-colors",

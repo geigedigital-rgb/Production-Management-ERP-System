@@ -156,7 +156,13 @@ export default async function NewOrderPage({
                 : product.materials.length > 0 || product.operations.length > 0
                   ? PRICE_TIERS.map((qty) => ({
                       qty,
-                      price: Number(buildCalcFromProduct(product, qty, pricing).sellingPricePerUnit),
+                      price: Number(
+                        buildCalcFromProduct(product, qty, {
+                          ...pricing,
+                          quantityAwareMaterialPrices: true,
+                          sizeMode: "standard",
+                        }).sellingPricePerUnit,
+                      ),
                     }))
                   : [],
           };

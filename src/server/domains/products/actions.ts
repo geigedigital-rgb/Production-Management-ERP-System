@@ -686,7 +686,12 @@ export async function previewProductEconomicsAction(productId: string, quantity:
   const pricing = await getPricingDefaults();
   const { fixedCostOptionsFromDb } = await import("@/server/domains/fixed-costs/service");
   const fixedCosts = await fixedCostOptionsFromDb();
-  const costCalc = buildCalcFromProduct(product, qty, { ...pricing, fixedCosts });
+  const costCalc = buildCalcFromProduct(product, qty, {
+    ...pricing,
+    fixedCosts,
+    quantityAwareMaterialPrices: true,
+    sizeMode: "standard",
+  });
   const {
     calcWithClientPrice,
     resolveSewingPerUnitFromOperations,

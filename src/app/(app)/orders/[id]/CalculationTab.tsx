@@ -21,8 +21,10 @@ import {
   OVERSIZE_RANGE_LABEL,
   oversizeMaterialPct,
   oversizeOperationPct,
+  oversizeTirageSizesCaption,
   oversizeUpliftCaption,
   resolveSizeCoeffs,
+  type SizeCoeffRule,
 } from "@/lib/size-coeffs";
 import {
   FIXED_COST_LINE_NAME_UK,
@@ -60,6 +62,7 @@ export function CalculationTab({
   commercialProfitTotal,
   priceSource,
   sizeQuantities = [],
+  sizeRules = null,
 }: {
   calc: CalculationResult;
   totalQuantity: number;
@@ -86,6 +89,7 @@ export function CalculationTab({
   commercialProfitTotal?: number;
   priceSource?: "pricelist" | "sewing_markup" | "cost";
   sizeQuantities?: Array<{ sizeCode: string; quantity: number }>;
+  sizeRules?: SizeCoeffRule[] | null;
 }) {
   const perUnit = (value: number) => (totalQuantity > 0 ? value / totalQuantity : 0);
   const costPerUnit = Number(calc.costPerUnit);
@@ -108,8 +112,11 @@ export function CalculationTab({
     .filter((row) => row.quantity > 0 && isOversizeCode(row.sizeCode))
     .map((row) => ({
       ...row,
-      ...resolveSizeCoeffs(row.sizeCode),
+      ...resolveSizeCoeffs(row.sizeCode, sizeRules),
     }));
+  const oversizeSizesLabel = oversizeTirageSizesCaption(oversizeRows);
+  const matPct = oversizeMaterialPct(sizeRules);
+  const opPct = oversizeOperationPct(sizeRules);
   const fixedCostTotal = fixedCostAllocation?.fixedCostTotal ?? 0;
   const otherAdditionalCosts = Math.max(
     0,
@@ -147,6 +154,9 @@ export function CalculationTab({
           <p className="type-caption">Ціна клієнту / од.</p>
           <p className="mt-0.5 text-[15px] font-semibold tabular">{formatMoneyUah(sellingPerUnit)}</p>
           <p className="type-caption mt-0.5">{priceSourceLabel}</p>
+          {totalQuantity > 1 ? (
+            <p className="type-caption mt-0.5">разом {formatMoneyUah(sellingTotal)}</p>
+          ) : null}
         </div>
         <div>
           <p className="type-caption">Заробимо на тираж</p>
@@ -209,7 +219,8 @@ export function CalculationTab({
             {oversizeRows.length > 0 ? (
               <TR muted>
                 <TD colSpan={4} className="type-caption">
-                  У сумах нижче вже враховано {oversizeUpliftCaption()} на частку тиражу {OVERSIZE_RANGE_LABEL}.
+                  У сумах нижче вже враховано націнку за розмір ({oversizeUpliftCaption(sizeRules)})
+                  для: {oversizeSizesLabel}. Решта розмірів — без цієї надбавки.
                 </TD>
               </TR>
             ) : null}
@@ -230,7 +241,7 @@ export function CalculationTab({
                     {row.consumption} {row.unit} × (1 + {row.waste}%) × {formatMoneyUah(row.price)}
                     {row.sizeCode ? ` · ${row.sizeCode}` : ""}
                     {oversizeRows.length > 0 && !row.sizeCode
-                      ? ` · для ${OVERSIZE_RANGE_LABEL} ще ×${(1 + oversizeMaterialPct() / 100).toFixed(2)}`
+                      ? ` · для ${oversizeSizesLabel} ще ×${(1 + matPct / 100).toFixed(2)}`
                       : ""}
                   </TD>
                   <TD numeric className="text-[var(--color-text-secondary)]">
@@ -252,8 +263,8 @@ export function CalculationTab({
             {oversizeRows.length > 0 ? (
               <TR muted>
                 <TD colSpan={4} className="type-caption">
-                  Для {OVERSIZE_RANGE_LABEL} ставка операцій ×{(1 + oversizeOperationPct() / 100).toFixed(2)} вже в
-                  підсумку.
+                  Для {oversizeSizesLabel} ставка операцій ×{(1 + opPct / 100).toFixed(2)} вже в
+                  підсумку ({OVERSIZE_RANGE_LABEL}).
                 </TD>
               </TR>
             ) : null}

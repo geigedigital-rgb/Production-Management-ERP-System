@@ -168,16 +168,24 @@ export function lineCostOnSizes(
     consumption: number;
     waste: number;
     price: number;
+    /** When false, size uplift (3XL+) is already baked into consumption. */
+    applySizeCoeff?: boolean;
   },
   siblings: Array<{ id: string; groupKey?: string | null; sizeCode?: string | null }>,
   sizes: Array<{ sizeCode: string; quantity: number }>,
+  sizeRules?: Array<{ sizeCode: string; materialCoeff: number; operationCoeff: number }> | null,
 ) {
   let cost = 0;
   const unit = row.consumption * (1 + row.waste / 100) * row.price;
+  const applyCoeff =
+    row.applySizeCoeff !== false && !(row.sizeCode != null && isOversizeCode(row.sizeCode));
   for (const size of sizes) {
     if (size.quantity <= 0) continue;
     if (!linesForSize(siblings, size.sizeCode).some((line) => line.id === row.id)) continue;
-    cost += unit * size.quantity;
+    const coeff = applyCoeff
+      ? resolveSizeCoeffs(size.sizeCode, sizeRules).materialCoeff
+      : 1;
+    cost += unit * size.quantity * coeff;
   }
   return cost;
 }

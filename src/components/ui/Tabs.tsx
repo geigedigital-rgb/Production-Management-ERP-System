@@ -98,10 +98,13 @@ export function ViewTabs({
   items,
   active,
   className,
+  onNavigate,
 }: {
   items: TabItem[];
   active: string;
   className?: string;
+  /** Return false to block navigation (e.g. unsaved changes). */
+  onNavigate?: (href: string) => boolean | void;
 }) {
   return (
     <nav className={cn("flex flex-wrap items-center gap-4 border-b border-[var(--color-border)]", className)}>
@@ -112,6 +115,15 @@ export function ViewTabs({
             key={item.key}
             href={item.href}
             aria-current={isActive ? "page" : undefined}
+            onClick={
+              onNavigate
+                ? (event) => {
+                    if (onNavigate(item.href) === false) {
+                      event.preventDefault();
+                    }
+                  }
+                : undefined
+            }
             className={cn(
               "-mb-px inline-flex items-center gap-1.5 border-b-2 px-0.5 pb-2 text-[13.5px] font-semibold transition-colors",
               isActive

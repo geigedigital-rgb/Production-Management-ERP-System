@@ -2,6 +2,7 @@ import {
   DEFAULT_FABRIC_DELIVERY_RATES,
   type FabricDeliveryRateGlobals,
 } from "@/lib/fabric-delivery-types";
+import { isOversizeCode } from "@/lib/size-coeffs";
 
 export type MaterialCostVatMode = "NET" | "GROSS";
 
@@ -407,15 +408,35 @@ export function fabricMetersNeeded(input: {
   quantitiesBySize: Record<string, number>;
   sizeCode?: string | null;
   sizeConsumption?: Record<string, number> | null;
+  sizeWaste?: Record<string, number> | null;
+  /**
+   * Per-size material coeffs (3XL+). Skipped when the line is already an oversize-only
+   * row (coeff baked into consumption) or the size has an explicit sizeConsumption norm.
+   */
+  sizeMaterialCoeffs?: Record<string, number> | null;
+  /** When false, never apply sizeMaterialCoeffs (default true). */
+  applySizeCoeff?: boolean;
 }): number {
-  const waste = 1 + (input.wastePercent || 0) / 100;
+  const baseWaste = 1 + (input.wastePercent || 0) / 100;
+  // Oversize-specific rows already carry absolute / baked norms — don't uplift again.
+  const lineAllowsCoeff =
+    input.applySizeCoeff !== false && !isOversizeCode(input.sizeCode);
   let total = 0;
   for (const [code, qty] of Object.entries(input.quantitiesBySize)) {
     if (qty <= 0) continue;
     if (input.sizeCode && input.sizeCode !== code) continue;
+    const hasExplicitNorm = input.sizeConsumption?.[code] != null;
     const consumption =
       input.sizeConsumption?.[code] ?? input.consumptionPerUnit;
-    total += consumption * waste * qty;
+    const waste =
+      input.sizeWaste?.[code] != null
+        ? 1 + (Number(input.sizeWaste[code]) || 0) / 100
+        : baseWaste;
+    const coeff =
+      lineAllowsCoeff && !hasExplicitNorm
+        ? (input.sizeMaterialCoeffs?.[code] ?? 1)
+        : 1;
+    total += consumption * waste * qty * coeff;
   }
   return total;
 }

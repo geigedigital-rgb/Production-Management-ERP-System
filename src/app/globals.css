@@ -402,6 +402,15 @@ table {
   }
 }
 
+@keyframes pinned-column-shadow-left {
+  from {
+    box-shadow: none;
+  }
+  to {
+    box-shadow: 8px 0 8px -8px rgba(15, 23, 32, 0.16);
+  }
+}
+
 @supports (animation-timeline: scroll(self inline)) {
   .table-scroll {
     scroll-timeline: --table-scroll-x inline;
@@ -412,6 +421,28 @@ table {
     animation-timeline: --table-scroll-x;
     animation-range: 0 4px;
   }
+
+  .table-scroll .is-pinned-left.is-pinned-left-edge {
+    animation: pinned-column-shadow-left linear both;
+    animation-timeline: --table-scroll-x;
+    animation-range: 0 4px;
+  }
+}
+
+/** Top twin scrollbar — keeps horizontal paging reachable without scrolling the page bottom. */
+.table-scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  height: 12px;
+  margin-bottom: -1px;
+}
+.table-scroll-top::-webkit-scrollbar {
+  height: 10px;
+}
+.table-scroll-top-spacer {
+  height: 1px;
+  pointer-events: none;
 }
 
 @media print {

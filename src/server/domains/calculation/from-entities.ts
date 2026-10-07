@@ -231,21 +231,19 @@ export function productFabricDeliveryAmount(
     materialCostVatMode?: MaterialCostVatMode;
   },
 ): number {
-  const sizeRules = pricing.sizeRules;
+  // Product catalog: never apply size markups (3XL+). Those run only on orders.
+  void pricing.sizeRules;
   const productSizes =
     pricing.sizeMode === "standard"
       ? product.sizes.filter((row) => !isOversizeCode(row.size.code))
       : product.sizes;
   const sizes =
     productSizes.length > 0
-      ? productSizes.map((row) => {
-          const coeffs = resolveSizeCoeffs(row.size.code, sizeRules);
-          return {
-            sizeCode: row.size.code,
-            quantity: 0,
-            materialCoeff: coeffs.materialCoeff,
-          };
-        })
+      ? productSizes.map((row) => ({
+          sizeCode: row.size.code,
+          quantity: 0,
+          materialCoeff: 1,
+        }))
       : [{ sizeCode: "ONE", quantity: 0, materialCoeff: 1 }];
 
   const base = Math.floor(quantity / sizes.length);
@@ -394,26 +392,24 @@ export function buildCalcFromProduct(
     /**
      * Size mix for spreading the tirage quantity.
      * "standard" — XS–XXL only (Прайс і крій). "all" — full grid including 3XL–6XL.
+     * Size markups (materialCoeff / operationCoeff) are NEVER applied here — only on orders.
      */
     sizeMode?: "all" | "standard";
   },
 ): CalculationResult {
-  const sizeRules = pricing.sizeRules;
+  void pricing.sizeRules;
   const productSizes =
     pricing.sizeMode === "standard"
       ? product.sizes.filter((row) => !isOversizeCode(row.size.code))
       : product.sizes;
   const sizes =
     productSizes.length > 0
-      ? productSizes.map((row) => {
-          const coeffs = resolveSizeCoeffs(row.size.code, sizeRules);
-          return {
-            sizeCode: row.size.code,
-            quantity: 0,
-            materialCoeff: coeffs.materialCoeff,
-            operationCoeff: coeffs.operationCoeff,
-          };
-        })
+      ? productSizes.map((row) => ({
+          sizeCode: row.size.code,
+          quantity: 0,
+          materialCoeff: 1,
+          operationCoeff: 1,
+        }))
       : [{ sizeCode: "ONE", quantity: 0, materialCoeff: 1, operationCoeff: 1 }];
 
   const base = Math.floor(quantity / sizes.length);
@@ -457,23 +453,19 @@ export function buildCalcFromProduct(
             consumptionPerUnit: consumptions[0] ?? Number(row.consumptionPerUnit),
             wastePercent: wastes[0] ?? baseWaste,
             purchasePrice: price,
-            applySizeCoeff: true,
+            applySizeCoeff: false,
           },
         ];
       }
-      return applies.map((code, index) => {
-        const hasExplicitNorm = sizeConsumption[code] != null;
-        return {
-          id: `${row.id}:${code}`,
-          groupKey: row.materialId,
-          sizeCode: code,
-          consumptionPerUnit: consumptions[index]!,
-          wastePercent: wastes[index]!,
-          purchasePrice: price,
-          // Explicit per-size norm already embeds oversize uplift — don't apply coeff again.
-          applySizeCoeff: !hasExplicitNorm,
-        };
-      });
+      return applies.map((code, index) => ({
+        id: `${row.id}:${code}`,
+        groupKey: row.materialId,
+        sizeCode: code,
+        consumptionPerUnit: consumptions[index]!,
+        wastePercent: wastes[index]!,
+        purchasePrice: price,
+        applySizeCoeff: false,
+      }));
     }),
     operations: product.operations.flatMap((row): OperationLineInput[] => {
       const nameUk = row.operation.nameUk;
@@ -490,9 +482,7 @@ export function buildCalcFromProduct(
             : row.operation.standardOutputPerShift != null
               ? Number(row.operation.standardOutputPerShift)
               : null,
-        // Cut and trim-delivery are job/tirage rates (₴/шт × qty), not oversize labor.
-        applySizeCoeff:
-          !isCutOperationName(nameUk) && !isDeliveryOperationName(nameUk),
+        applySizeCoeff: false,
       };
       if (applies.length === sizeCodes.length) {
         return [{ id: row.id, groupKey: row.operationId, sizeCode: null, ...payload }];
@@ -545,7 +535,7 @@ export function buildCalcFromProduct(
         } else {
           unit = resolveProductOperationUnitRate(row, quantity, product) ?? 0;
         }
-        sewingPerUnit += unit * (size.operationCoeff ?? 1);
+        sewingPerUnit += unit;
       }
       return {
         sizeCode: size.sizeCode,

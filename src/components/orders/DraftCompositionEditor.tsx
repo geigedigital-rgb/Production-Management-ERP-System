@@ -271,8 +271,8 @@ export function DraftCompositionEditor({
         </div>
         {qtyMode === "total" && hasRealSizes ? (
           <p className="type-caption text-[var(--color-text-tertiary)]">
-            Орієнтовний розрахунок без розкладки по розмірах. Точну сітку задайте пізніше у
-            комплектації замовлення.
+            Орієнтовний тираж без розкладки по розмірах. Точну сітку задасте перед
+            виробництвом у комплектації замовлення.
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-2">

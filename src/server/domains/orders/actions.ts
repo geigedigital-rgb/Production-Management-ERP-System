@@ -98,6 +98,11 @@ const draftItemSchema = z.object({
           sizeCodes: z.array(z.string()).optional().nullable(),
           sizeConsumption: z.record(z.string(), z.coerce.number().nonnegative()).optional(),
           purchasePrice: z.coerce.number().nonnegative().optional().nullable(),
+          supplierId: z.string().trim().optional().nullable(),
+          deliveryType: z
+            .enum(["CARGO", "NP_STANDARD", "NP_VOLUME"])
+            .optional()
+            .nullable(),
           colorSnapshot: z.string().trim().optional().nullable(),
           cargoUsdPerKg: z.coerce.number().nonnegative().optional().nullable(),
           usdUahRate: z.coerce.number().positive().optional().nullable(),
@@ -156,6 +161,8 @@ export async function createOrderAction(formData: FormData) {
         sizeCodes?: string[] | null;
         sizeConsumption?: Record<string, number>;
         purchasePrice?: number | null;
+        supplierId?: string | null;
+        deliveryType?: "CARGO" | "NP_STANDARD" | "NP_VOLUME" | null;
         colorSnapshot?: string | null;
         cargoUsdPerKg?: number | null;
         usdUahRate?: number | null;

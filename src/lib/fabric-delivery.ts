@@ -5,6 +5,7 @@ import {
 } from "@/lib/fabric-pricing";
 import { deliveryRateUsdPerKg } from "@/lib/fabric-delivery-types";
 import { resolveSupplierDeliveryRate } from "@/lib/supplier-delivery-rates";
+import { materialCoeffsBySize, type SizeCoeffRule } from "@/lib/size-coeffs";
 
 /** Additional-cost id used in product + order calc engines. */
 export const FABRIC_DELIVERY_ADDITIONAL_ID = "fabric-delivery";
@@ -112,6 +113,7 @@ export function computeFabricDeliveryLine(
   row: FabricDeliveryMaterialSource,
   quantitiesBySize: Record<string, number>,
   globals: FabricPricingGlobals,
+  sizeRules?: SizeCoeffRule[] | null,
 ): number {
   if (row.type && row.type !== "FABRIC") return 0;
   const metersPerKg = num(row.metersPerKg);
@@ -122,6 +124,7 @@ export function computeFabricDeliveryLine(
     wastePercent: row.wastePercent,
     quantitiesBySize,
     sizeCode: row.sizeCode,
+    sizeMaterialCoeffs: materialCoeffsBySize(Object.keys(quantitiesBySize), sizeRules),
   });
   if (meters <= 0) return 0;
 
@@ -138,10 +141,16 @@ export function computeOrderItemFabricDelivery(input: {
   materials: FabricDeliveryMaterialSource[];
   quantitiesBySize: Record<string, number>;
   globals: FabricPricingGlobals;
+  sizeRules?: SizeCoeffRule[] | null;
 }): number {
   let total = 0;
   for (const row of input.materials) {
-    total += computeFabricDeliveryLine(row, input.quantitiesBySize, input.globals);
+    total += computeFabricDeliveryLine(
+      row,
+      input.quantitiesBySize,
+      input.globals,
+      input.sizeRules,
+    );
   }
   return round1(total);
 }

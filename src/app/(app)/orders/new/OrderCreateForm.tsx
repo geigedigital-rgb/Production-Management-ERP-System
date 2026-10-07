@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
@@ -37,6 +37,8 @@ import { createOrderAction } from "@/server/domains/orders/actions";
 import { cn, formatMoneyUah } from "@/lib/utils";
 import { OrderDetailSection } from "@/components/orders/OrderWorkspaceLayout";
 import { IconClients } from "@/components/ui/Icons";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
+import { useUnsavedCloseGuard } from "@/hooks/useUnsavedCloseGuard";
 
 type ClientOption = {
   id: string;
@@ -133,6 +135,8 @@ export function OrderCreateForm({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [switchProductOpen, setSwitchProductOpen] = useState(false);
+  const [pendingProductId, setPendingProductId] = useState<string | null>(null);
 
   const stagingProduct = useMemo(
     () => products.find((product) => product.id === stagingProductId),
@@ -229,6 +233,24 @@ export function OrderCreateForm({
 
   const readyToSubmit = Boolean(clientId && lines.length > 0);
 
+  const formDirty =
+    lines.length > 0 ||
+    Boolean(clientId) ||
+    Boolean(deadline) ||
+    Boolean(stagingProductId) ||
+    Object.values(stagingQty).some((qty) => qty > 0) ||
+    Boolean(stagingComment.trim());
+
+  const leaveToOrders = useCallback(() => {
+    router.push("/orders");
+  }, [router]);
+
+  const { leaveOpen, requestClose: requestLeave, stay, discard } = useUnsavedCloseGuard({
+    dirty: formDirty,
+    pending,
+    onDiscard: leaveToOrders,
+  });
+
   function clearStaging() {
     setStagingProductId("");
     setStagingComposition(null);
@@ -263,7 +285,7 @@ export function OrderCreateForm({
     else clearStaging();
   }
 
-  function selectProduct(id: string) {
+  function applySelectProduct(id: string) {
     const product = products.find((row) => row.id === id);
     if (!product) return;
     // New position from catalog — leave confirmed lines in the table as-is.
@@ -278,6 +300,16 @@ export function OrderCreateForm({
     setStagingQty({});
     setStagingComment("");
     setEditingKey(null);
+  }
+
+  function selectProduct(id: string) {
+    if (id === stagingProductId) return;
+    if (stagingDirty && id !== stagingProductId) {
+      setPendingProductId(id);
+      setSwitchProductOpen(true);
+      return;
+    }
+    applySelectProduct(id);
   }
 
   function buildStagingPayload(key: string): DraftLine | null {
@@ -363,9 +395,11 @@ export function OrderCreateForm({
             sizeCodes: row.sizeCodes ?? null,
             sizeConsumption: row.sizeConsumption,
             purchasePrice: row.price,
+            supplierId: row.supplierId ?? null,
+            deliveryType: row.deliveryType ?? null,
             colorSnapshot: isPackagingSku(row)
               ? null
-              : row.lineColor?.trim() || null,
+              : row.lineColor?.trim() || row.colorSnapshot?.trim() || null,
             cargoUsdPerKg: row.cargoUsdPerKg ?? null,
             usdUahRate: row.usdUahRate ?? null,
             fabricDeliveryManual: Boolean(row.fabricDeliveryManual),
@@ -643,11 +677,18 @@ export function OrderCreateForm({
                             </td>
                             {showCosts ? (
                               <td className="px-3 py-2 text-right tabular">
-                                {sum != null
-                                  ? formatMoneyUah(sum)
-                                  : unit != null
-                                    ? formatMoneyUah(unit)
-                                    : "—"}
+                                {unit != null ? (
+                                  <span className="inline-flex flex-col items-end gap-0.5">
+                                    <span className="font-medium">{formatMoneyUah(unit)}</span>
+                                    {sum != null && qty > 1 ? (
+                                      <span className="type-caption">
+                                        разом {formatMoneyUah(sum)}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
                               </td>
                             ) : null}
                             <td className="px-3 py-2">
@@ -728,7 +769,31 @@ export function OrderCreateForm({
         estimate={estimate}
         ready={readyToSubmit}
         pending={pending}
-        onCancel={() => router.push("/orders")}
+        onCancel={requestLeave}
+      />
+      <UnsavedChangesDialog
+        open={leaveOpen}
+        pending={pending}
+        title="Незбережене замовлення"
+        description="Є введені дані. Закрити створення без збереження?"
+        onStay={stay}
+        onDiscard={discard}
+      />
+      <UnsavedChangesDialog
+        open={switchProductOpen}
+        pending={pending}
+        title="Незбережена позиція"
+        description="У чернетці є зміни. Обрати інший виріб без додавання в список?"
+        onStay={() => {
+          setSwitchProductOpen(false);
+          setPendingProductId(null);
+        }}
+        onDiscard={() => {
+          const nextId = pendingProductId;
+          setSwitchProductOpen(false);
+          setPendingProductId(null);
+          if (nextId) applySelectProduct(nextId);
+        }}
       />
     </form>
   );

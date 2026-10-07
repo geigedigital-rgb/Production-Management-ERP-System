@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Field";
@@ -9,7 +9,6 @@ import { syncOrderScreenPrintAction } from "@/server/domains/screen-print/action
 import {
   isScreenPrintDecorationName,
   lookupScreenPrintBaseRate,
-  parseScreenPrintLineName,
   resolveScreenPrintUnitRate,
   uniqueColorCounts,
   type ScreenPrintCoefficient,
@@ -24,9 +23,8 @@ type ExistingDecoration = {
 };
 
 /**
- * 1) Pick silk-screen (color count) — draft only.
- * 2) Optional coefficient checkboxes appear.
- * 3) «Додати» writes the decoration row into the order calculation.
+ * Draft silk-screen print → always inserts a new decoration row.
+ * Multiple prints per order item (different colors / приладки) are allowed.
  */
 export function OrderScreenPrintCalculator({
   orderId,
@@ -48,13 +46,9 @@ export function OrderScreenPrintCalculator({
   hideCosts?: boolean;
 }) {
   const router = useRouter();
-  const existing = useMemo(
-    () => existingDecorations.find((row) => isScreenPrintDecorationName(row.name)) ?? null,
+  const screenPrintCount = useMemo(
+    () => existingDecorations.filter((row) => isScreenPrintDecorationName(row.name)).length,
     [existingDecorations],
-  );
-  const parsed = useMemo(
-    () => (existing ? parseScreenPrintLineName(existing.name) : null),
-    [existing],
   );
 
   const colorOptions = useMemo(() => {
@@ -75,24 +69,10 @@ export function OrderScreenPrintCalculator({
       .filter((row): row is NonNullable<typeof row> => row != null);
   }, [cells, quantity, hideCosts]);
 
-  const [draftColorCount, setDraftColorCount] = useState(
-    existing ? String(parsed?.colorCount ?? "") : "",
-  );
-  const [selected, setSelected] = useState<string[]>(parsed?.selectedCodes ?? []);
+  const [draftColorCount, setDraftColorCount] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-
-  useEffect(() => {
-    const next = existing ? parseScreenPrintLineName(existing.name) : null;
-    if (existing && next) {
-      setDraftColorCount(String(next.colorCount));
-      setSelected(next.selectedCodes);
-    } else if (!existing) {
-      setDraftColorCount("");
-      setSelected([]);
-    }
-    setError(null);
-  }, [orderItemId, existing?.id, existing?.name]);
 
   const colorPicked = Boolean(draftColorCount);
   const activeColorCount = Number(draftColorCount) || 1;
@@ -111,28 +91,22 @@ export function OrderScreenPrintCalculator({
     [colorPicked, quantity, activeColorCount, cells, coefficients, selected],
   );
 
-  const savedCodes = parsed?.selectedCodes ?? [];
-  const savedColor = parsed?.colorCount ?? null;
-  const isDirty =
-    Boolean(existing) &&
-    colorPicked &&
-    (savedColor !== activeColorCount ||
-      savedCodes.length !== selected.length ||
-      savedCodes.some((code) => !selected.includes(code)));
+  function clearDraft() {
+    setDraftColorCount("");
+    setSelected([]);
+    setError(null);
+  }
 
-  function persist(next: {
-    enabled: boolean;
-    colorCount: number;
-    selectedCodes: string[];
-  }) {
+  function persist() {
+    if (!preview) return;
     setError(null);
     startTransition(async () => {
       const result = await syncOrderScreenPrintAction({
         orderId,
         orderItemId,
-        enabled: next.enabled,
-        colorCount: next.colorCount,
-        selectedCodes: next.selectedCodes,
+        enabled: true,
+        colorCount: activeColorCount,
+        selectedCodes: selected,
       });
       if (!result.ok) {
         setError(
@@ -140,11 +114,9 @@ export function OrderScreenPrintCalculator({
             ? "Немає ставки для цього тиражу / кольорів у довіднику"
             : "Не вдалося зберегти нанесення",
         );
-        const saved = existing ? parseScreenPrintLineName(existing.name) : null;
-        setDraftColorCount(String(saved?.colorCount ?? ""));
-        setSelected(saved?.selectedCodes ?? []);
         return;
       }
+      clearDraft();
       router.refresh();
     });
   }
@@ -155,18 +127,13 @@ export function OrderScreenPrintCalculator({
     );
   }
 
-  function clearDraft() {
-    setDraftColorCount("");
-    setSelected([]);
-    setError(null);
-  }
-
   if (locked) {
-    if (!existing) return null;
+    if (screenPrintCount === 0) return null;
     return (
       <div className="border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)] px-3 py-2.5">
         <p className="text-[12.5px] text-[var(--color-text-secondary)]">
-          Шовкотрафарет зафіксовано в таблиці вище.
+          Шовкотрафарет зафіксовано в таблиці вище
+          {screenPrintCount > 1 ? ` (${screenPrintCount} рядки)` : ""}.
         </p>
       </div>
     );
@@ -183,14 +150,14 @@ export function OrderScreenPrintCalculator({
   }
 
   return (
-    <SoftBusy
-      busy={pending}
-      label={existing ? "Оновлюємо нанесення…" : "Додаємо нанесення…"}
-    >
+    <SoftBusy busy={pending} label="Додаємо нанесення…">
       <div className="space-y-2 border-t border-[var(--color-divider)] bg-[var(--color-surface-subtle)] px-3 py-2.5">
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-[220px] flex-1 space-y-0.5">
-            <span className="type-caption">Шовкотрафарет за тиражем ({quantity} шт)</span>
+            <span className="type-caption">
+              + Шовкотрафарет за тиражем ({quantity} шт)
+              {screenPrintCount > 0 ? ` · уже ${screenPrintCount}` : ""}
+            </span>
             <Select
               size="sm"
               className="w-full"
@@ -204,7 +171,7 @@ export function OrderScreenPrintCalculator({
                 setError(null);
               }}
             >
-              {!existing ? <option value="">+ шовкодрук за тиражем…</option> : null}
+              <option value="">+ шовкодрук за тиражем…</option>
               {colorOptions.map((row) => (
                 <option key={row.colorCount} value={String(row.colorCount)}>
                   {row.label}
@@ -252,62 +219,29 @@ export function OrderScreenPrintCalculator({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {!existing ? (
-                <>
-                  <Button
-                    type="button"
-                    size="sm"
-                    loading={pending}
-                    disabled={pending || !preview}
-                    onClick={() =>
-                      persist({
-                        enabled: true,
-                        colorCount: activeColorCount,
-                        selectedCodes: selected,
-                      })
-                    }
-                    className="inline-flex items-center gap-1"
-                  >
-                    <IconPlus size={14} />
-                    Додати
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={pending}
-                    onClick={clearDraft}
-                  >
-                    Скинути
-                  </Button>
-                  <p className="type-caption text-[var(--color-text-quiet)]">
-                    Галочки лише для чернетки. «Додати» записує рядок у розрахунок.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Button
-                    type="button"
-                    size="sm"
-                    loading={pending}
-                    disabled={pending || !preview || !isDirty}
-                    onClick={() =>
-                      persist({
-                        enabled: true,
-                        colorCount: activeColorCount,
-                        selectedCodes: selected,
-                      })
-                    }
-                  >
-                    Оновити рядок
-                  </Button>
-                  <p className="type-caption text-[var(--color-text-quiet)]">
-                    {isDirty
-                      ? "Є зміни — натисніть «Оновити рядок»."
-                      : "Рядок уже в таблиці. Прибрати — кошиком."}
-                  </p>
-                </>
-              )}
+              <Button
+                type="button"
+                size="sm"
+                loading={pending}
+                disabled={pending || !preview}
+                onClick={persist}
+                className="inline-flex items-center gap-1"
+              >
+                <IconPlus size={14} />
+                Додати рядок
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={pending}
+                onClick={clearDraft}
+              >
+                Скинути
+              </Button>
+              <p className="type-caption text-[var(--color-text-quiet)]">
+                Кожне «Додати» — новий рядок у таблиці. Приладку можна задати в рядку окремо.
+              </p>
             </div>
           </>
         ) : null}

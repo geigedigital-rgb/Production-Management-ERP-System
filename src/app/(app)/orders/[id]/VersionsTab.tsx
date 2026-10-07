@@ -265,7 +265,8 @@ export function VersionsTab({
               </p>
               {needsSizeBeforeHandover ? (
                 <Banner tone="warning" title="Потрібна розкладка розмірів" className="mt-3">
-                  Перед передачею в цех розкладіть тираж по розмірах у Комплектації.
+                  Перед передачею у виробництво розкладіть тираж по реальних розмірах у
+                  Комплектації. На етапі розрахунку КП рахується для базових XS–XXL.
                   {sizesPendingCount > 0 ? ` Залишилось позицій: ${sizesPendingCount}.` : ""}{" "}
                   <a
                     href={sizesHref}

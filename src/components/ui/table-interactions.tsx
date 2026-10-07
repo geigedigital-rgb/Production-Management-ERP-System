@@ -120,6 +120,7 @@ export function SortableTH<K extends string>({
   align = "left",
   width,
   stickyRight,
+  stickyLeft,
   className,
   title,
 }: {
@@ -130,6 +131,7 @@ export function SortableTH<K extends string>({
   align?: "left" | "right" | "center";
   width?: string;
   stickyRight?: boolean;
+  stickyLeft?: boolean | string;
   className?: string;
   title?: string;
 }) {
@@ -137,7 +139,14 @@ export function SortableTH<K extends string>({
   const direction = active ? sort.direction : null;
 
   return (
-    <TH align={align} width={width} stickyRight={stickyRight} className={className} title={title}>
+    <TH
+      align={align}
+      width={width}
+      stickyRight={stickyRight}
+      stickyLeft={stickyLeft}
+      className={className}
+      title={title}
+    >
       <button
         type="button"
         onClick={() => onSort(columnKey)}
@@ -149,7 +158,7 @@ export function SortableTH<K extends string>({
           active ? "text-[var(--color-text-primary)]" : "text-inherit",
         )}
       >
-        <span className="truncate">{children}</span>
+        <span className="min-w-0">{children}</span>
         <IconChevronDown
           size={12}
           className={cn(

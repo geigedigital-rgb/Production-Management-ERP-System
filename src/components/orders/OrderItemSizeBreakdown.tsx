@@ -7,7 +7,9 @@ import { Select } from "@/components/ui/Field";
 import { SizeRun, type SizeRunItem } from "@/components/orders/SizeRun";
 import { applyOrderItemSizeBreakdownAction } from "@/server/domains/orders/actions";
 import { cn } from "@/lib/utils";
-import { realSizesQuantitySum } from "@/lib/order-item-sizes";
+import { isRealSizeCode, realSizesQuantitySum } from "@/lib/order-item-sizes";
+import { OVERSIZE_RANGE_LABEL } from "@/lib/size-coeffs";
+import { useOrderUnsavedWorkspaceDirty } from "@/components/orders/OrderUnsavedContext";
 
 export type SizeChartOption = {
   id: string;
@@ -25,35 +27,61 @@ function mergeChartSizes(prev: SizeRunItem[], chart: SizeChartOption): SizeRunIt
   return [...byCode.values()];
 }
 
+function seedFromPreferred(
+  preferred: Array<{ code: string; nameUk: string }> | undefined,
+  charts: SizeChartOption[],
+): { chartId: string; grid: SizeRunItem[] } {
+  if (preferred && preferred.length > 0) {
+    return {
+      chartId: charts[0]?.id ?? "",
+      grid: preferred.map((size) => ({ code: size.code, nameUk: size.nameUk })),
+    };
+  }
+  const first = charts[0];
+  if (!first) return { chartId: "", grid: [] };
+  return { chartId: first.id, grid: mergeChartSizes([], first) };
+}
+
 export function OrderItemSizeBreakdown({
   orderId,
   orderItemId,
   targetTirage,
   sizeCharts,
+  preferredSizes,
   disabled,
 }: {
   orderId: string;
   orderItemId: string;
   targetTirage: number;
   sizeCharts: SizeChartOption[];
+  /** Product catalog sizes — prefill the grid so manager does not start empty. */
+  preferredSizes?: Array<{ code: string; nameUk: string }>;
   disabled?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [chartId, setChartId] = useState(sizeCharts[0]?.id ?? "");
-  const [grid, setGrid] = useState<SizeRunItem[]>(() =>
-    sizeCharts[0] ? mergeChartSizes([], sizeCharts[0]) : [],
+  const preferredSignature =
+    preferredSizes?.map((size) => size.code).join("|") ??
+    sizeCharts[0]?.sizes.map((size) => size.code).join("|") ??
+    "";
+  const seeded = useMemo(
+    () => seedFromPreferred(preferredSizes, sizeCharts),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reseeds on item / preferred grid change
+    [orderItemId, preferredSignature],
   );
+  const [chartId, setChartId] = useState(seeded.chartId);
+  const [grid, setGrid] = useState<SizeRunItem[]>(seeded.grid);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
 
   const activeChart = sizeCharts.find((chart) => chart.id === chartId) ?? null;
 
   useEffect(() => {
-    if (!chartId && sizeCharts[0]) {
-      setChartId(sizeCharts[0].id);
-    }
-  }, [chartId, sizeCharts]);
+    setChartId(seeded.chartId);
+    setGrid(seeded.grid);
+    setQuantities({});
+    setError(null);
+  }, [orderItemId, seeded]);
 
   const brokenDown = useMemo(
     () =>
@@ -67,6 +95,17 @@ export function OrderItemSizeBreakdown({
     [grid, quantities],
   );
   const matched = brokenDown === targetTirage && targetTirage > 0;
+  useOrderUnsavedWorkspaceDirty(brokenDown > 0);
+  const oversizeQty = useMemo(
+    () =>
+      grid.reduce((sum, size) => {
+        if (!isRealSizeCode(size.code)) return sum;
+        const code = size.code.toUpperCase();
+        if (!["3XL", "4XL", "5XL", "6XL"].includes(code)) return sum;
+        return sum + (quantities[size.code] ?? 0);
+      }, 0),
+    [grid, quantities],
+  );
 
   function addChartSizes(chart: SizeChartOption | null) {
     if (!chart) return;
@@ -109,7 +148,11 @@ export function OrderItemSizeBreakdown({
     <div className="space-y-2.5 rounded-[var(--radius-control)] border border-[var(--color-warning-text)]/25 bg-[var(--color-warning-bg)]/50 px-3 py-2.5">
       <div>
         <p className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-          Задано загальний тираж {targetTirage} шт.
+          Розкладка тиражу {targetTirage} шт по розмірах
+        </p>
+        <p className="type-caption mt-0.5">
+          Перед передачею у виробництво. КП на розрахунку рахувалось для базових XS–XXL;
+          розміри {OVERSIZE_RANGE_LABEL} підвищать витрати в специфікації.
         </p>
       </div>
 
@@ -151,14 +194,21 @@ export function OrderItemSizeBreakdown({
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p
-          className={cn(
-            "text-[12.5px] font-medium tabular",
-            matched ? "text-[var(--color-success-text)]" : "text-[var(--color-text-secondary)]",
-          )}
-        >
-          розкладено {brokenDown} / {targetTirage}
-        </p>
+        <div className="space-y-0.5">
+          <p
+            className={cn(
+              "text-[12.5px] font-medium tabular",
+              matched ? "text-[var(--color-success-text)]" : "text-[var(--color-text-secondary)]",
+            )}
+          >
+            розкладено {brokenDown} / {targetTirage}
+          </p>
+          {oversizeQty > 0 ? (
+            <p className="type-caption text-[var(--color-warning-text)]">
+              {OVERSIZE_RANGE_LABEL}: {oversizeQty} шт — у калькуляції буде націнка за розмір
+            </p>
+          ) : null}
+        </div>
         <Button
           size="sm"
           onClick={applyBreakdown}

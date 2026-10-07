@@ -1,5 +1,6 @@
 export type CorridorKey =
   | "compose"
+  | "sizes"
   | "saveVersion"
   | "approve"
   | "artwork"
@@ -10,11 +11,12 @@ export type CorridorKey =
 
 export type CorridorTab = "configuration" | "calculation" | "versions" | "files";
 
+/** Line-level need — sizes are NOT here: layout is only before production. */
 export type ItemNeed = "qty" | "compose" | "saveVersion" | "approve" | "ready";
 
 export type CorridorStep = {
   key: CorridorKey;
-  /** 1-based index in the live corridor (compose → spec). */
+  /** 1-based index in the live corridor. */
   index: number;
   of: number;
   label: string;
@@ -22,9 +24,7 @@ export type CorridorStep = {
   detail: string;
   tab: CorridorTab;
   hrefQuery?: string;
-  /** Line that currently blocks the next step (multi-item orders). */
   focusItemId?: string;
-  /** Document shortcuts that actually work in this state. */
   quotationReady: boolean;
   specificationReady: boolean;
 };
@@ -54,6 +54,10 @@ export type CorridorFacts = {
   sizesReady?: boolean;
 };
 
+/**
+ * Збір → Розрахунок → Погодження → (розміри) → Виробництво
+ * Size layout is only required after approve, before handover.
+ */
 const LIVE_STEPS = 5;
 
 export const itemNeedLabel: Record<ItemNeed, string> = {
@@ -64,7 +68,10 @@ export const itemNeedLabel: Record<ItemNeed, string> = {
   ready: "Погоджено",
 };
 
-export function itemNeed(item: CorridorItemFacts, order?: Pick<CorridorFacts, "hasCompleteProposal" | "hasApprovedProposal">): ItemNeed {
+export function itemNeed(
+  item: CorridorItemFacts,
+  order?: Pick<CorridorFacts, "hasCompleteProposal" | "hasApprovedProposal">,
+): ItemNeed {
   if (item.totalQuantity <= 0) return "qty";
   if (item.materialsCount <= 0 || item.operationsCount <= 0) return "compose";
   if (order && !order.hasCompleteProposal) return "saveVersion";
@@ -82,7 +89,10 @@ export function itemNeedTone(
   return "accent";
 }
 
-function firstBlocking(items: CorridorItemFacts[], order?: Pick<CorridorFacts, "hasCompleteProposal" | "hasApprovedProposal">) {
+function firstBlocking(
+  items: CorridorItemFacts[],
+  order?: Pick<CorridorFacts, "hasCompleteProposal" | "hasApprovedProposal">,
+) {
   return items.find((item) => itemNeed(item, order) !== "ready") ?? null;
 }
 
@@ -91,25 +101,33 @@ function named(item: CorridorItemFacts | null, many: boolean, fallback: string) 
   return `${item.nameUk}: ${fallback.charAt(0).toLowerCase()}${fallback.slice(1)}`;
 }
 
-function factsOf(items: CorridorItemFacts[], order?: Pick<CorridorFacts, "hasCompleteProposal" | "hasApprovedProposal">) {
+function factsOf(
+  items: CorridorItemFacts[],
+  order?: Pick<CorridorFacts, "hasCompleteProposal" | "hasApprovedProposal">,
+) {
   const blocking = firstBlocking(items, order);
-  const approved = order?.hasApprovedProposal ?? (items.length > 0 && items.every((item) => item.hasApprovedVersion));
+  const approved =
+    order?.hasApprovedProposal ??
+    (items.length > 0 && items.every((item) => item.hasApprovedVersion));
   const specLocked = items.some((item) => item.specificationLocked);
   const needsDecorationFile = items.some((item) => item.decorationsCount > 0);
   return { blocking, approved, specLocked, needsDecorationFile, many: items.length > 1 };
 }
 
 /**
- * One next door for an order. Completeness is across every line:
- * a version on item 1 does not skip the empty item 2.
+ * One next door for an order. Completeness is across every line.
  */
 export function corridorFor(input: CorridorFacts): CorridorStep {
   const orderFlags = {
     hasCompleteProposal: input.hasCompleteProposal,
     hasApprovedProposal: input.hasApprovedProposal,
   };
-  const { blocking, approved, specLocked, needsDecorationFile, many } = factsOf(input.items, orderFlags);
-  const quotationReady = approved;
+  const { blocking, approved, specLocked, needsDecorationFile, many } = factsOf(
+    input.items,
+    orderFlags,
+  );
+  // КП available once a complete proposal exists (Розрахунок), not only after approve.
+  const quotationReady = Boolean(input.hasCompleteProposal) || approved;
   const specificationReady = specLocked || input.status === "HANDED_TO_PRODUCTION";
   const focusItemId = blocking?.id;
 
@@ -149,11 +167,11 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
       index: 1,
       of: LIVE_STEPS,
       label: "Вказати кількість",
-      title: "Спочатку тираж",
+      title: "Збір · тираж",
       detail: named(
         blocking,
         many,
-        "Вкажіть кількості за розмірами — без цього немає ціни й калькуляції.",
+        "Вкажіть кількість (орієнтовний тираж). Розкладку по розмірах зробите перед виробництвом.",
       ),
       tab: "configuration",
       focusItemId,
@@ -167,12 +185,12 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
       key: "compose",
       index: 1,
       of: LIVE_STEPS,
-      label: "Заповнити комплектацію",
-      title: "Зберіть склад виробу",
+      label: "Збір",
+      title: "Збір замовлення",
       detail: named(
         blocking,
         many,
-        "Додайте матеріали й операції. Нанесення — лише якщо воно є в замовленні.",
+        "Додайте матеріали й операції. Далі менеджер передає замовлення на розрахунок.",
       ),
       tab: "configuration",
       focusItemId,
@@ -186,15 +204,15 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
       key: "saveVersion",
       index: 2,
       of: LIVE_STEPS,
-      label: "Зберегти пропозицію",
-      title: "Зафіксуйте ціни для клієнта",
+      label: "Розрахунок",
+      title: "Розрахунок і пропозиція",
       detail: many
-        ? "Комплектацію зібрано. Збережіть пропозицію з цінами всіх позицій — це основа для КП."
-        : "Комплектацію зібрано. Збережіть пропозицію — це ціна, яку побачить клієнт.",
+        ? "Порахуйте собівартість і збережіть пропозицію по всіх позиціях. КП уже можна друкувати (база XS–XXL). Розкладку розмірів — перед цехом."
+        : "Порахуйте собівартість і збережіть пропозицію. КП доступне для базових розмірів XS–XXL. Розкладку 3XL+ зробите перед виробництвом.",
       tab: "versions",
       hrefQuery: "action=save",
       focusItemId,
-      quotationReady: false,
+      quotationReady: Boolean(input.hasCompleteProposal),
       specificationReady: false,
     };
   }
@@ -204,14 +222,14 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
       key: "approve",
       index: 3,
       of: LIVE_STEPS,
-      label: "Погодити пропозицію",
-      title: "Погодьте ціни",
+      label: "Погодження",
+      title: "Погодьте пропозицію",
       detail: many
-        ? "Пропозицію збережено. Погодьте її цілком — тоді можна сформувати КП і передати в цех."
-        : "Пропозицію збережено. Погодження відкриває комерційну пропозицію і шлях у цех.",
+        ? "Пропозицію збережено. Погодьте її цілком — далі розкладка розмірів і передача в цех."
+        : "Пропозицію збережено. Погодьте ціну — далі розкладка розмірів перед виробництвом.",
       tab: "versions",
       focusItemId,
-      quotationReady: false,
+      quotationReady: true,
       specificationReady: false,
     };
   }
@@ -221,17 +239,17 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
       const sizesFocus =
         input.items.find((item) => item.needsSizeBreakdown)?.id ?? focusItemId;
       return {
-        key: "compose",
+        key: "sizes",
         index: 4,
         of: LIVE_STEPS,
         label: "Розкласти розміри",
-        title: "Розміри перед цехом",
+        title: "Розміри перед виробництвом",
         detail: many
-          ? "Перед передачею у виробництво розкладіть загальний тираж по реальних розмірах у Комплектації для кожної позиції."
-          : "Перед передачею у виробництво розкладіть загальний тираж по реальних розмірах у Комплектації.",
+          ? "Перед передачею в цех розкладіть тираж по реальних розмірах для кожної позиції. 3XL+ підвищать витрати в специфікації."
+          : "Перед передачею в цех розкладіть тираж по реальних розмірах. Розміри понад XXL дають вищі витрати.",
         tab: "configuration",
         focusItemId: sizesFocus,
-        quotationReady,
+        quotationReady: true,
         specificationReady: false,
       };
     }
@@ -246,7 +264,7 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
         detail:
           "У складі є друк або вишивка. Додайте макет у вкладці «Документи» — без нього цех не зможе виконати нанесення.",
         tab: "files",
-        quotationReady,
+        quotationReady: true,
         specificationReady: false,
       };
     }
@@ -257,15 +275,15 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
       key: "handover",
       index: 4,
       of: LIVE_STEPS,
-      label: "Передати у виробництво",
-      title: missing.length ? "Ще не все для цеху" : "Можна віддати в цех",
+      label: "Виробництво",
+      title: missing.length ? "Ще не все для цеху" : "Передати у виробництво",
       detail: missing.length
-        ? `Усі позиції погоджено. Перед передачею вкажіть: ${missing.join(", ")}.`
+        ? `Погоджено й розміри готові. Перед передачею вкажіть: ${missing.join(", ")}.`
         : many
-          ? "Усі вироби погоджені. Натисніть «Передати у виробництво» — специфікація сформується сама."
-          : "Натисніть «Передати у виробництво» — специфікація сформується сама, нічого заповнювати не треба.",
+          ? "Усе готово. Натисніть «Передати у виробництво» — специфікація сформується сама."
+          : "Натисніть «Передати у виробництво» — специфікація сформується сама.",
       tab: "versions",
-      quotationReady,
+      quotationReady: true,
       specificationReady: false,
     };
   }
@@ -274,11 +292,11 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
     key: "spec",
     index: 5,
     of: LIVE_STEPS,
-    label: "Специфікація",
+    label: "У виробництві",
     title: "У виробництві",
     detail: "Специфікацію зафіксовано. Цех працює за погодженою пропозицією.",
     tab: "files",
-    quotationReady,
+    quotationReady: true,
     specificationReady: true,
   };
 }

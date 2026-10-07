@@ -33,6 +33,7 @@ export const materialFormSchema = z.object({
     .optional()
     .default([]),
   note: optionalString,
+  referenceUrls: z.array(z.string().trim().min(1)).optional().default([]),
   tagColor: z.preprocess(
     emptyToNull,
     z.enum(["green", "blue", "amber", "rose", "slate"]).nullable().optional(),

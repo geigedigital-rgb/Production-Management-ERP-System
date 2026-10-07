@@ -13,7 +13,7 @@ import {
   PrintDocument,
 } from "@/components/print/PrintDocument";
 import { formatDateUk, formatMoneyUah } from "@/lib/utils";
-import { approvedProposal } from "@/lib/order-proposals";
+import { quotationProposal } from "@/lib/order-proposals";
 import {
   buildQuotationSizeRows,
   quotationGrandTotal,
@@ -54,7 +54,7 @@ export default async function QuotationPage({
     })),
   }));
 
-  const proposal = approvedProposal(proposalItems);
+  const proposal = quotationProposal(proposalItems);
   if (!proposal) notFound();
 
   const lines = proposal.lines
@@ -98,7 +98,7 @@ export default async function QuotationPage({
   const docMeta = [
     `від ${formatDateUk(proposal.createdAt)}`,
     proposal.revision != null
-      ? `пропозиція v${proposal.revision}${proposal.isApproved ? " · погоджено" : ""}`
+      ? `пропозиція v${proposal.revision}${proposal.isApproved ? " · погоджено" : " · проєкт"}`
       : `${tableRows.length} ряд.`,
   ];
 
@@ -149,6 +149,14 @@ export default async function QuotationPage({
             },
           ]}
         />
+
+        <p className="print-doc-scope-banner">
+          Розрахунок для базових моделей — розміри XS–XXL.
+          <br />
+          <span className="print-doc-scope-banner-sub">
+            Крупні розміри (3XL+) уточнюються перед виробництвом і можуть змінити вартість.
+          </span>
+        </p>
 
         <PrintDocSection title="Позиції замовлення" breakable>
           <PrintDocTable

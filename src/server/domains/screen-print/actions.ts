@@ -2,12 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/server/auth";
-import {
-  addOrderItemDecorationWithRates,
-  findOrderItemScreenPrintDecoration,
-  removeOrderItemDecoration,
-  updateOrderItemDecoration,
-} from "@/server/domains/orders/service";
+import { addOrderItemDecorationWithRates } from "@/server/domains/orders/service";
 import {
   resolveScreenPrintUnitRate,
   screenPrintLineName,
@@ -71,8 +66,9 @@ async function assertCanEditOrderScreenPrint(orderId: string) {
 }
 
 /**
- * Checkbox-driven silk-screen line: enabled → upsert one decoration;
- * disabled → remove the existing silk-screen row.
+ * Silk-screen line: enabled → always insert a new decoration row
+ * (multiple prints / приладки per order item). disabled → no-op here
+ * (rows are removed from the decorations table trash).
  */
 export async function syncOrderScreenPrintAction(input: {
   orderId: string;
@@ -94,12 +90,9 @@ export async function syncOrderScreenPrintAction(input: {
     return { ok: false as const, error: "NOT_FOUND" as const };
   }
 
-  const existing = await findOrderItemScreenPrintDecoration(input.orderItemId);
-
   if (!input.enabled) {
-    if (existing) await removeOrderItemDecoration(existing.id);
     revalidatePath(`/orders/${input.orderId}`);
-    return { ok: true as const, removed: true as const };
+    return { ok: true as const, removed: false as const };
   }
 
   const catalog = await getScreenPrintCatalog();
@@ -120,21 +113,12 @@ export async function syncOrderScreenPrintAction(input: {
     applied: resolved.applied,
   });
 
-  if (existing) {
-    await updateOrderItemDecoration({
-      id: existing.id,
-      nameUk,
-      setupCost: 0,
-      unitRate: resolved.unitRate,
-    });
-  } else {
-    await addOrderItemDecorationWithRates({
-      orderItemId: input.orderItemId,
-      nameUk,
-      setupCost: 0,
-      unitRate: resolved.unitRate,
-    });
-  }
+  await addOrderItemDecorationWithRates({
+    orderItemId: input.orderItemId,
+    nameUk,
+    setupCost: 0,
+    unitRate: resolved.unitRate,
+  });
 
   revalidatePath(`/orders/${input.orderId}`);
   return {

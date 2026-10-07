@@ -279,6 +279,7 @@ export async function createMaterial(raw: MaterialFormValues) {
       colorOrAttribute: data.colorOrAttribute || null,
       availableColors: data.availableColors ?? [],
       note: data.note || null,
+      referenceUrls: data.referenceUrls ?? [],
       ...(prismaMaterialHasField("tagColor")
         ? { tagColor: data.tagColor || null }
         : {}),
@@ -386,6 +387,7 @@ export async function updateMaterial(
       colorOrAttribute: data.colorOrAttribute || null,
       availableColors: data.availableColors ?? [],
       note: data.note || null,
+      referenceUrls: data.referenceUrls ?? [],
       ...(prismaMaterialHasField("tagColor")
         ? { tagColor: data.tagColor || null }
         : {}),
@@ -531,6 +533,109 @@ export async function resyncFabricPurchasePrices() {
     count += 1;
   }
   return { count };
+}
+
+/** Clone material + primary supplier offers under a new name. */
+export async function duplicateMaterial(
+  sourceId: string,
+  options?: { nameUk?: string },
+) {
+  const source = await prisma.material.findUnique({
+    where: { id: sourceId },
+    include: {
+      supplierOffers: {
+        include: { supplier: true },
+        orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+      },
+    },
+  });
+  if (!source || source.status === "ARCHIVED") {
+    throw new Error("MATERIAL_NOT_FOUND");
+  }
+
+  const preferred =
+    options?.nameUk?.replace(/\s+/g, " ").trim() || `${source.nameUk} (копія)`;
+  let nameUk = preferred;
+  const taken = await prisma.material.findFirst({
+    where: {
+      nameUk: { equals: nameUk, mode: "insensitive" },
+      unitOfMeasureId: source.unitOfMeasureId,
+      status: "ACTIVE",
+    },
+    select: { id: true },
+  });
+  if (taken) {
+    nameUk = `${preferred} ${Date.now().toString(36)}`;
+  }
+
+  const copy = await prisma.material.create({
+    data: {
+      nameUk,
+      type: source.type,
+      categoryId: source.categoryId,
+      unitOfMeasureId: source.unitOfMeasureId,
+      purchasePrice: source.purchasePrice,
+      defaultWastePercent: source.defaultWastePercent,
+      supplierCode: source.supplierCode,
+      colorOrAttribute: source.colorOrAttribute,
+      availableColors: source.availableColors,
+      note: source.note,
+      referenceUrls: source.referenceUrls ?? [],
+      tagColor: source.tagColor,
+      densityGsm: source.densityGsm,
+      composition: source.composition,
+      metersPerKg: source.metersPerKg,
+      priceKgUsd: source.priceKgUsd,
+      priceKgUsdCargo: source.priceKgUsdCargo,
+      priceKgUsdVat: source.priceKgUsdVat,
+      priceMeterUahNoVat: source.priceMeterUahNoVat,
+      priceMeterUahVat: source.priceMeterUahVat,
+      priceMeterUahCutVat: source.priceMeterUahCutVat,
+      fabricKindUk: source.fabricKindUk,
+      widthCm: source.widthCm,
+      wholesaleNote: source.wholesaleNote,
+      rollWeightKg: source.rollWeightKg,
+      metersPerRoll: source.metersPerRoll,
+      minWholesaleMeters: source.minWholesaleMeters,
+      costVatOverride: source.costVatOverride,
+      deliveryType: source.deliveryType,
+      unitsPerPack: source.unitsPerPack,
+      unitsPerKg: source.unitsPerKg,
+      purchasePackPrice: source.purchasePackPrice,
+      packDeliveryCostUah: source.packDeliveryCostUah,
+      status: "ACTIVE",
+    },
+  });
+
+  for (const offer of source.supplierOffers) {
+    await prisma.materialSupplier.create({
+      data: {
+        materialId: copy.id,
+        supplierId: offer.supplierId,
+        isPrimary: offer.isPrimary,
+        metersPerKg: offer.metersPerKg,
+        deliveryType: offer.deliveryType,
+        cargoUsdPerKg: offer.cargoUsdPerKg,
+        npStandardUsdPerKg: offer.npStandardUsdPerKg,
+        npVolumeUsdPerKg: offer.npVolumeUsdPerKg,
+        priceKgUsd: offer.priceKgUsd,
+        priceKgUsdCargo: offer.priceKgUsdCargo,
+        priceKgUsdVat: offer.priceKgUsdVat,
+        priceMeterUahNoVat: offer.priceMeterUahNoVat,
+        priceMeterUahVat: offer.priceMeterUahVat,
+        priceMeterUahCutVat: offer.priceMeterUahCutVat,
+        rollWeightKg: offer.rollWeightKg,
+        metersPerRoll: offer.metersPerRoll,
+        minWholesaleMeters: offer.minWholesaleMeters,
+        wholesaleNote: offer.wholesaleNote,
+        availableColors: offer.availableColors,
+        purchasePackPrice: offer.purchasePackPrice,
+        packDeliveryCostUah: offer.packDeliveryCostUah,
+      },
+    });
+  }
+
+  return copy;
 }
 
 export async function archiveMaterial(id: string) {

@@ -161,6 +161,8 @@ model Material {
   availableColors    String[]     @default([]) @map("available_colors")
   priceEffectiveDate DateTime?
   note               String?
+  /// Supplier / catalog links (clickable in UI).
+  referenceUrls      String[]     @default([]) @map("reference_urls")
   /// Optional catalog color tag (green / blue / amber / rose / slate).
   tagColor           String?      @map("tag_color")
   status             RecordStatus @default(ACTIVE)

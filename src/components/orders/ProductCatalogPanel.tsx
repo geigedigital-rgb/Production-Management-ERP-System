@@ -47,6 +47,10 @@ export type ProductCompositionTemplate = {
     }>;
     /** Selected supplier for color palette / terms. */
     supplierId?: string | null;
+    /** BOM delivery type from product (CARGO / NP…). */
+    deliveryType?: string | null;
+    /** Color snapshot from product BOM (seed for order lineColor). */
+    colorSnapshot?: string | null;
     /** User confirmed row in the side panel (order draft only). */
     specReviewed?: boolean;
     /** Fabric delivery / cargo overrides for this draft line. */

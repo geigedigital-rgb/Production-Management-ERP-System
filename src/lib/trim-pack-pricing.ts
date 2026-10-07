@@ -17,24 +17,35 @@ import {
 } from "@/lib/supplier-delivery-rates";
 
 export type TrimPackQuote = {
-  unitsPerPack?: number | null;
-  purchasePackPrice?: number | null;
-  packDeliveryCostUah?: number | null;
+  unitsPerPack?: number | string | null;
+  purchasePackPrice?: number | string | null;
+  packDeliveryCostUah?: number | string | null;
 };
 
 export type TrimKgQuote = {
-  unitsPerKg?: number | null;
-  priceKgUsd?: number | null;
-  usdUahRate?: number | null;
+  unitsPerKg?: number | string | null;
+  priceKgUsd?: number | string | null;
+  usdUahRate?: number | string | null;
 };
+
+function isPresentNumberish(value: number | string | null | undefined): boolean {
+  if (value == null) return false;
+  if (typeof value === "string" && value.trim() === "") return false;
+  return true;
+}
 
 export function hasTrimPackQuote(quote: TrimPackQuote): boolean {
   const n = Math.floor(Number(quote.unitsPerPack) || 0);
+  if (!(n > 0)) return false;
+  // null / "" must NOT count as pack 0 — otherwise «ціна за м/шт» becomes 0÷уп.
+  if (!isPresentNumberish(quote.purchasePackPrice)) return false;
   const pack = Number(quote.purchasePackPrice);
-  return n > 0 && Number.isFinite(pack) && pack >= 0;
+  return Number.isFinite(pack) && pack >= 0;
 }
 
 export function hasTrimKgQuote(quote: TrimKgQuote): boolean {
+  if (!isPresentNumberish(quote.priceKgUsd)) return false;
+  if (!isPresentNumberish(quote.unitsPerKg)) return false;
   const upk = Number(quote.unitsPerKg);
   const kg = Number(quote.priceKgUsd);
   const rate = Number(quote.usdUahRate);

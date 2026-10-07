@@ -92,7 +92,10 @@ export function cloneComposition(
       return {
         ...row,
         ...pricing,
-        lineColor: null,
+        // Keep product BOM supplier / color / delivery — do not wipe on clone.
+        lineColor: row.lineColor?.trim() || row.colorSnapshot?.trim() || null,
+        colorSnapshot: row.colorSnapshot ?? null,
+        deliveryType: row.deliveryType ?? null,
         availableColors: option?.availableColors ?? row.availableColors ?? [],
         supplierOffers: option?.supplierOffers ?? row.supplierOffers ?? [],
         supplierId:
@@ -144,6 +147,7 @@ export function decorationBatchCost(row: DraftDecorationRow, quantity: number) {
 export function draftMaterialMetersNeeded(
   row: DraftMaterialRow,
   quantitiesBySize: Record<string, number>,
+  sizeMaterialCoeffs?: Record<string, number> | null,
 ): number {
   return fabricMetersNeeded({
     consumptionPerUnit: row.consumption,
@@ -151,6 +155,7 @@ export function draftMaterialMetersNeeded(
     quantitiesBySize,
     sizeCode: row.sizeCodes?.length === 1 ? row.sizeCodes[0] : null,
     sizeConsumption: row.sizeConsumption,
+    sizeMaterialCoeffs,
   });
 }
 

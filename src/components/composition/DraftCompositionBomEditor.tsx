@@ -5,12 +5,7 @@ import { MaterialCreatePanel } from "@/app/(app)/settings/resources/MaterialCrea
 import { OperationCreatePanel } from "@/app/(app)/settings/operations/OperationCreateForm";
 import { CopySizeSpec, SizeScopeTabs } from "@/components/catalog/SizeScopeTabs";
 import { SizeBomScopeHint } from "@/components/catalog/SizeBomScopeHint";
-import {
-  effectiveOversizeConsumption,
-  isOversizeCode,
-  OVERSIZE_DEFAULT_COEFFS,
-  OVERSIZE_RANGE_LABEL,
-} from "@/lib/size-coeffs";
+import { isOversizeCode } from "@/lib/size-coeffs";
 import { materialOptionDescription } from "@/lib/material-catalog-options";
 import {
   CompositionAddBar,
@@ -137,7 +132,6 @@ export function DraftCompositionBomEditor({
     operations: composition.operations,
   });
   const hasOversizeSizes = sizes.some((size) => isOversizeCode(size.code));
-  const scopeIsOversize = isOversizeCode(sizeScope);
   const resolvedScopeHint =
     typeof scopeHint === "function" ? scopeHint(sizeScope) : scopeHint;
   const selectedMaterial =
@@ -337,14 +331,7 @@ export function DraftCompositionBomEditor({
                 });
                 const showMarker =
                   enableLinePricingControls && (showColorSlot || needsAttention);
-                const baseUnitCost = consumption * (1 + row.waste / 100) * row.price;
-                const displayUnitCost = scopeIsOversize
-                  ? baseUnitCost * OVERSIZE_DEFAULT_COEFFS.materialCoeff
-                  : baseUnitCost;
-                const oversizeNorm =
-                  !hideCosts && (hasOversizeSizes || scopeIsOversize)
-                    ? effectiveOversizeConsumption(consumption)
-                    : null;
+                const displayUnitCost = consumption * (1 + row.waste / 100) * row.price;
                 return (
                   <TR
                     key={row.key}
@@ -407,11 +394,6 @@ export function DraftCompositionBomEditor({
                             {formatUnit(row.unit)}
                           </span>
                         </span>
-                        {oversizeNorm != null ? (
-                          <span className="text-[10px] text-[var(--color-text-quiet)]">
-                            {OVERSIZE_RANGE_LABEL} ≈ {oversizeNorm} {formatUnit(row.unit)}
-                          </span>
-                        ) : null}
                       </span>
                     </TD>
                     {!hideCosts ? (
@@ -445,14 +427,7 @@ export function DraftCompositionBomEditor({
                     ) : null}
                     {!hideCosts ? (
                       <TD numeric className="font-medium">
-                        <span className="inline-flex flex-col items-end gap-0.5">
-                          <span>{formatMoneyUah(displayUnitCost)}</span>
-                          {scopeIsOversize ? (
-                            <span className="text-[10px] font-normal text-[var(--color-text-quiet)]">
-                              база {formatMoneyUah(baseUnitCost)}
-                            </span>
-                          ) : null}
-                        </span>
+                        {formatMoneyUah(displayUnitCost)}
                       </TD>
                     ) : null}
                     <TD align="center" onClick={(event) => event.stopPropagation()}>

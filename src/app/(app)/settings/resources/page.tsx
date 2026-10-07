@@ -110,6 +110,8 @@ export default async function MaterialsSettingsPage({
       supplierNames,
       colorOrAttribute: row.colorOrAttribute ?? "",
       note: row.note ?? "",
+      referenceUrls: Array.isArray(row.referenceUrls) ? row.referenceUrls : [],
+      updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt ?? ""),
       details:
         row.type === "FABRIC"
           ? [row.fabricKindUk, row.widthCm ? `шир. ${row.widthCm}` : null]

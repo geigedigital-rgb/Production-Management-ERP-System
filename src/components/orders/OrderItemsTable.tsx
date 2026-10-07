@@ -23,6 +23,7 @@ import { itemNeedLabel, itemNeedTone, type ItemNeed } from "@/lib/order-corridor
 import { removeOrderItemAction } from "@/server/domains/orders/actions";
 import { AddOrderItemPanel, type AddableProduct } from "@/components/orders/AddOrderItemPanel";
 import { ProductThumb } from "@/components/orders/ProductCatalogPanel";
+import { useOrderUnsavedOptional } from "@/components/orders/OrderUnsavedContext";
 
 export type OrderItemRow = {
   id: string;
@@ -35,6 +36,8 @@ export type OrderItemRow = {
   decorationsCount: number;
   versionLabel: string;
   unitPrice: number | null;
+  /** Selling total for the line tirage (shown under unit price). */
+  lineTotal?: number | null;
   need: ItemNeed;
   sourceProductId: string | null;
 };
@@ -59,12 +62,15 @@ export function OrderItemsTable({
   showPrices?: boolean;
 }) {
   const router = useRouter();
+  const unsaved = useOrderUnsavedOptional();
   const [pending, startTransition] = useTransition();
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const totalQty = rows.reduce((sum, row) => sum + row.quantity, 0);
 
   function select(id: string) {
-    router.push(`/orders/${orderId}?tab=${activeTab}&item=${id}`);
+    const href = `/orders/${orderId}?tab=${activeTab}&item=${id}`;
+    if (unsaved && !unsaved.requestNavigate(href)) return;
+    router.push(href);
   }
 
   function remove(row: OrderItemRow) {
@@ -175,7 +181,18 @@ export function OrderItemsTable({
                 </TD>
                 {showPrices ? (
                   <TD numeric nowrap>
-                    {row.unitPrice != null ? formatMoneyUah(row.unitPrice) : "—"}
+                    {row.unitPrice != null ? (
+                      <span className="inline-flex flex-col items-end gap-0.5">
+                        <span className="font-medium">{formatMoneyUah(row.unitPrice)}</span>
+                        {row.lineTotal != null && row.quantity > 1 ? (
+                          <span className="type-caption">
+                            разом {formatMoneyUah(row.lineTotal)}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </TD>
                 ) : null}
                 <TD>

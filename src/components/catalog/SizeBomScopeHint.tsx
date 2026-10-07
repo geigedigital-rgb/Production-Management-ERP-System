@@ -2,7 +2,8 @@ import { ALL_SIZES, type SizeScope } from "@/lib/size-bom";
 import { isOversizeCode, OVERSIZE_RANGE_LABEL } from "@/lib/size-coeffs";
 
 /**
- * Explains size tabs: shared base on «Усі», auto 3XL–6XL uplift from company %, optional overrides.
+ * Explains size tabs on the product BOM.
+ * Size markups (+% for 3XL–6XL) apply only in orders when those sizes are in the tirage.
  */
 export function SizeBomScopeHint({
   sizeScope,
@@ -26,7 +27,7 @@ export function SizeBomScopeHint({
         <p className="type-caption">
           База S–XL
           {hasOversizeSizes && !hideUpliftPercents
-            ? ` · ${OVERSIZE_RANGE_LABEL} авто +${materialPct}% мат. / +${operationPct}% оп.`
+            ? ` · ${OVERSIZE_RANGE_LABEL} +${materialPct}%/+${operationPct}% лише в замовленні`
             : hasOversizeSizes
               ? ` · ${OVERSIZE_RANGE_LABEL} окремо`
               : ""}
@@ -37,8 +38,8 @@ export function SizeBomScopeHint({
       return (
         <p className="type-caption">
           {hideUpliftPercents
-            ? `${sizeScope}: норма для цього розміру. Зміна = своя норма.`
-            : `${sizeScope}: норма вже з +${materialPct}%. Зміна = своя норма розміру.`}
+            ? `${sizeScope}: норма для цього розміру.`
+            : `${sizeScope}: базова норма. Націнка +${materialPct}% — у замовленні.`}
         </p>
       );
     }
@@ -50,12 +51,13 @@ export function SizeBomScopeHint({
   if (sizeScope === ALL_SIZES) {
     return (
       <p className="type-caption">
-        «Усі» — базові норми (S–XL).
+        «Усі» — базові норми без націнок за розміром.
         {hasOversizeSizes && !hideUpliftPercents ? (
           <>
             {" "}
-            Для {OVERSIZE_RANGE_LABEL} у розрахунку автоматично матеріали +{materialPct}% і операції +
-            {operationPct}% (поля справа від вкладок). Окремо оновлювати кожен виріб не потрібно.
+            Для {OVERSIZE_RANGE_LABEL} у замовленні автоматично матеріали +{materialPct}% і операції +
+            {operationPct}% (поля справа — % для компанії). У картці виробу й «Прайс і крій» націнки не
+            рахуються.
           </>
         ) : hasOversizeSizes ? (
           <> Для {OVERSIZE_RANGE_LABEL} норми задаються окремо.</>
@@ -70,7 +72,7 @@ export function SizeBomScopeHint({
       <p className="type-caption">
         {hideUpliftPercents
           ? `${sizeScope}: норма на цій вкладці — лише для цього розміру.`
-          : `${sizeScope}: у полі норми вже показана база × +${materialPct}%. Змініть цифру — збережеться як своя норма цього розміру. Відсотки справа (${OVERSIZE_RANGE_LABEL}) діють на всі вироби.`}
+          : `${sizeScope}: тут базова норма (без +${materialPct}%). Націнка застосовується лише в замовленні, коли в тиражі є ${OVERSIZE_RANGE_LABEL}. Відсотки справа діють на всі вироби.`}
       </p>
     );
   }

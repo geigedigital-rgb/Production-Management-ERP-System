@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { SoftBusy } from "@/components/ui/SoftBusy";
 import { useRouter } from "next/navigation";
 import { SidePanel } from "@/components/ui/Overlay";
@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/Button";
 import { SidePanelSkeleton } from "@/components/ui/Skeleton";
 import { Select } from "@/components/ui/Field";
 import { Banner } from "@/components/ui/Banner";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
+import { useUnsavedCloseGuard } from "@/hooks/useUnsavedCloseGuard";
 import { formatMoneyUah, formatUnit } from "@/lib/utils";
 import { materialQtyUnitShort } from "@/lib/material-pack-labels";
 import {
@@ -366,6 +368,63 @@ export function OrderMaterialDetailPanel({
     }
   }
 
+  const isDirty = useMemo(() => {
+    if (!detail || locked) return false;
+    if ((supplierId || "") !== (detail.supplierId ?? "")) return true;
+    if ((colorSnapshot ?? null) !== (detail.colorSnapshot ?? null)) return true;
+    if (!detail.isFabric) {
+      return deliveryType !== (detail.deliveryType ? String(detail.deliveryType) : "");
+    }
+    const loadedVat = detail.costVatOverride ?? detail.companyCostVatMode;
+    if (vatMode !== loadedVat) return true;
+    const loadedCargo =
+      detail.cargoUsdPerKg != null ? String(detail.cargoUsdPerKg) : "";
+    if (cargoUsdPerKg.trim() !== loadedCargo) return true;
+    const loadedDeliveryType =
+      "deliveryType" in detail && detail.deliveryType
+        ? String(detail.deliveryType)
+        : "";
+    if (deliveryType !== loadedDeliveryType) return true;
+    const hasRateOverride =
+      detail.defaultUsdUahRate != null &&
+      Math.abs(detail.usdUahRate - detail.defaultUsdUahRate) > 0.0001;
+    const loadedRate = hasRateOverride ? String(detail.usdUahRate) : "";
+    if (usdUahRate.trim() !== loadedRate) return true;
+    if (Boolean(deliveryManual) !== Boolean(detail.fabricDeliveryManual)) return true;
+    if (deliveryManual) {
+      const loadedAmount = String(detail.fabricDeliveryAmount ?? 0);
+      if (deliveryAmount.trim() !== loadedAmount) return true;
+    }
+    const loadedThreshold =
+      detail.minWholesaleMetersOverride != null
+        ? String(detail.minWholesaleMetersOverride)
+        : "";
+    if (thresholdOverride.trim() !== loadedThreshold) return true;
+    return false;
+  }, [
+    detail,
+    locked,
+    supplierId,
+    colorSnapshot,
+    deliveryType,
+    vatMode,
+    cargoUsdPerKg,
+    usdUahRate,
+    deliveryManual,
+    deliveryAmount,
+    thresholdOverride,
+  ]);
+
+  const discardClose = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+  const { leaveOpen, requestClose, stay, discard } = useUnsavedCloseGuard({
+    dirty: isDirty,
+    pending,
+    onDiscard: discardClose,
+  });
+
   function apply() {
     if (!detail) return;
     const formData = new FormData();
@@ -416,9 +475,10 @@ export function OrderMaterialDetailPanel({
     : "м";
 
   return (
+    <>
     <SidePanel
       open={open}
-      onClose={onClose}
+      onClose={locked ? onClose : requestClose}
       title={detail?.name ?? "Матеріал"}
       description="Закупівля, партія та доставка для цієї позиції"
       width="lg"
@@ -429,7 +489,7 @@ export function OrderMaterialDetailPanel({
           </Button>
         ) : (
           <>
-            <Button variant="ghost" onClick={onClose} disabled={pending}>
+            <Button variant="ghost" onClick={requestClose} disabled={pending}>
               Скасувати
             </Button>
             <Button onClick={apply} loading={pending} disabled={pending || loading || !detail}>
@@ -970,5 +1030,12 @@ export function OrderMaterialDetailPanel({
         </SoftBusy>
       ) : null}
     </SidePanel>
+    <UnsavedChangesDialog
+      open={leaveOpen}
+      pending={pending}
+      onStay={stay}
+      onDiscard={discard}
+    />
+    </>
   );
 }

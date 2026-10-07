@@ -51,6 +51,18 @@ export function resolveSizeCoeffs(
   return { materialCoeff: 1, operationCoeff: 1 };
 }
 
+/** Per-size material uplift map for fabric meters / delivery / wholesale threshold. */
+export function materialCoeffsBySize(
+  sizeCodes: Iterable<string>,
+  rules?: SizeCoeffRule[] | null,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const code of sizeCodes) {
+    out[code] = resolveSizeCoeffs(code, rules).materialCoeff;
+  }
+  return out;
+}
+
 /** Shared oversize uplift from rules (3XL+); falls back to defaults. */
 export function resolveOversizeUplift(rules?: SizeCoeffRule[] | null): SizeCoeff {
   for (const code of OVERSIZE_CODES) {
@@ -76,6 +88,16 @@ export function oversizeOperationPct(rules?: SizeCoeffRule[] | null): number {
 /** Short Ukrainian labels for BOM / calc UI. */
 export function oversizeUpliftCaption(rules?: SizeCoeffRule[] | null): string {
   return `${OVERSIZE_RANGE_LABEL} · матеріали +${oversizeMaterialPct(rules)}% · операції +${oversizeOperationPct(rules)}%`;
+}
+
+/** Order calc: which tirage sizes triggered size markups. */
+export function oversizeTirageSizesCaption(
+  rows: Array<{ sizeCode: string; quantity: number }>,
+): string {
+  const parts = rows
+    .filter((row) => row.quantity > 0 && isOversizeCode(row.sizeCode))
+    .map((row) => `${row.sizeCode}: ${row.quantity} шт`);
+  return parts.join(" · ");
 }
 
 export function effectiveOversizeConsumption(

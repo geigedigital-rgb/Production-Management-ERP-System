@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Field";
@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/Table";
 import { IconPlus, IconTrash, IconMaterials, IconOperations, IconDecoration } from "@/components/ui/Icons";
 import { OrderMaterialDetailPanel } from "@/components/orders/OrderMaterialDetailPanel";
+import { useOrderUnsavedWorkspaceDirty } from "@/components/orders/OrderUnsavedContext";
 import { cn, formatMoneyUah } from "@/lib/utils";
 import { materialOptionDescription } from "@/lib/material-catalog-options";
 import {
@@ -163,6 +164,7 @@ export function ConfigurationTab({
   screenPrintCoefficients = [],
   needsSizeBreakdown = false,
   sizeCharts = [],
+  preferredProductSizes = [],
 }: {
   orderId: string;
   itemId: string;
@@ -184,6 +186,8 @@ export function ConfigurationTab({
   unitOptions: Array<{ id: string; label: string }>;
   needsSizeBreakdown?: boolean;
   sizeCharts?: SizeChartOption[];
+  /** Catalog sizes of the source product — seed size breakdown grid. */
+  preferredProductSizes?: Array<{ code: string; nameUk: string }>;
   materialsSubtotal: number;
   operationsSubtotal: number;
   decorationsSubtotal: number;
@@ -201,7 +205,8 @@ export function ConfigurationTab({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [quantities, setQuantities] = useState<Record<string, number>>(
+  const sizesSignature = sizes.map((size) => `${size.sizeCode}:${size.quantity}`).join("|");
+  const [quantities, setQuantities] = useState<Record<string, number>>(() =>
     Object.fromEntries(sizes.map((size) => [size.sizeCode, size.quantity])),
   );
   const [removeTarget, setRemoveTarget] = useState<{
@@ -211,6 +216,12 @@ export function ConfigurationTab({
   } | null>(null);
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
   const [sizeScope, setSizeScope] = useState<SizeScope>(ALL_SIZES);
+
+  // Keep qty state in sync after apply/refresh — otherwise SizeRun shows zeros and a save wipes DB.
+  useEffect(() => {
+    setQuantities(Object.fromEntries(sizes.map((size) => [size.sizeCode, size.quantity])));
+    setSizeScope(ALL_SIZES);
+  }, [itemId, sizesSignature]);
 
   const isBusy = (key: string) => pending && busyKey === key;
 
@@ -227,6 +238,7 @@ export function ConfigurationTab({
   }
 
   const dirty = sizes.some((size) => (quantities[size.sizeCode] ?? 0) !== size.quantity);
+  useOrderUnsavedWorkspaceDirty(!locked && dirty);
   const totalQuantity = sizes.reduce((sum, size) => sum + (quantities[size.sizeCode] ?? 0), 0);
   const decorationSetupTotal = decorations.reduce((sum, row) => sum + row.setupCost, 0);
   const decorationUnitRateTotal = decorations.reduce((sum, row) => sum + row.unitRate, 0);
@@ -350,6 +362,7 @@ export function ConfigurationTab({
             orderItemId={itemId}
             targetTirage={sizes.reduce((sum, size) => sum + size.quantity, 0)}
             sizeCharts={sizeCharts}
+            preferredSizes={preferredProductSizes}
             disabled={isBusy("sizes")}
           />
         ) : (
@@ -492,7 +505,7 @@ export function ConfigurationTab({
                           </div>
                           <RowBusyMark busy={rowBusy} />
                         </div>
-                        {showSupplierColor ? (
+                        {showSupplierColor && !hideCosts ? (
                           <OrderMaterialSupplierColorEditor
                             orderId={orderId}
                             orderItemMaterialId={row.id}
@@ -501,7 +514,7 @@ export function ConfigurationTab({
                             color={row.colorSnapshot ?? null}
                             offers={row.supplierOffers ?? []}
                             materialFallbackColors={row.materialAvailableColors}
-                            readOnly={locked || rowBusy || hideCosts}
+                            readOnly={locked || rowBusy}
                           />
                         ) : null}
                       </div>
@@ -604,9 +617,20 @@ export function ConfigurationTab({
             <TFoot>
               <tr>
                 <TD colSpan={4} className="text-[var(--color-text-secondary)]">
-                  Разом на {totalQuantity} шт
+                  Разом матеріали
                 </TD>
-                <TD numeric>{formatMoneyUah(materialsSubtotal)}</TD>
+                <TD numeric>
+                  <span className="inline-flex flex-col items-end gap-0.5">
+                    <span className="font-medium">
+                      {formatMoneyUah(
+                        totalQuantity > 0 ? materialsSubtotal / totalQuantity : 0,
+                      )}
+                    </span>
+                    <span className="type-caption">
+                      разом {formatMoneyUah(materialsSubtotal)}
+                    </span>
+                  </span>
+                </TD>
                 {!locked ? <TD /> : null}
               </tr>
             </TFoot>
@@ -695,9 +719,20 @@ export function ConfigurationTab({
             <TFoot>
               <tr>
                 <TD colSpan={2} className="text-[var(--color-text-secondary)]">
-                  Разом на {totalQuantity} шт
+                  Разом операції
                 </TD>
-                <TD numeric>{formatMoneyUah(operationsSubtotal)}</TD>
+                <TD numeric>
+                  <span className="inline-flex flex-col items-end gap-0.5">
+                    <span className="font-medium">
+                      {formatMoneyUah(
+                        totalQuantity > 0 ? operationsSubtotal / totalQuantity : 0,
+                      )}
+                    </span>
+                    <span className="type-caption">
+                      разом {formatMoneyUah(operationsSubtotal)}
+                    </span>
+                  </span>
+                </TD>
                 {!locked ? <TD /> : null}
               </tr>
             </TFoot>
@@ -762,9 +797,22 @@ export function ConfigurationTab({
             <TFoot>
               <tr>
                 <TD colSpan={2} className="text-[var(--color-text-secondary)]">
-                  Разом на {totalQuantity} шт
+                  Разом ПВ
                 </TD>
-                <TD numeric>{formatMoneyUah(fixedCostAllocation.fixedCostTotal)}</TD>
+                <TD numeric>
+                  <span className="inline-flex flex-col items-end gap-0.5">
+                    <span className="font-medium">
+                      {formatMoneyUah(
+                        totalQuantity > 0
+                          ? fixedCostAllocation.fixedCostTotal / totalQuantity
+                          : 0,
+                      )}
+                    </span>
+                    <span className="type-caption">
+                      разом {formatMoneyUah(fixedCostAllocation.fixedCostTotal)}
+                    </span>
+                  </span>
+                </TD>
                 {!locked ? <TD /> : null}
               </tr>
             </TFoot>
@@ -892,14 +940,25 @@ export function ConfigurationTab({
           {decorations.length > 0 && !hideCosts ? (
             <TFoot>
               <tr>
-                <TD
-                  className="min-w-0 truncate text-[var(--color-text-secondary)]"
-                  title={`На ${totalQuantity} шт: ${formatMoneyUah(decorationsSubtotal)}`}
-                >
-                  Разом
+                <TD className="min-w-0 truncate text-[var(--color-text-secondary)]">
+                  Разом нанесення
                 </TD>
-                <TD numeric>{formatMoneyUah(decorationSetupTotal)}</TD>
-                <TD numeric>{formatMoneyUah(decorationUnitRateTotal)}</TD>
+                <TD numeric>
+                  <span className="inline-flex flex-col items-end gap-0.5">
+                    <span className="font-medium">{formatMoneyUah(decorationSetupTotal)}</span>
+                    <span className="type-caption">приладки</span>
+                  </span>
+                </TD>
+                <TD numeric>
+                  <span className="inline-flex flex-col items-end gap-0.5">
+                    <span className="font-medium">
+                      {formatMoneyUah(decorationUnitRateTotal)}
+                    </span>
+                    <span className="type-caption">
+                      разом {formatMoneyUah(decorationsSubtotal)}
+                    </span>
+                  </span>
+                </TD>
                 {!locked ? <TD /> : null}
               </tr>
             </TFoot>

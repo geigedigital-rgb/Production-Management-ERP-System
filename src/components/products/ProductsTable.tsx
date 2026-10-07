@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBadge } from "@/components/ui/Page";
 import {
   CellStack,
-  Table,
   TableEmpty,
   TBody,
   TD,
@@ -40,7 +39,31 @@ export type ProductsTableRow = {
   priceTiers: number[];
 };
 
-type SortKey = "name" | "composition" | "status" | "price";
+type SortKey = "name" | "status" | `price:${number}`;
+
+const CHECK_COL_PX = 40;
+const NAME_COL_LEFT = `${CHECK_COL_PX}px`;
+
+function priceAtTier(row: ProductsTableRow, qty: number): number | null {
+  const index = row.priceTiers.indexOf(qty);
+  if (index < 0) return null;
+  return row.prices[index] ?? null;
+}
+
+function collectPriceTiers(rows: ProductsTableRow[]): number[] {
+  const set = new Set<number>();
+  for (const row of rows) {
+    for (const qty of row.priceTiers) {
+      if (Number.isFinite(qty) && qty > 0) set.add(qty);
+    }
+  }
+  if (set.size === 0) return [50, 100, 500];
+  return [...set].sort((a, b) => a - b);
+}
+
+function formatTierLabel(qty: number) {
+  return `${qty}\u00a0шт`;
+}
 
 export function ProductsTable({
   rows,
@@ -53,7 +76,8 @@ export function ProductsTable({
   canDelete?: boolean;
   showPrices?: boolean;
 }) {
-  const priceTiers = rows[0]?.priceTiers ?? [50, 100, 500];
+  const priceTiers = useMemo(() => collectPriceTiers(rows), [rows]);
+  const highlightTier = priceTiers[Math.min(1, Math.max(0, priceTiers.length - 1))];
   const { sort, toggle } = useTableSort<SortKey>({ key: "status", direction: "desc" });
   const sorted = useMemo(
     () =>
@@ -62,17 +86,69 @@ export function ProductsTable({
         sort,
         {
           name: (row) => row.nameUk,
-          composition: (row) => row.materialsCount + row.operationsCount,
           status: (row) => (row.ready ? 1 : 0),
-          price: (row) => row.prices[1] ?? row.prices[0] ?? 0,
-        },
+          ...Object.fromEntries(
+            priceTiers.map((qty) => [
+              `price:${qty}`,
+              (row: ProductsTableRow) => priceAtTier(row, qty) ?? -1,
+            ]),
+          ),
+        } as Record<SortKey, (row: ProductsTableRow) => string | number | null | undefined>,
         sort?.key === "status" ? { key: "name", direction: "asc" } : undefined,
       ),
-    [rows, sort],
+    [rows, sort, priceTiers],
   );
   const ids = useMemo(() => sorted.map((row) => row.id), [sorted]);
   const selection = useRowSelection(ids);
-  const colSpan = showPrices ? 5 : 4;
+  const colSpan = showPrices ? 3 + priceTiers.length : 3;
+
+  const mainScrollRef = useRef<HTMLDivElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const [scrollWidth, setScrollWidth] = useState(0);
+  const [needsHScroll, setNeedsHScroll] = useState(false);
+  const syncing = useRef<"main" | "top" | null>(null);
+
+  const measureWidth = useCallback(() => {
+    const el = mainScrollRef.current;
+    if (!el) return;
+    setScrollWidth(el.scrollWidth);
+    setNeedsHScroll(el.scrollWidth > el.clientWidth + 1);
+  }, []);
+
+  useEffect(() => {
+    measureWidth();
+    const el = mainScrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(measureWidth);
+    ro.observe(el);
+    const table = el.querySelector("table");
+    if (table) ro.observe(table);
+    window.addEventListener("resize", measureWidth);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measureWidth);
+    };
+  }, [measureWidth, sorted.length, priceTiers.length, showPrices]);
+
+  function onMainScroll() {
+    const main = mainScrollRef.current;
+    const top = topScrollRef.current;
+    if (!main || !top) return;
+    if (syncing.current === "top") return;
+    syncing.current = "main";
+    top.scrollLeft = main.scrollLeft;
+    syncing.current = null;
+  }
+
+  function onTopScroll() {
+    const main = mainScrollRef.current;
+    const top = topScrollRef.current;
+    if (!main || !top) return;
+    if (syncing.current === "main") return;
+    syncing.current = "top";
+    main.scrollLeft = top.scrollLeft;
+    syncing.current = null;
+  }
 
   return (
     <div>
@@ -91,107 +167,143 @@ export function ProductsTable({
         ) : null}
       </SelectionBar>
 
-      <Table>
-        <THead>
-          <TH width="40px" align="center">
-            <RowCheckbox
-              checked={selection.allSelected}
-              indeterminate={selection.someSelected}
-              onChange={selection.toggleAll}
-              label="Обрати всі"
-            />
-          </TH>
-          <SortableTH columnKey="name" sort={sort} onSort={toggle}>
-            Виріб
-          </SortableTH>
-          <SortableTH columnKey="composition" sort={sort} onSort={toggle}>
-            Комплектація
-          </SortableTH>
-          {showPrices ? (
-            <SortableTH columnKey="price" sort={sort} onSort={toggle} align="right">
-              <span className="block">Розрахунковий прайс, ₴</span>
-              <span className="mt-0.5 flex justify-end gap-4 font-normal normal-case tracking-normal">
-                {priceTiers.map((qty) => (
-                  <span key={qty} className="tabular w-[76px] text-right">
-                    {qty} шт
-                  </span>
-                ))}
-              </span>
+      {showPrices && needsHScroll ? (
+        <div
+          ref={topScrollRef}
+          className="table-scroll-top"
+          onScroll={onTopScroll}
+          aria-hidden
+        >
+          <div className="table-scroll-top-spacer" style={{ width: scrollWidth }} />
+        </div>
+      ) : null}
+
+      <div
+        ref={mainScrollRef}
+        className="table-scroll max-h-[min(70vh,calc(100dvh-13rem))] max-w-full overflow-auto"
+        onScroll={onMainScroll}
+      >
+        <table className="erp-table w-full min-w-max border-collapse text-[13px]">
+          <THead>
+            <TH width={`${CHECK_COL_PX}px`} align="center" stickyLeft className="!border-r-0">
+              <RowCheckbox
+                checked={selection.allSelected}
+                indeterminate={selection.someSelected}
+                onChange={selection.toggleAll}
+                label="Обрати всі"
+              />
+            </TH>
+            <SortableTH
+              columnKey="name"
+              sort={sort}
+              onSort={toggle}
+              stickyLeft={NAME_COL_LEFT}
+              className="is-pinned-left-edge"
+            >
+              Виріб
             </SortableTH>
-          ) : null}
-          <SortableTH columnKey="status" sort={sort} onSort={toggle} stickyRight>
-            Стан
-          </SortableTH>
-        </THead>
-        <TBody>
-          {sorted.length === 0 ? (
-            <TableEmpty colSpan={colSpan} title={empty.title} description={empty.description} action={empty.action} />
-          ) : (
-            sorted.map((product) => {
-              const isSelected = selection.isSelected(product.id);
-              return (
-                <TR
-                  key={product.id}
-                  className={cn(
-                    isSelected && "bg-[var(--color-tint-slate)] hover:bg-[var(--color-tint-slate)]",
-                  )}
-                >
-                  <TD align="center">
-                    <RowCheckbox
-                      checked={isSelected}
-                      onChange={() => selection.toggleOne(product.id)}
-                      label={`Обрати ${product.nameUk}`}
-                    />
-                  </TD>
-                  <TD>
-                    <CellStack
-                      title={product.nameUk}
-                      subtitle={
-                        <>
-                          {product.isBaseModel ? (
-                            <span className="text-[var(--color-primary-700)]">Базова модель</span>
-                          ) : null}
-                          {product.isBaseModel && product.internalCode ? " · " : null}
-                          {product.internalCode ?? undefined}
-                        </>
-                      }
-                      href={`/products/${product.id}`}
-                      maxWidth="260px"
-                    />
-                  </TD>
-                  <TD nowrap className="text-[var(--color-text-secondary)]">
-                    {product.materialsCount} мат. · {product.operationsCount} оп. ·{" "}
-                    {product.decorationsCount} нанес.
-                  </TD>
-                  {showPrices ? (
-                    <TD nowrap>
-                      <div className="flex justify-end gap-4">
-                        {product.prices.map((price, index) => (
-                          <span
-                            key={`${product.id}-tier-${product.priceTiers[index] ?? index}`}
-                            className={cn(
-                              "tabular w-[76px] text-right",
-                              !product.ready && "text-[var(--color-text-tertiary)]",
-                              index === 1 && "font-medium",
-                            )}
-                          >
-                            {product.ready && price != null ? formatAmount(Number(price)) : "—"}
-                          </span>
-                        ))}
-                      </div>
+            {showPrices
+              ? priceTiers.map((qty, index) => (
+                  <SortableTH
+                    key={qty}
+                    columnKey={`price:${qty}`}
+                    sort={sort}
+                    onSort={toggle}
+                    align="right"
+                    width="88px"
+                    title={`Ціна ₴/шт при тиражі від ${qty} шт`}
+                    className={cn(index === 0 && "border-l border-[var(--color-divider)]")}
+                  >
+                    <span className="block normal-case tracking-normal">
+                      <span className="block text-[10px] font-normal text-[var(--color-text-quiet)]">
+                        від
+                      </span>
+                      <span className="tabular text-[12px] font-semibold text-[var(--color-text-secondary)]">
+                        {formatTierLabel(qty)}
+                      </span>
+                    </span>
+                  </SortableTH>
+                ))
+              : null}
+            <SortableTH columnKey="status" sort={sort} onSort={toggle} stickyRight>
+              Стан
+            </SortableTH>
+          </THead>
+          <TBody>
+            {sorted.length === 0 ? (
+              <TableEmpty
+                colSpan={colSpan}
+                title={empty.title}
+                description={empty.description}
+                action={empty.action}
+              />
+            ) : (
+              sorted.map((product) => {
+                const isSelected = selection.isSelected(product.id);
+                return (
+                  <TR key={product.id} selected={isSelected}>
+                    <TD align="center" stickyLeft className="!border-r-0">
+                      <RowCheckbox
+                        checked={isSelected}
+                        onChange={() => selection.toggleOne(product.id)}
+                        label={`Обрати ${product.nameUk}`}
+                      />
                     </TD>
-                  ) : null}
-                  <TD nowrap stickyRight>
-                    <StatusBadge dot tone={product.ready ? "success" : "warning"}>
-                      {product.ready ? "Готовий" : "Комплектація"}
-                    </StatusBadge>
-                  </TD>
-                </TR>
-              );
-            })
-          )}
-        </TBody>
-      </Table>
+                    <TD stickyLeft={NAME_COL_LEFT} className="is-pinned-left-edge">
+                      <CellStack
+                        title={product.nameUk}
+                        subtitle={
+                          <>
+                            {product.isBaseModel ? (
+                              <span className="text-[var(--color-primary-700)]">Базова модель</span>
+                            ) : null}
+                            {product.isBaseModel && product.internalCode ? " · " : null}
+                            {product.internalCode ?? undefined}
+                          </>
+                        }
+                        href={`/products/${product.id}`}
+                        maxWidth="240px"
+                      />
+                    </TD>
+                    {showPrices
+                      ? priceTiers.map((qty, index) => {
+                          const price = priceAtTier(product, qty);
+                          const emphasize = qty === highlightTier;
+                          return (
+                            <TD
+                              key={`${product.id}-${qty}`}
+                              numeric
+                              nowrap
+                              className={cn(
+                                index === 0 && "border-l border-[var(--color-divider)]",
+                                !product.ready && "text-[var(--color-text-tertiary)]",
+                                emphasize &&
+                                  product.ready &&
+                                  "font-medium text-[var(--color-text-primary)]",
+                              )}
+                              title={
+                                product.ready && price != null
+                                  ? `${formatTierLabel(qty)} · ${formatAmount(Number(price))} ₴/шт`
+                                  : undefined
+                              }
+                            >
+                              {product.ready && price != null ? formatAmount(Number(price)) : "—"}
+                            </TD>
+                          );
+                        })
+                      : null}
+                    <TD nowrap stickyRight>
+                      <StatusBadge dot tone={product.ready ? "success" : "warning"}>
+                        {product.ready ? "Готовий" : "Комплектація"}
+                      </StatusBadge>
+                    </TD>
+                  </TR>
+                );
+              })
+            )}
+          </TBody>
+        </table>
+      </div>
     </div>
   );
 }

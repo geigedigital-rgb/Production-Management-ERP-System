@@ -60,9 +60,18 @@ export function TableToolbar({
   );
 }
 
-export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
+export function Table({
+  children,
+  className,
+  scrollClassName,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  /** Extra classes on the overflow scroller (e.g. max-height for sticky thead). */
+  scrollClassName?: string;
+}) {
   return (
-    <div className="table-scroll max-w-full overflow-x-auto">
+    <div className={cn("table-scroll max-w-full overflow-x-auto", scrollClassName)}>
       <table className={cn("erp-table w-full border-collapse text-[13px]", className)}>
         {children}
       </table>
@@ -72,35 +81,44 @@ export function Table({ children, className }: { children: React.ReactNode; clas
 
 export function THead({ children }: { children: React.ReactNode }) {
   return (
-    <thead className="sticky top-0 z-[1] bg-[var(--color-surface)]">
+    <thead className="sticky top-0 z-[3] bg-[var(--color-surface)]">
       <tr className="border-b border-[var(--color-divider)]">{children}</tr>
     </thead>
   );
 }
 
 /**
- * `stickyRight` pins a column to the right edge while the rest of a wide table
- * scrolls horizontally — used for the "next action" column so it stays reachable.
+ * `stickyRight` / `stickyLeft` pin columns while the table scrolls horizontally.
+ * `stickyLeft` accepts `true` (left: 0) or a CSS offset for stacked pins (e.g. "40px").
  */
 export function TH({
   children,
   align = "left",
   width,
   stickyRight,
+  stickyLeft,
   className,
   title,
+  style,
 }: {
   children?: React.ReactNode;
   align?: "left" | "right" | "center";
   width?: string;
   stickyRight?: boolean;
+  stickyLeft?: boolean | string;
   className?: string;
   title?: string;
+  style?: React.CSSProperties;
 }) {
+  const leftOffset = stickyLeft === true ? 0 : stickyLeft || undefined;
   return (
     <th
       title={title}
-      style={width ? { width } : undefined}
+      style={{
+        ...(width ? { width } : null),
+        ...(leftOffset != null ? { left: leftOffset } : null),
+        ...style,
+      }}
       className={cn(
         "whitespace-nowrap px-3 py-2 text-[11px] font-medium tracking-[0.04em] text-[var(--color-text-quiet)] uppercase",
         title && "cursor-help",
@@ -108,7 +126,9 @@ export function TH({
         align === "center" && "text-center",
         align === "left" && "text-left",
         stickyRight &&
-          "is-pinned-right sticky right-0 z-[2] border-l border-[var(--color-divider)] bg-[var(--color-surface)]",
+          "is-pinned-right sticky right-0 z-[4] border-l border-[var(--color-divider)] bg-[var(--color-surface)]",
+        stickyLeft != null && stickyLeft !== false &&
+          "is-pinned-left sticky z-[4] border-r border-[var(--color-divider)] bg-[var(--color-surface)]",
         className,
       )}
     >
@@ -179,6 +199,7 @@ export function TR({
   children,
   className,
   muted,
+  selected,
   style,
   onClick,
   onDragOver,
@@ -188,6 +209,7 @@ export function TR({
   children: React.ReactNode;
   className?: string;
   muted?: boolean;
+  selected?: boolean;
   style?: React.CSSProperties;
   onClick?: () => void;
   onDragOver?: (event: React.DragEvent<HTMLTableRowElement>) => void;
@@ -196,6 +218,7 @@ export function TR({
 }) {
   return (
     <tr
+      data-selected={selected ? "true" : undefined}
       onClick={onClick}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -204,6 +227,7 @@ export function TR({
       className={cn(
         "group border-b border-[var(--color-divider)] transition-colors last:border-0 hover:bg-[var(--color-surface-hover)]",
         muted && "text-[var(--color-text-tertiary)]",
+        selected && "bg-[var(--color-tint-slate)] hover:bg-[var(--color-tint-slate)]",
         onClick && "cursor-pointer",
         className,
       )}
@@ -219,26 +243,35 @@ export function TD({
   numeric,
   nowrap,
   stickyRight,
+  stickyLeft,
   className,
   colSpan,
   title,
   onClick,
+  style,
 }: {
   children?: React.ReactNode;
   align?: "left" | "right" | "center";
   numeric?: boolean;
   nowrap?: boolean;
   stickyRight?: boolean;
+  stickyLeft?: boolean | string;
   className?: string;
   colSpan?: number;
   title?: string;
   onClick?: (event: React.MouseEvent<HTMLTableCellElement>) => void;
+  style?: React.CSSProperties;
 }) {
+  const leftOffset = stickyLeft === true ? 0 : stickyLeft || undefined;
   return (
     <td
       colSpan={colSpan}
       title={title}
       onClick={onClick}
+      style={{
+        ...(leftOffset != null ? { left: leftOffset } : null),
+        ...style,
+      }}
       className={cn(
         "px-3 py-2 align-middle text-[13px] font-normal text-[var(--color-text-secondary)]",
         align === "right" && "text-right",
@@ -246,7 +279,9 @@ export function TD({
         numeric && "tabular text-right whitespace-nowrap text-[var(--color-text-secondary)]",
         nowrap && "whitespace-nowrap",
         stickyRight &&
-          "is-pinned-right sticky right-0 border-l border-[var(--color-divider)] bg-[var(--color-surface)] transition-colors group-hover:bg-[var(--color-surface-hover)]",
+          "is-pinned-right sticky right-0 z-[1] border-l border-[var(--color-divider)] bg-[var(--color-surface)] transition-colors group-hover:bg-[var(--color-surface-hover)] group-data-[selected=true]:bg-[var(--color-tint-slate)]",
+        stickyLeft != null && stickyLeft !== false &&
+          "is-pinned-left sticky z-[1] border-r border-[var(--color-divider)] bg-[var(--color-surface)] transition-colors group-hover:bg-[var(--color-surface-hover)] group-data-[selected=true]:bg-[var(--color-tint-slate)]",
         className,
       )}
     >

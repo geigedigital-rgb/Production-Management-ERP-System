@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { FormGroup, Textarea } from "@/components/ui/Field";
 import { SidePanel } from "@/components/ui/Overlay";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
+import { useUnsavedCloseGuard } from "@/hooks/useUnsavedCloseGuard";
 import { IconPlus } from "@/components/ui/Icons";
 import { saveProposalAction } from "@/server/domains/orders/actions";
 import { formatMoneyUah } from "@/lib/utils";
@@ -99,6 +101,27 @@ export function SaveProposalPanel({
     setError(null);
   }, [initialKey]);
 
+  const dirty =
+    Boolean(proposalLabel.trim()) ||
+    Boolean(proposalComment.trim()) ||
+    Boolean(discountPercent.trim()) ||
+    manualOverrides.size > 0;
+
+  const resetAndClose = useCallback(() => {
+    setOpen(false);
+    setManualOverrides(new Map());
+    setDiscountPercent("");
+    setProposalLabel("");
+    setProposalComment("");
+    setError(null);
+  }, []);
+
+  const { leaveOpen, requestClose, stay, discard } = useUnsavedCloseGuard({
+    dirty,
+    pending,
+    onDiscard: resetAndClose,
+  });
+
   const lines = useMemo(() => {
     const discount = parseDiscount(discountPercent);
     return catalogLines.map((catalog) => {
@@ -161,7 +184,7 @@ export function SaveProposalPanel({
         setError("Не вдалося зберегти пропозицію. Перевірте склад усіх позицій.");
         return;
       }
-      setOpen(false);
+      resetAndClose();
       router.refresh();
     });
   }
@@ -180,14 +203,14 @@ export function SaveProposalPanel({
 
       <SidePanel
         open={open}
-        onClose={() => (pending ? undefined : setOpen(false))}
+        onClose={requestClose}
         title="Зберегти пропозицію для клієнта"
         description="Комерційна ціна з прайсу (+ брендування). Собівартість лишається для внутрішнього планування."
         width="2xl"
         footer={
           <>
             {error ? <span className="type-caption mr-auto text-[var(--color-danger-text)]">{error}</span> : null}
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+            <Button variant="ghost" onClick={requestClose} disabled={pending}>
               Скасувати
             </Button>
             <Button onClick={submit} disabled={pending || lines.length === 0}>
@@ -287,6 +310,12 @@ export function SaveProposalPanel({
           </FormGroup>
         </div>
       </SidePanel>
+      <UnsavedChangesDialog
+        open={leaveOpen}
+        pending={pending}
+        onStay={stay}
+        onDiscard={discard}
+      />
     </>
   );
 }

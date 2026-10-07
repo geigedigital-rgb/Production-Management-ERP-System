@@ -15,7 +15,8 @@ import {
 import { draftLineFromItem } from "@/lib/order-item-commercial";
 import { Breadcrumbs, QuickAction, QuickActions } from "@/components/ui/ObjectHeader";
 import { Banner } from "@/components/ui/Banner";
-import { ViewTabs } from "@/components/ui/Tabs";
+import { OrderWorkspaceTabs } from "@/components/orders/OrderWorkspaceTabs";
+import { OrderUnsavedProvider } from "@/components/orders/OrderUnsavedContext";
 import {
   OrderChevronPipeline,
   OrderHeaderFacts,
@@ -36,6 +37,7 @@ import { formatDateUk, formatMoneyUah, formatUnit } from "@/lib/utils";
 import { materialOptionDescription, materialSupplierNames } from "@/lib/material-catalog-options";
 import { formatSizeRun, lineCostOnSizes, uniqueBomCount } from "@/lib/size-bom";
 import { fabricMetersNeeded } from "@/lib/fabric-pricing";
+import { materialCoeffsBySize } from "@/lib/size-coeffs";
 import { deliveryRateUsdPerKg } from "@/lib/fabric-delivery-types";
 import {
   accessHas,
@@ -241,6 +243,7 @@ export default async function OrderDetailPage({
         },
         siblings,
         item.sizes,
+        pricing.sizeRules,
       ),
       sizeCode: row.sizeCode ?? null,
       groupKey: row.materialId ?? row.nameSnapshot,
@@ -338,6 +341,10 @@ export default async function OrderDetailPage({
         wastePercent: Number(row.wastePercent),
         quantitiesBySize,
         sizeCode: row.sizeCode,
+        sizeMaterialCoeffs: materialCoeffsBySize(
+          Object.keys(quantitiesBySize),
+          pricing.sizeRules,
+        ),
       });
       const metersPerKg =
         row.material?.metersPerKg != null ? Number(row.material.metersPerKg) : null;
@@ -445,7 +452,14 @@ export default async function OrderDetailPage({
     `/orders/${order.id}?tab=configuration${
       order.items.length > 1 ? `&item=${sizesFocusItemId}` : ""
     }`;
-  const needsSizeAttention = order.status === "APPROVED" && !orderSizesReady;
+  // Attention only after approve — size layout is the gate before production.
+  const needsSizeAttention =
+    (order.status === "APPROVED" || hasApprovedProposal) && !orderSizesReady;
+  /** Size grid UI only after approve — until then managers keep orientative tirage. */
+  const sizeBreakdownUnlocked =
+    order.status === "APPROVED" ||
+    order.status === "HANDED_TO_PRODUCTION" ||
+    hasApprovedProposal;
   const readiness: ReadinessCheck[] = [
     {
       key: "version",
@@ -608,7 +622,8 @@ export default async function OrderDetailPage({
           : row.versions[0]
             ? `v${row.versions[0].versionNumber}`
             : "немає",
-      unitPrice: canViewCosts && row.totalQuantity > 0 ? draft.sellingPricePerUnit : null,
+      unitPrice: row.totalQuantity > 0 ? draft.sellingPricePerUnit : null,
+      lineTotal: row.totalQuantity > 0 ? draft.totalSellingValue : null,
       need: itemNeed(
         {
           id: row.id,
@@ -621,6 +636,7 @@ export default async function OrderDetailPage({
           hasApprovedVersion: row.versions.some((version) => version.isApproved),
           specificationLocked: Boolean(row.specification),
           inLatestProposal: latestProposal?.lines.some((line) => line.orderItemId === row.id) ?? false,
+          needsSizeBreakdown: itemSizeFlags.find((entry) => entry.id === row.id)?.needsSizeBreakdown,
         },
         orderFlags,
       ),
@@ -765,6 +781,7 @@ export default async function OrderDetailPage({
   ) : null;
 
   return (
+    <OrderUnsavedProvider>
     <div className="space-y-4">
       <Breadcrumbs items={[{ label: "Замовлення", href: "/orders" }, { label: order.number }]} />
 
@@ -890,7 +907,7 @@ export default async function OrderDetailPage({
         handedOver={order.status === "HANDED_TO_PRODUCTION" || order.status === "CLOSED"}
         rows={itemRows}
         catalog={catalog}
-        showPrices={canViewCosts}
+        showPrices
       />
 
       <OrderWorkspacePanel
@@ -906,7 +923,7 @@ export default async function OrderDetailPage({
                 </span>
               </p>
             </div>
-            <ViewTabs items={tabs} active={activeTab} className="border-b-0" />
+            <OrderWorkspaceTabs items={tabs} active={activeTab} className="border-b-0" />
           </div>
         }
       >
@@ -924,6 +941,7 @@ export default async function OrderDetailPage({
               </Banner>
             ) : null}
             <ConfigurationTab
+            key={item.id}
             orderId={order.id}
             itemId={item.id}
             locked={compositionLocked}
@@ -937,8 +955,16 @@ export default async function OrderDetailPage({
               sizeNameUk: size.sizeNameUk,
               quantity: size.quantity,
             }))}
-            needsSizeBreakdown={activeItemNeedsSizeBreakdown}
+            needsSizeBreakdown={
+              activeItemNeedsSizeBreakdown && sizeBreakdownUnlocked
+            }
             sizeCharts={sizeCharts}
+            preferredProductSizes={
+              item.product?.sizes?.map((row) => ({
+                code: row.size.code,
+                nameUk: row.size.nameUk,
+              })) ?? []
+            }
             materials={materialRows}
             operations={operationRows}
             decorations={decorationRows}
@@ -971,11 +997,11 @@ export default async function OrderDetailPage({
             corridorHint={
               action.focusItemId && action.focusItemId !== item.id
                 ? null
-                : action.key === "compose"
+                : action.key === "compose" ||
+                    action.key === "sizes" ||
+                    action.key === "saveVersion"
                   ? { title: action.title, detail: action.detail }
-                  : action.key === "saveVersion"
-                    ? { title: action.title, detail: action.detail }
-                    : null
+                  : null
             }
             />
           </div>
@@ -1000,6 +1026,7 @@ export default async function OrderDetailPage({
                   sizeCode: size.sizeCode,
                   quantity: size.quantity,
                 }))}
+                sizeRules={pricing.sizeRules ?? null}
                 pricingMethod={pricing.pricingMethod}
                 targetRatePercent={pricing.targetRatePercent}
                 minimumMarginPercent={pricing.minimumMarginPercent}
@@ -1014,11 +1041,16 @@ export default async function OrderDetailPage({
                 corridorHint={
                   action.focusItemId && action.focusItemId !== item.id
                     ? null
-                    : action.key === "compose" || action.key === "saveVersion"
+                    : action.key === "compose" ||
+                        action.key === "sizes" ||
+                        action.key === "saveVersion"
                       ? {
                           title: action.title,
                           detail: action.detail,
-                          href: action.key === "saveVersion" ? nextHref : tabHref("configuration"),
+                          href:
+                            action.key === "saveVersion"
+                              ? nextHref
+                              : tabHref("configuration"),
                           label: action.label,
                         }
                       : null
@@ -1079,5 +1111,6 @@ export default async function OrderDetailPage({
         empty="Подій ще немає — зʼявляться після збереження пропозицій і змін статусу"
       />
     </div>
+    </OrderUnsavedProvider>
   );
 }

@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/ui/Banner";
 import { SidePanel } from "@/components/ui/Overlay";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
+import { useUnsavedCloseGuard } from "@/hooks/useUnsavedCloseGuard";
 import { SizeRun } from "@/components/orders/SizeRun";
 import { ProductCatalogPanel, type CatalogProduct } from "@/components/orders/ProductCatalogPanel";
 import { addOrderItemAction } from "@/server/domains/orders/actions";
@@ -54,13 +56,20 @@ export function AddOrderItemPanel({
       ? [{ code: "ONE", nameUk: "Без розміру" }]
       : [];
   const total = sizes.reduce((sum, size) => sum + (quantities[size.code] || 0), 0);
+  const dirty = Boolean(productId) || total > 0;
 
-  function close() {
+  const reset = useCallback(() => {
     setOpen(false);
     setProductId("");
     setQuantities({});
     setError(null);
-  }
+  }, []);
+
+  const { leaveOpen, requestClose, stay, discard } = useUnsavedCloseGuard({
+    dirty,
+    pending,
+    onDiscard: reset,
+  });
 
   function selectProduct(id: string) {
     setProductId(id);
@@ -93,7 +102,7 @@ export function AddOrderItemPanel({
         );
         return;
       }
-      close();
+      reset();
       router.push(`/orders/${orderId}?tab=configuration&item=${result.itemId}`);
       router.refresh();
     });
@@ -101,18 +110,25 @@ export function AddOrderItemPanel({
 
   return (
     <>
-      <Button type="button" size="sm" onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          setError(null);
+          setOpen(true);
+        }}
+      >
         Додати виріб
       </Button>
       <SidePanel
         open={open}
-        onClose={close}
+        onClose={requestClose}
         title="Додати виріб у замовлення"
         description="Оберіть еталон з каталогу, вкажіть тираж — склад скопіюється в цю позицію. Далі його можна правити в таблиці замовлення."
         width="lg"
         footer={
           <>
-            <Button type="button" variant="ghost" onClick={close} disabled={pending}>
+            <Button type="button" variant="ghost" onClick={requestClose} disabled={pending}>
               Скасувати
             </Button>
             <Button type="button" onClick={submit} disabled={!selected || total <= 0 || pending}>
@@ -150,6 +166,12 @@ export function AddOrderItemPanel({
           </div>
         </div>
       </SidePanel>
+      <UnsavedChangesDialog
+        open={leaveOpen}
+        pending={pending}
+        onStay={stay}
+        onDiscard={discard}
+      />
     </>
   );
 }

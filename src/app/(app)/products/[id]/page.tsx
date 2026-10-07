@@ -312,7 +312,12 @@ export default async function ProductDetailPage({
       })
     : [];
 
-  const costCalc = buildCalcFromProduct(product, ECONOMICS_PREVIEW_QTY, pricingWithFixed);
+  // Product card = base norms, no size markups (those apply only in orders).
+  const costCalc = buildCalcFromProduct(product, ECONOMICS_PREVIEW_QTY, {
+    ...pricingWithFixed,
+    quantityAwareMaterialPrices: true,
+    sizeMode: "standard",
+  });
   const economicsSewing = resolveSewingPerUnitFromOperations(
     product.operations.map((row) => ({
       nameUk: row.operation.nameUk,

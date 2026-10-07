@@ -22,8 +22,8 @@ import { CopySizeSpec, SizeScopeTabs } from "@/components/catalog/SizeScopeTabs"
 import { SizeBomScopeHint } from "@/components/catalog/SizeBomScopeHint";
 import { OversizeCoeffFields } from "@/components/catalog/OversizeCoeffFields";
 import {
-  effectiveOversizeConsumption,
   isOversizeCode,
+  OVERSIZE_RANGE_LABEL,
   resolveOversizeUplift,
   type SizeCoeffRule,
 } from "@/lib/size-coeffs";
@@ -534,17 +534,11 @@ export function ProductSizeBom({
               visibleMaterials.map((row) => {
                 const hasSizeNorm =
                   sizeScope !== ALL_SIZES && row.sizeConsumption[sizeScope] != null;
-                const baseConsumption =
+                // Product BOM shows base norms only — size markups apply in orders.
+                const displayConsumption =
                   sizeScope === ALL_SIZES
                     ? row.consumption
                     : consumptionForSize(row.consumption, row.sizeConsumption, sizeScope);
-                const displayConsumption =
-                  scopeIsOversize && !hasSizeNorm
-                    ? effectiveOversizeConsumption(
-                        row.consumption,
-                        oversizeUplift.materialCoeff,
-                      )
-                    : baseConsumption;
                 const waste =
                   sizeScope === ALL_SIZES
                     ? row.waste
@@ -555,7 +549,6 @@ export function ProductSizeBom({
                     Object.keys(row.sizeWaste ?? {}).length > 0);
                 const unitCost =
                   displayConsumption * (1 + waste / 100) * row.price;
-                const autoFromBase = scopeIsOversize && !hasSizeNorm;
                 const specHint = materialOptionDescription(
                   row.densityGsm,
                   row.composition,
@@ -635,10 +628,10 @@ export function ProductSizeBom({
                                   ? row.sizeCodes.join(" · ")
                                   : mixed
                                     ? "Базова норма; по розмірах є перевизначення"
-                                    : autoFromBase
-                                      ? `авто +${materialPct}% від бази ${row.consumption}`
-                                      : scopeIsOversize && hasSizeNorm
-                                        ? "своя норма для розміру"
+                                    : scopeIsOversize && hasSizeNorm
+                                      ? "своя норма для розміру"
+                                      : scopeIsOversize
+                                        ? `база · націнка ${OVERSIZE_RANGE_LABEL} лише в замовленні`
                                         : null,
                               ]
                                 .filter(Boolean)
@@ -685,8 +678,8 @@ export function ProductSizeBom({
                               title={
                                 mixed && sizeScope === ALL_SIZES
                                   ? "Редагує базову норму. Перевизначення по розмірах лишаються."
-                                  : autoFromBase
-                                    ? `Авто з бази × +${materialPct}%. Змініть — збережеться як своя норма розміру.`
+                                  : scopeIsOversize && !hasSizeNorm
+                                    ? `Базова норма. Націнка +${materialPct}% застосовується лише в замовленні, якщо є ${OVERSIZE_RANGE_LABEL}.`
                                     : undefined
                               }
                               onBlur={(event) => {

@@ -1,6 +1,14 @@
 "use client";
 
-import { useId, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useId,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/Input";
 import { Select, FormGroup } from "@/components/ui/Field";
@@ -20,6 +28,7 @@ import {
   IconSpec,
 } from "@/components/ui/Icons";
 import { MaterialTagPicker } from "@/components/catalog/MaterialTagPicker";
+import { MaterialReferenceLinks } from "@/components/catalog/MaterialReferenceLinks";
 import {
   normalizeMaterialTagColor,
   type MaterialTagColor,
@@ -31,6 +40,7 @@ import {
   inferFabricTierMode,
   type FabricTierMode,
 } from "@/components/catalog/FabricPurchaseModes";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { PanelTabs } from "@/components/ui/Tabs";
 import {
   createMaterialAction,
@@ -121,6 +131,8 @@ export type MaterialFormDefaults = {
   supplierCode: string;
   colorOrAttribute: string;
   note: string;
+  referenceUrls?: string[];
+  updatedAt?: string | null;
   tagColor?: string | null;
   densityGsm?: string;
   composition?: string;
@@ -187,6 +199,7 @@ function MaterialFields({
   managePricingSeparately = false,
   wizard = false,
   onWizardMeta,
+  onDirtyChange,
 }: {
   units: UnitOption[];
   defaults?: MaterialFormDefaults;
@@ -196,6 +209,7 @@ function MaterialFields({
   managePricingSeparately?: boolean;
   wizard?: boolean;
   onWizardMeta?: (meta: MaterialWizardMeta) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const initialKind = resolveFabricKindSelect(defaults?.fabricKindUk);
   const [catalogCompositions, setCatalogCompositions] = useState<string[]>([
@@ -283,9 +297,14 @@ function MaterialFields({
   const [densityGsm, setDensityGsm] = useState(defaults?.densityGsm ?? "");
   const [widthCm, setWidthCm] = useState(defaults?.widthCm ?? "");
   const [metersPerKg, setMetersPerKg] = useState(numStr(defaults?.metersPerKg));
-  const [metersPerKgManual, setMetersPerKgManual] = useState(
-    () => defaults?.metersPerKg != null && Number(defaults.metersPerKg) > 0,
-  );
+  /** Manual only when saved м.п./кг differs from density×width — else edit keeps auto-calc. */
+  const [metersPerKgManual, setMetersPerKgManual] = useState(() => {
+    const saved = defaults?.metersPerKg;
+    if (saved == null || !(Number(saved) > 0)) return false;
+    const auto = metersPerKgFromDensityWidth(defaults?.densityGsm, defaults?.widthCm);
+    if (auto == null) return true;
+    return Math.abs(Number(saved) - auto) > 0.05;
+  });
   const [priceKgUsd, setPriceKgUsd] = useState(numStr(defaults?.priceKgUsd));
   const [priceKgUsdVat, setPriceKgUsdVat] = useState(numStr(defaults?.priceKgUsdVat));
   const [priceMeterNoVat, setPriceMeterNoVat] = useState(numStr(defaults?.priceMeterUahNoVat));
@@ -310,7 +329,16 @@ function MaterialFields({
   );
   const [wholesaleNote, setWholesaleNote] = useState(defaults?.wholesaleNote ?? "");
   const [note, setNote] = useState(defaults?.note ?? "");
+  const [referenceUrls, setReferenceUrls] = useState<string[]>(
+    () => defaults?.referenceUrls ?? [],
+  );
   const [costOverride, setCostOverride] = useState(defaults?.costVatOverride ?? "");
+  const dirtyNotified = useRef(false);
+  function markDirty() {
+    if (dirtyNotified.current) return;
+    dirtyNotified.current = true;
+    onDirtyChange?.(true);
+  }
   const [deliveryType, setDeliveryType] = useState<FabricDeliveryTypeCode>(
     normalizeFabricDeliveryType(defaults?.deliveryType),
   );
@@ -435,6 +463,18 @@ function MaterialFields({
     if (!force && metersPerKgManual && metersPerKg.trim()) return;
     applyMetersPerKg(String(auto), { fromAuto: true });
   }
+
+  // Edit/create: re-apply formula when density/width or kg-mode flips (create already did this onChange).
+  useEffect(() => {
+    if (autoMetersPerKg == null) return;
+    if (metersPerKgAutoOnly) {
+      applyMetersPerKg(String(autoMetersPerKg), { fromAuto: true });
+      return;
+    }
+    if (metersPerKgManual && metersPerKg.trim()) return;
+    applyMetersPerKg(String(autoMetersPerKg), { fromAuto: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drive from formula inputs / kg mode only
+  }, [autoMetersPerKg, metersPerKgAutoOnly]);
 
   function applyM2Prices(next: {
     priceM2NoVat?: string;
@@ -679,7 +719,7 @@ function MaterialFields({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" onInput={markDirty} onChange={markDirty}>
       {defaults ? <input type="hidden" name="id" value={defaults.id} /> : null}
       {managePricingSeparately ? (
         <input type="hidden" name="pricingManagedSeparately" value="1" />
@@ -747,7 +787,13 @@ function MaterialFields({
           label="Од. виміру"
           required
           value={unitOfMeasureId}
-          onChange={(event) => setUnitOfMeasureId(event.target.value)}
+          onChange={(event) => {
+            setUnitOfMeasureId(event.target.value);
+            const nextUnit = units.find((unit) => unit.id === event.target.value) ?? units[0];
+            if (type === "FABRIC" && resolveFabricUnitMode(resolveUnitCode(nextUnit)) === "kg") {
+              syncMetersPerKgFromDensity(densityGsm, widthCm, true);
+            }
+          }}
           hint={type === "FABRIC" ? fabricUnitTip(fabricUnitMode) : undefined}
         >
           {unitOptions.map((unit) => (
@@ -1552,6 +1598,13 @@ function MaterialFields({
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />
+        <MaterialReferenceLinks
+          value={referenceUrls}
+          onChange={(next) => {
+            setReferenceUrls(next);
+            markDirty();
+          }}
+        />
       </FormGroup>
       </div>
     </div>
@@ -1581,6 +1634,19 @@ export function MaterialCreatePanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [wizardMeta, setWizardMeta] = useState<MaterialWizardMeta | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+
+  function requestClose() {
+    if (pending) return;
+    if (dirty) {
+      setLeaveOpen(true);
+      return;
+    }
+    setOpen(false);
+    setWizardMeta(null);
+    setDirty(false);
+  }
 
   function submit(formData: FormData) {
     setError(null);
@@ -1592,6 +1658,7 @@ export function MaterialCreatePanel({
       }
       setOpen(false);
       setWizardMeta(null);
+      setDirty(false);
       onCreated?.(result);
       router.refresh();
     });
@@ -1605,6 +1672,7 @@ export function MaterialCreatePanel({
         onClick={() => {
           setWizardMeta(null);
           setError(null);
+          setDirty(false);
           setOpen(true);
         }}
       >
@@ -1612,11 +1680,7 @@ export function MaterialCreatePanel({
       </Button>
       <SidePanel
         open={open}
-        onClose={() => {
-          if (pending) return;
-          setOpen(false);
-          setWizardMeta(null);
-        }}
+        onClose={requestClose}
         title="Новий матеріал"
         description="Крок за кроком · * обовʼязкові поля"
         width="lg"
@@ -1632,15 +1696,7 @@ export function MaterialCreatePanel({
                 ← Назад
               </Button>
             ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={pending}
-                onClick={() => {
-                  setOpen(false);
-                  setWizardMeta(null);
-                }}
-              >
+              <Button type="button" variant="ghost" disabled={pending} onClick={requestClose}>
                 Скасувати
               </Button>
             )}
@@ -1679,9 +1735,21 @@ export function MaterialCreatePanel({
             suppliers={suppliers}
             wizard
             onWizardMeta={setWizardMeta}
+            onDirtyChange={setDirty}
           />
         </form>
       </SidePanel>
+      <UnsavedChangesDialog
+        open={leaveOpen}
+        pending={pending}
+        onStay={() => setLeaveOpen(false)}
+        onDiscard={() => {
+          setLeaveOpen(false);
+          setOpen(false);
+          setWizardMeta(null);
+          setDirty(false);
+        }}
+      />
     </>
   );
 }
@@ -1691,11 +1759,14 @@ export function MaterialEditPanel({
   units,
   suppliers = [],
   fabricGlobals = DEFAULT_FABRIC_PRICING_GLOBALS,
+  trigger,
 }: {
   material: MaterialFormDefaults;
   units: UnitOption[];
   suppliers?: string[];
   fabricGlobals?: FabricPricingGlobals;
+  /** Custom open control (e.g. clickable name). Default: «Змінити» button. */
+  trigger?: (api: { open: () => void }) => ReactNode;
 }) {
   const router = useRouter();
   const formId = useId();
@@ -1706,10 +1777,13 @@ export function MaterialEditPanel({
   const [loaded, setLoaded] = useState<MaterialFormDefaults | null>(null);
   const [globals, setGlobals] = useState(fabricGlobals);
   const [tab, setTab] = useState<"main" | "suppliers">("main");
+  const [dirty, setDirty] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
 
   async function openEditor() {
     setOpen(true);
     setError(null);
+    setDirty(false);
     setLoading(true);
     setLoaded(null);
     setTab("main");
@@ -1728,6 +1802,16 @@ export function MaterialEditPanel({
     }
   }
 
+  function requestClose() {
+    if (pending || loading) return;
+    if (dirty) {
+      setLeaveOpen(true);
+      return;
+    }
+    setOpen(false);
+    setDirty(false);
+  }
+
   function submit(formData: FormData) {
     setError(null);
     startTransition(async () => {
@@ -1737,6 +1821,7 @@ export function MaterialEditPanel({
         return;
       }
       setOpen(false);
+      setDirty(false);
       router.refresh();
     });
   }
@@ -1755,25 +1840,22 @@ export function MaterialEditPanel({
 
   return (
     <>
-      <Button variant="secondary" size="sm" onClick={() => void openEditor()}>
-        Змінити
-      </Button>
+      {trigger ? (
+        trigger({ open: () => void openEditor() })
+      ) : (
+        <Button variant="secondary" size="sm" onClick={() => void openEditor()}>
+          Змінити
+        </Button>
+      )}
 
       <SidePanel
         open={open}
-        onClose={() => {
-          if (pending || loading) return;
-          setOpen(false);
-        }}
+        onClose={requestClose}
         title="Змінити матеріал"
         width="lg"
         footer={
           <>
-            <Button
-              variant="ghost"
-              onClick={() => setOpen(false)}
-              disabled={pending || loading}
-            >
+            <Button variant="ghost" onClick={requestClose} disabled={pending || loading}>
               Скасувати
             </Button>
             <Button type="submit" form={formId} loading={pending} disabled={pending || loading || !loaded}>
@@ -1788,6 +1870,20 @@ export function MaterialEditPanel({
             <SidePanelSkeleton sections={4} />
           ) : (
             <>
+              {loaded.updatedAt ? (
+                <p className="type-caption">
+                  Останнє редагування:{" "}
+                  <span className="tabular text-[var(--color-text-secondary)]">
+                    {new Date(loaded.updatedAt).toLocaleString("uk-UA", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </p>
+              ) : null}
               <PanelTabs
                 items={tabItems}
                 active={tab}
@@ -1802,6 +1898,7 @@ export function MaterialEditPanel({
                   fabricGlobals={globals}
                   suppliers={suppliers}
                   managePricingSeparately
+                  onDirtyChange={setDirty}
                 />
               </div>
 
@@ -1842,6 +1939,16 @@ export function MaterialEditPanel({
           )}
         </form>
       </SidePanel>
+      <UnsavedChangesDialog
+        open={leaveOpen}
+        pending={pending}
+        onStay={() => setLeaveOpen(false)}
+        onDiscard={() => {
+          setLeaveOpen(false);
+          setOpen(false);
+          setDirty(false);
+        }}
+      />
     </>
   );
 }
