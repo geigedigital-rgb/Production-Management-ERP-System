@@ -7,7 +7,7 @@ import { Banner } from "@/components/ui/Banner";
 import { Select } from "@/components/ui/Field";
 import { StatusBadge } from "@/components/ui/Page";
 import { IconDecoration, IconPlus, IconTrash } from "@/components/ui/Icons";
-import { formatDateUk } from "@/lib/utils";
+import { cn, formatDateUk } from "@/lib/utils";
 import { deleteOrderFileAction, uploadOrderFileAction } from "@/server/domains/orders/actions";
 import {
   itemNeedsArtworkFile,
@@ -60,6 +60,10 @@ function uploadErrorMessage(error: string | undefined) {
   }
 }
 
+function hasFileDrag(event: React.DragEvent) {
+  return Array.from(event.dataTransfer.types).includes("Files");
+}
+
 export function OrderAttachments({
   orderId,
   files,
@@ -76,6 +80,8 @@ export function OrderAttachments({
   const generalInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [artworkDragging, setArtworkDragging] = useState(false);
+  const [generalDragging, setGeneralDragging] = useState(false);
   const decorated = useMemo(
     () => artworkItems.filter((item) => item.decorationsCount > 0),
     [artworkItems],
@@ -91,22 +97,36 @@ export function OrderAttachments({
   const hasLinkedFiles = files.some((file) => file.orderItemId);
   const unlinkedFiles = files.filter((file) => !file.orderItemId);
   const atLimit = files.length >= ORDER_FILE_MAX_COUNT;
+  const canUpload = !locked && !atLimit;
 
-  function upload(file: File | null, purpose: "artwork" | "general") {
-    if (!file) return;
-    setError(null);
-    const formData = new FormData();
-    formData.set("orderId", orderId);
-    formData.set("file", file);
-    formData.set("purpose", purpose);
-    if (purpose === "artwork" && selectedArtworkItemId) {
-      formData.set("orderItemId", selectedArtworkItemId);
+  function uploadFiles(fileList: FileList | File[] | null, purpose: "artwork" | "general") {
+    const selected = fileList ? Array.from(fileList) : [];
+    if (selected.length === 0) return;
+    if (purpose === "artwork" && decorated.length > 1 && !selectedArtworkItemId) {
+      setError(uploadErrorMessage("ITEM_REQUIRED"));
+      return;
     }
+    setError(null);
     startTransition(async () => {
-      const result = await uploadOrderFileAction(formData);
-      if (!result.ok) {
-        setError(uploadErrorMessage(result.error));
-        return;
+      let remaining = ORDER_FILE_MAX_COUNT - files.length;
+      for (const file of selected) {
+        if (remaining <= 0) {
+          setError(uploadErrorMessage("TOO_MANY"));
+          break;
+        }
+        const formData = new FormData();
+        formData.set("orderId", orderId);
+        formData.set("file", file);
+        formData.set("purpose", purpose);
+        if (purpose === "artwork" && selectedArtworkItemId) {
+          formData.set("orderItemId", selectedArtworkItemId);
+        }
+        const result = await uploadOrderFileAction(formData);
+        if (!result.ok) {
+          setError(uploadErrorMessage(result.error));
+          break;
+        }
+        remaining -= 1;
       }
       if (artworkInputRef.current) artworkInputRef.current.value = "";
       if (generalInputRef.current) generalInputRef.current.value = "";
@@ -133,6 +153,45 @@ export function OrderAttachments({
       router.refresh();
     });
   }
+
+  function makeDropHandlers(
+    purpose: "artwork" | "general",
+    setDragging: (value: boolean) => void,
+  ) {
+    return {
+      onDragEnter(event: React.DragEvent) {
+        if (!canUpload || !hasFileDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDragging(true);
+      },
+      onDragOver(event: React.DragEvent) {
+        if (!canUpload || !hasFileDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+        setDragging(true);
+      },
+      onDragLeave(event: React.DragEvent) {
+        if (!canUpload) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const next = event.relatedTarget as Node | null;
+        if (next && event.currentTarget.contains(next)) return;
+        setDragging(false);
+      },
+      onDrop(event: React.DragEvent) {
+        if (!canUpload) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDragging(false);
+        uploadFiles(event.dataTransfer.files, purpose);
+      },
+    };
+  }
+
+  const generalList =
+    decorated.length === 0 ? files : hasLinkedFiles ? unlinkedFiles : [];
 
   return (
     <div className="space-y-4">
@@ -209,45 +268,59 @@ export function OrderAttachments({
             })}
           </ul>
 
-          {locked || atLimit ? null : (
-            <div className="flex flex-wrap items-end gap-2 border-t border-[var(--color-border)] px-3.5 py-3">
-              {decorated.length > 1 ? (
-                <div className="min-w-[12rem] flex-1">
-                  <Select
-                    label="Виріб для макета"
-                    value={selectedArtworkItemId}
-                    onChange={(event) => setArtworkItemId(event.target.value)}
-                    options={[
-                      { value: "", label: "Оберіть позицію…" },
-                      ...decorated.map((item) => ({
-                        value: item.id,
-                        label: item.nameUk,
-                      })),
-                    ]}
-                  />
-                </div>
-              ) : null}
-              <input
-                ref={artworkInputRef}
-                type="file"
-                className="sr-only"
-                accept={ORDER_FILE_ACCEPT}
-                onChange={(event) => {
-                  upload(event.target.files?.[0] ?? null, "artwork");
-                }}
-              />
-              <Button
-                type="button"
-                size="sm"
-                loading={pending}
-                disabled={pending || (decorated.length > 1 && !selectedArtworkItemId)}
-                onClick={() => artworkInputRef.current?.click()}
-              >
-                <IconPlus size={14} />
-                {pending ? "Завантаження…" : "Додати макет"}
-              </Button>
+          {canUpload ? (
+            <div
+              className={cn(
+                "border-t border-[var(--color-border)] px-3.5 py-3 transition-colors",
+                artworkDragging && "bg-[var(--color-primary-50)]",
+              )}
+              {...makeDropHandlers("artwork", setArtworkDragging)}
+            >
+              <div className="flex flex-wrap items-end gap-2">
+                {decorated.length > 1 ? (
+                  <div className="min-w-[12rem] flex-1">
+                    <Select
+                      label="Виріб для макета"
+                      value={selectedArtworkItemId}
+                      onChange={(event) => setArtworkItemId(event.target.value)}
+                      options={[
+                        { value: "", label: "Оберіть позицію…" },
+                        ...decorated.map((item) => ({
+                          value: item.id,
+                          label: item.nameUk,
+                        })),
+                      ]}
+                    />
+                  </div>
+                ) : null}
+                <input
+                  ref={artworkInputRef}
+                  type="file"
+                  className="sr-only"
+                  accept={ORDER_FILE_ACCEPT}
+                  multiple
+                  onChange={(event) => {
+                    uploadFiles(event.target.files, "artwork");
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  loading={pending}
+                  disabled={pending || (decorated.length > 1 && !selectedArtworkItemId)}
+                  onClick={() => artworkInputRef.current?.click()}
+                >
+                  <IconPlus size={14} />
+                  {pending ? "Завантаження…" : "Додати макет"}
+                </Button>
+              </div>
+              <p className="type-caption mt-2">
+                {artworkDragging
+                  ? "Відпустіть файл, щоб завантажити макет"
+                  : "Або перетягніть файл макета в цю зону"}
+              </p>
             </div>
-          )}
+          ) : null}
         </section>
       ) : null}
 
@@ -263,78 +336,79 @@ export function OrderAttachments({
                 : `Макети, лекала, підтвердження · до ${ORDER_FILE_MAX_MB} МБ · до ${ORDER_FILE_MAX_COUNT} файлів`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="type-caption tabular">
-              {files.length}/{ORDER_FILE_MAX_COUNT}
-            </span>
-            {locked || atLimit ? null : (
-              <>
-                <input
-                  ref={generalInputRef}
-                  type="file"
-                  className="sr-only"
-                  accept={ORDER_FILE_ACCEPT}
-                  onChange={(event) => {
-                    upload(event.target.files?.[0] ?? null, "general");
-                  }}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  loading={pending}
-                  disabled={pending}
-                  onClick={() => generalInputRef.current?.click()}
-                >
-                  <IconPlus size={14} />
-                  {pending ? "Завантаження…" : "Додати файл"}
-                </Button>
-              </>
-            )}
-          </div>
+          <span className="type-caption tabular">
+            {files.length}/{ORDER_FILE_MAX_COUNT}
+          </span>
         </div>
 
-        {(() => {
-          const list =
-            decorated.length === 0
-              ? files
-              : hasLinkedFiles
-                ? unlinkedFiles
-                : [];
-          if (list.length === 0) {
-            return (
-              <div className="px-4 py-6 text-center">
-                <p className="text-[14px] font-semibold">
-                  {decorated.length > 0 ? "Додаткових файлів немає" : "Файлів ще немає"}
-                </p>
-                {decorated.length === 0 ? (
-                  <p className="type-body-secondary mx-auto mt-0.5 max-w-md">
-                    Якщо зʼявиться нанесення — тут буде блок макетів і жовтий маркер на вкладці
-                    «Документи».
-                  </p>
-                ) : null}
-              </div>
-            );
-          }
-          return (
-            <ul>
-              {list.map((file) => (
-                <li
-                  key={file.id}
-                  className="border-b border-[var(--color-divider)] px-4 py-3 last:border-0"
-                >
-                  <FileRow
-                    file={file}
-                    locked={locked}
-                    pending={pending}
-                    onRemove={() => remove(file.id)}
-                    showProduct
-                  />
-                </li>
-              ))}
-            </ul>
-          );
-        })()}
+        {generalList.length > 0 ? (
+          <ul>
+            {generalList.map((file) => (
+              <li
+                key={file.id}
+                className="border-b border-[var(--color-divider)] px-4 py-3 last:border-0"
+              >
+                <FileRow
+                  file={file}
+                  locked={locked}
+                  pending={pending}
+                  onRemove={() => remove(file.id)}
+                  showProduct
+                />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="px-4 py-5 text-center">
+            <p className="text-[14px] font-semibold">
+              {decorated.length > 0 ? "Додаткових файлів немає" : "Файлів ще немає"}
+            </p>
+            {decorated.length === 0 ? (
+              <p className="type-body-secondary mx-auto mt-0.5 max-w-md">
+                Якщо зʼявиться нанесення — тут буде блок макетів і жовтий маркер на вкладці
+                «Документи».
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        {canUpload ? (
+          <div
+            className={cn(
+              "border-t border-dashed border-[var(--color-border)] px-4 py-5 text-center transition-colors",
+              generalDragging
+                ? "border-[var(--color-primary-600)] bg-[var(--color-primary-50)]"
+                : "bg-[var(--color-surface-subtle)]",
+            )}
+            {...makeDropHandlers("general", setGeneralDragging)}
+          >
+            <input
+              ref={generalInputRef}
+              type="file"
+              className="sr-only"
+              accept={ORDER_FILE_ACCEPT}
+              multiple
+              onChange={(event) => {
+                uploadFiles(event.target.files, "general");
+              }}
+            />
+            <p className="type-body-secondary mb-3">
+              {generalDragging
+                ? "Відпустіть файл, щоб завантажити"
+                : "Перетягніть файл сюди або натисніть кнопку"}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              loading={pending}
+              disabled={pending}
+              onClick={() => generalInputRef.current?.click()}
+            >
+              <IconPlus size={14} />
+              {pending ? "Завантаження…" : "Додати файл"}
+            </Button>
+          </div>
+        ) : null}
       </section>
 
       {decorated.length > 0 && !hasLinkedFiles && unlinkedFiles.length > 0 ? (

@@ -1203,12 +1203,11 @@ export async function removeOrderItem(input: { orderItemId: string; userId?: str
       id: true,
       nameUk: true,
       orderId: true,
-      order: { select: { status: true, _count: { select: { items: true } } } },
+      order: { select: { status: true } },
     },
   });
   if (!item) throw new Error("NOT_FOUND");
   assertOrderEditable(item.order.status);
-  if (item.order._count.items <= 1) throw new Error("LAST_ITEM");
 
   await prisma.$transaction(async (tx) => {
     await tx.quotation.deleteMany({

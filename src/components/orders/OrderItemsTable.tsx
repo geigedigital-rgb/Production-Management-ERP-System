@@ -74,7 +74,6 @@ export function OrderItemsTable({
   }
 
   function remove(row: OrderItemRow) {
-    if (rows.length <= 1) return;
     if (!window.confirm(`Прибрати «${row.nameUk}» із цього замовлення?`)) return;
     const formData = new FormData();
     formData.set("orderId", orderId);
@@ -89,6 +88,8 @@ export function OrderItemsTable({
       }
       if (fallback) {
         router.push(`/orders/${orderId}?tab=${activeTab}&item=${fallback}`);
+      } else {
+        router.push(`/orders/${orderId}?tab=${activeTab}`);
       }
       router.refresh();
     });
@@ -202,22 +203,20 @@ export function OrderItemsTable({
                 </TD>
                 {!locked ? (
                   <TD>
-                    {rows.length > 1 ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={pending}
-                        aria-label={`Прибрати ${row.nameUk}`}
-                        className="text-[var(--color-text-tertiary)]"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          remove(row);
-                        }}
-                      >
-                        <IconTrash size={14} />
-                      </Button>
-                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={pending}
+                      aria-label={`Прибрати ${row.nameUk}`}
+                      className="text-[var(--color-text-tertiary)]"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        remove(row);
+                      }}
+                    >
+                      <IconTrash size={14} />
+                    </Button>
                   </TD>
                 ) : null}
               </TR>
