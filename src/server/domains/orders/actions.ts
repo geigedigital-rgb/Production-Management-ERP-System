@@ -2,8 +2,20 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/server/auth";
-import { assertSessionPermission, getCurrentUserAccess, canEditOrderComposition, canEditOrderPricing, canViewOrderCosts } from "@/server/auth/access";
+import {
+  assertSessionPermission,
+  getCurrentUserAccess,
+  canEditOrderComposition,
+  canEditOrderPricing,
+  canManageOrderItems,
+  canViewOrderCosts,
+} from "@/server/auth/access";
 import { hasUserPermission } from "@/lib/permissions";
+import {
+  ORDER_FILE_MAX_BYTES,
+  ORDER_FILE_MAX_COUNT,
+  orderFileAllowed,
+} from "@/lib/order-files";
 import {
   addOrderFile,
   addOrderItemDecoration,
@@ -60,6 +72,20 @@ async function assertCanEditOrderComposition(orderId: string) {
   });
   if (!order) throw new Error("NOT_FOUND");
   if (!canEditOrderComposition(access, order.status)) {
+    throw new Error("FORBIDDEN");
+  }
+  return { access, order };
+}
+
+async function assertCanManageOrderItems(orderId: string) {
+  const access = await getCurrentUserAccess();
+  if (!access) throw new Error("UNAUTHORIZED");
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { status: true },
+  });
+  if (!order) throw new Error("NOT_FOUND");
+  if (!canManageOrderItems(access, order.status)) {
     throw new Error("FORBIDDEN");
   }
   return { access, order };
@@ -345,7 +371,7 @@ export async function addOrderItemAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  await assertCanManageOrderItems(orderId);
   const productId = String(formData.get("productId") ?? "");
   const sizeCodes = formData.getAll("sizeCode").map(String);
   const sizeNames = formData.getAll("sizeNameUk").map(String);
@@ -384,7 +410,7 @@ export async function removeOrderItemAction(formData: FormData) {
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
-  await assertCanEditOrderComposition(orderId);
+  await assertCanManageOrderItems(orderId);
   const orderItemId = String(formData.get("orderItemId") ?? "");
   if (!orderItemId) return { ok: false as const, error: "VALIDATION" as const };
 
@@ -1123,55 +1149,50 @@ export async function updateOrderMarginAction(formData: FormData) {
   return { ok: true as const };
 }
 
-const ARTWORK_MAX_BYTES = 20 * 1024 * 1024;
-const ARTWORK_EXTENSIONS = new Set([
-  "pdf",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "svg",
-  "tif",
-  "tiff",
-  "ai",
-  "eps",
-  "zip",
-]);
-
-function fileAllowed(file: File) {
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (ARTWORK_EXTENSIONS.has(ext)) return true;
-  return (
-    file.type.startsWith("image/") ||
-    file.type === "application/pdf" ||
-    file.type === "application/zip" ||
-    file.type === "application/postscript"
-  );
-}
-
 export async function uploadOrderFileAction(formData: FormData) {
   const session = await auth();
   if (!session?.user) throw new Error("UNAUTHORIZED");
   await assertSessionPermission("manageOrders");
 
   const orderId = String(formData.get("orderId") ?? "");
+  const orderItemIdRaw = String(formData.get("orderItemId") ?? "").trim();
   const file = formData.get("file");
   if (!orderId) return { ok: false as const, error: "VALIDATION" as const };
   if (!(file instanceof File) || file.size === 0) {
     return { ok: false as const, error: "EMPTY" as const };
   }
-  if (file.size > ARTWORK_MAX_BYTES) {
+  if (file.size > ORDER_FILE_MAX_BYTES) {
     return { ok: false as const, error: "TOO_LARGE" as const };
   }
-  if (!fileAllowed(file)) {
+  if (!orderFileAllowed(file)) {
     return { ok: false as const, error: "TYPE" as const };
   }
 
   const order = await getOrder(orderId);
   if (!order) return { ok: false as const, error: "NOT_FOUND" as const };
-  if (order.status === "CANCELLED") {
+  if (
+    order.status === "CANCELLED" ||
+    order.status === "HANDED_TO_PRODUCTION" ||
+    order.status === "CLOSED"
+  ) {
     return { ok: false as const, error: "ORDER_LOCKED" as const };
+  }
+  if (order.files.length >= ORDER_FILE_MAX_COUNT) {
+    return { ok: false as const, error: "TOO_MANY" as const };
+  }
+
+  const purpose = String(formData.get("purpose") ?? "general");
+  const decoratedItems = order.items.filter((item) => item.decorations.length > 0);
+  let orderItemId: string | null = orderItemIdRaw || null;
+  if (orderItemId) {
+    const match = order.items.find((item) => item.id === orderItemId);
+    if (!match) return { ok: false as const, error: "ITEM" as const };
+  } else if (purpose === "artwork") {
+    if (decoratedItems.length === 1) {
+      orderItemId = decoratedItems[0]!.id;
+    } else if (decoratedItems.length > 1) {
+      return { ok: false as const, error: "ITEM_REQUIRED" as const };
+    }
   }
 
   try {
@@ -1191,12 +1212,16 @@ export async function uploadOrderFileAction(formData: FormData) {
 
     await addOrderFile({
       orderId,
+      orderItemId,
       fileName: file.name,
       mimeType: file.type || "application/octet-stream",
       sizeBytes: file.size,
       storageKey,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "ORDER_ITEM_NOT_FOUND") {
+      return { ok: false as const, error: "ITEM" as const };
+    }
     return { ok: false as const, error: "UPLOAD" as const };
   }
 

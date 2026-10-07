@@ -653,6 +653,7 @@ model OrderItem {
   additionalCosts OrderItemAdditionalCost[]
   versions CalculationVersion[]
   specification ProductionSpecification?
+  files FileAsset[]
 
   @@index([orderId])
   @@map("order_items")
@@ -907,11 +908,16 @@ model FileAsset {
   storageKey String
   clientId  String?
   orderId   String?
+  /// Order line (product) this artwork / attachment belongs to.
+  orderItemId String?
   createdAt DateTime @default(now())
 
-  client Client? @relation(fields: [clientId], references: [id])
-  order  Order?  @relation(fields: [orderId], references: [id])
+  client    Client?    @relation(fields: [clientId], references: [id])
+  order     Order?     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
 
+  @@index([orderId])
+  @@index([orderItemId])
   @@map("file_assets")
 }
 

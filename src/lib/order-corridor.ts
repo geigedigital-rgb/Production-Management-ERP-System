@@ -47,6 +47,8 @@ export type CorridorFacts = {
   status: string;
   deadline: Date | string | null;
   filesCount: number;
+  /** True when decoration artwork requirements are satisfied (see orderArtworkReady). */
+  artworkReady?: boolean;
   items: CorridorItemFacts[];
   hasCompleteProposal?: boolean;
   hasApprovedProposal?: boolean;
@@ -254,7 +256,13 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
       };
     }
 
-    if (needsDecorationFile && input.filesCount === 0) {
+    const artworkMissing =
+      needsDecorationFile && input.artworkReady === false
+        ? true
+        : needsDecorationFile &&
+          input.artworkReady == null &&
+          input.filesCount === 0;
+    if (artworkMissing) {
       return {
         key: "artwork",
         index: 4,
@@ -262,7 +270,7 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
         label: "Додати макет",
         title: "Потрібен файл нанесення",
         detail:
-          "У складі є друк або вишивка. Додайте макет у вкладці «Документи» — без нього цех не зможе виконати нанесення.",
+          "У складі є друк або вишивка. Додайте макет у вкладці «Документи» для кожної позиції з нанесенням — без нього цех не зможе виконати роботу.",
         tab: "files",
         quotationReady: true,
         specificationReady: false,

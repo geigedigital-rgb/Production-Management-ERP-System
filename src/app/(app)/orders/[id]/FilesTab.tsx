@@ -4,7 +4,12 @@ import { Banner } from "@/components/ui/Banner";
 import { TableCard, TableToolbar } from "@/components/ui/Table";
 import { IconPrint, IconQuote, IconSpec } from "@/components/ui/Icons";
 import { formatDateUk } from "@/lib/utils";
-import { OrderAttachments, type OrderFileRow } from "@/components/orders/OrderAttachments";
+import {
+  OrderAttachments,
+  type OrderArtworkItem,
+  type OrderFileRow,
+} from "@/components/orders/OrderAttachments";
+import { orderArtworkReady } from "@/lib/order-files";
 
 function DocumentRow({
   icon,
@@ -55,6 +60,7 @@ export function FilesTab({
   hasApprovedVersion,
   specificationLockedAt,
   needsArtwork,
+  artworkItems,
   files,
   locked,
 }: {
@@ -63,20 +69,34 @@ export function FilesTab({
   hasApprovedVersion: boolean;
   specificationLockedAt: string | null;
   needsArtwork: boolean;
+  artworkItems: OrderArtworkItem[];
   files: OrderFileRow[];
   locked?: boolean;
 }) {
   const itemQuery = itemId ? `?item=${itemId}` : "";
-  const artworkReady = !needsArtwork || files.length > 0;
+  const artworkReady = orderArtworkReady(
+    artworkItems.map((item) => ({
+      id: item.id,
+      decorationsCount: item.decorationsCount,
+    })),
+    files,
+  );
 
   return (
     <div className="space-y-4">
-      {needsArtwork && files.length === 0 ? (
-        <Banner tone="warning" title="Перед цехом потрібен макет">
-          У замовленні є нанесення. Додайте файл макета кнопкою «Додати файл» нижче — це єдине, що
-          треба зробити вручну на цьому кроці.
+      {needsArtwork && !artworkReady ? (
+        <Banner tone="warning" title="Перед цехом потрібен макет нанесення">
+          У замовленні є нанесення. Додайте файл макета в блоці «Нанесення — макети» нижче — для
+          кожної позиції з друком або вишивкою. Без цього передати у виробництво не вийде.
         </Banner>
       ) : null}
+
+      <OrderAttachments
+        orderId={orderId}
+        files={files}
+        artworkItems={artworkItems}
+        locked={locked}
+      />
 
       <TableCard>
         <TableToolbar left={<span className="type-subsection">Документи замовлення</span>} />
@@ -106,10 +126,6 @@ export function FilesTab({
           href={`/orders/${orderId}/specification${itemQuery}`}
           disabled={!specificationLockedAt}
         />
-      </TableCard>
-
-      <TableCard>
-        <OrderAttachments orderId={orderId} files={files} locked={locked} />
       </TableCard>
 
       {hasApprovedVersion && artworkReady && !specificationLockedAt ? (

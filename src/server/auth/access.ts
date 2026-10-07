@@ -67,6 +67,21 @@ export function canEditOrderComposition(
   return accessHas(access, "saveVersions");
 }
 
+/**
+ * Add / remove products in «Позиції замовлення».
+ * Allowed in Чернетка and Розрахунок (same as assembling the line list);
+ * later statuses follow composition rights (admin).
+ */
+export function canManageOrderItems(
+  access: UserAccess | null,
+  orderStatus: string,
+): boolean {
+  if (!access) return false;
+  if (!accessHas(access, "manageOrders")) return false;
+  if (orderStatus === "DRAFT" || orderStatus === "CALCULATION") return true;
+  return canEditOrderComposition(access, orderStatus);
+}
+
 export function canViewOrderCosts(access: UserAccess | null): boolean {
   return accessHas(access, "viewProductCosts") || accessHas(access, "saveVersions");
 }

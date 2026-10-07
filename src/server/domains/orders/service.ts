@@ -49,6 +49,8 @@ import {
   fabricFieldsForOrderLine,
   materialToSnapshot,
   offerToSnapshot,
+  pickSupplierOffer,
+  resolveBomMaterialPurchasePrice,
 } from "@/lib/order-material-terms";
 import {
   fabricMetersNeeded,
@@ -61,9 +63,14 @@ import {
 import { getFabricPricingGlobals } from "@/server/domains/catalog/materials";
 import {
   deliveryRateUsdPerKg,
+  isFabricDeliveryType,
   normalizeFabricDeliveryType,
   type FabricDeliveryTypeCode,
 } from "@/lib/fabric-delivery-types";
+
+function deliveryTypeOrNull(value: unknown): FabricDeliveryTypeCode | null {
+  return isFabricDeliveryType(value) ? value : null;
+}
 import {
   itemNeedsSizeBreakdown,
   itemSizeBreakdownReady,
@@ -71,6 +78,7 @@ import {
   sizesQuantitySum,
   type OrderSizeLine,
 } from "@/lib/order-item-sizes";
+import { orderArtworkReady } from "@/lib/order-files";
 
 type FabricMaterialFields = {
   type?: string | null;
@@ -557,21 +565,35 @@ function bomFromProduct(
             sizeRules,
           ),
         });
+        const offers = source.material.supplierOffers ?? [];
+        const offer = pickSupplierOffer(offers, source.supplierId);
+        const supplierId = offer?.supplierId ?? source.supplierId ?? null;
+        const supplierNameSnapshot =
+          (source.supplierId && source.supplierId === supplierId
+            ? source.supplier?.nameUk
+            : null) ??
+          offer?.supplier?.nameUk ??
+          null;
+        const deliveryType = deliveryTypeOrNull(
+          source.deliveryType ?? offer?.deliveryType ?? null,
+        );
         return {
           materialId: source.materialId,
           nameSnapshot: source.material.nameUk,
           unitCodeSnapshot: source.material.unitOfMeasure.code,
           consumptionPerUnit: consumption,
           wastePercent: waste,
-          purchasePrice: purchasePriceForOrderMaterial(
-            source.material,
+          purchasePrice: resolveBomMaterialPurchasePrice({
+            material: source.material,
+            offers,
+            supplierId,
             companyCostMode,
             metersNeeded,
-          ),
-          supplierId: source.supplierId ?? null,
-          supplierNameSnapshot: source.supplier?.nameUk ?? null,
+          }),
+          supplierId,
+          supplierNameSnapshot,
           colorSnapshot: source.colorSnapshot ?? null,
-          deliveryType: source.deliveryType ?? null,
+          deliveryType,
           sortOrder: index,
           sizeCode: row.sizeCode,
         };
@@ -800,7 +822,13 @@ export async function createOrderWithProducts(input: {
           materialIds.length
             ? tx.material.findMany({
                 where: { id: { in: materialIds } },
-                include: { unitOfMeasure: true },
+                include: {
+                  unitOfMeasure: true,
+                  supplierOffers: {
+                    include: { supplier: true },
+                    orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+                  },
+                },
               })
             : Promise.resolve([]),
           operationIds.length
@@ -858,14 +886,24 @@ export async function createOrderWithProducts(input: {
             const waste = row.waste ?? Number(material.defaultWastePercent);
             const draftSource = override.materials.find((m) => m.materialId === row.materialId);
             const productMat = productMaterialById.get(row.materialId);
-            const supplierId = draftSource?.supplierId ?? productMat?.supplierId ?? null;
-            const deliveryType = draftSource?.deliveryType ?? productMat?.deliveryType ?? null;
+            const offers = material.supplierOffers ?? [];
+            const preferredSupplierId =
+              draftSource?.supplierId ?? productMat?.supplierId ?? null;
+            const offer = pickSupplierOffer(offers, preferredSupplierId);
+            const supplierId = offer?.supplierId ?? preferredSupplierId ?? null;
+            const deliveryType = deliveryTypeOrNull(
+              draftSource?.deliveryType ??
+                productMat?.deliveryType ??
+                offer?.deliveryType ??
+                null,
+            );
             const colorSnapshot =
               draftSource?.colorSnapshot?.trim() ||
               productMat?.colorSnapshot?.trim() ||
               null;
             const supplierNameSnapshot = supplierId
               ? supplierNameById.get(supplierId) ??
+                offer?.supplier?.nameUk ??
                 (productMat?.supplierId === supplierId
                   ? productMat.supplier?.nameUk ?? null
                   : null)
@@ -893,7 +931,13 @@ export async function createOrderWithProducts(input: {
             const purchasePrice =
               draftPrice != null && Number.isFinite(Number(draftPrice))
                 ? Number(draftPrice)
-                : purchasePriceForOrderMaterial(material, companyCostMode, metersNeeded);
+                : resolveBomMaterialPurchasePrice({
+                    material,
+                    offers,
+                    supplierId,
+                    companyCostMode,
+                    metersNeeded,
+                  });
             return {
               materialId: material.id,
               nameSnapshot: material.nameUk,
@@ -2082,7 +2126,13 @@ export async function addOrderItemMaterial(input: {
   const [material, item, fabricGlobals] = await Promise.all([
     prisma.material.findUniqueOrThrow({
       where: { id: input.materialId },
-      include: { unitOfMeasure: true },
+      include: {
+        unitOfMeasure: true,
+        supplierOffers: {
+          include: { supplier: true },
+          orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+        },
+      },
     }),
     prisma.orderItem.findUniqueOrThrow({
       where: { id: input.orderItemId },
@@ -2110,6 +2160,9 @@ export async function addOrderItemMaterial(input: {
       pricingDefaults.sizeRules,
     ),
   });
+  const offers = material.supplierOffers ?? [];
+  const offer = pickSupplierOffer(offers, null);
+  const supplierId = offer?.supplierId ?? null;
 
   const created = await prisma.orderItemMaterial.create({
     data: {
@@ -2119,10 +2172,17 @@ export async function addOrderItemMaterial(input: {
       unitCodeSnapshot: material.unitOfMeasure.code,
       consumptionPerUnit: input.consumptionPerUnit,
       wastePercent: waste,
-      purchasePrice: purchasePriceForOrderMaterial(
+      purchasePrice: resolveBomMaterialPurchasePrice({
         material,
-        fabricGlobals.materialCostVatMode,
+        offers,
+        supplierId,
+        companyCostMode: fabricGlobals.materialCostVatMode,
         metersNeeded,
+      }),
+      supplierId,
+      supplierNameSnapshot: offer?.supplier?.nameUk ?? null,
+      deliveryType: deliveryTypeOrNull(
+        offer?.deliveryType ?? material.deliveryType ?? null,
       ),
       sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
       sizeCode: input.sizeCode || null,
@@ -2922,8 +2982,17 @@ export async function handOverToProduction(orderId: string, userId?: string) {
     return { item, approved };
   });
 
-  const needsArtwork = fresh.items.some((item) => item.decorations.length > 0);
-  if (needsArtwork && fresh.files.length === 0) throw new Error("NO_ARTWORK");
+  if (
+    !orderArtworkReady(
+      fresh.items.map((item) => ({
+        id: item.id,
+        decorationsCount: item.decorations.length,
+      })),
+      fresh.files.map((file) => ({ orderItemId: file.orderItemId })),
+    )
+  ) {
+    throw new Error("NO_ARTWORK");
+  }
 
   const [pricing, fixedCosts] = await Promise.all([
     getPricingForOrder(orderId),
@@ -3107,11 +3176,20 @@ export async function addOrderFile(input: {
   mimeType: string;
   sizeBytes: number;
   storageKey: string;
+  orderItemId?: string | null;
 }) {
   await assertOrderEditableById(input.orderId);
+  if (input.orderItemId) {
+    const item = await prisma.orderItem.findFirst({
+      where: { id: input.orderItemId, orderId: input.orderId },
+      select: { id: true },
+    });
+    if (!item) throw new Error("ORDER_ITEM_NOT_FOUND");
+  }
   return prisma.fileAsset.create({
     data: {
       orderId: input.orderId,
+      orderItemId: input.orderItemId || null,
       fileName: input.fileName,
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,

@@ -438,12 +438,11 @@ export function ConfigurationTab({
             {!hideCosts ? <TH align="right">Відходи</TH> : null}
             {!hideCosts ? <TH align="right">Ціна</TH> : null}
             {!hideCosts ? <TH align="right">Собівартість / од.</TH> : null}
-            {!locked ? <TH width="52px" /> : null}
           </THead>
           <TBody>
             {visibleMaterials.length === 0 ? (
               <TableEmpty
-                colSpan={(hideCosts ? 2 : 5) + (locked ? 0 : 1)}
+                colSpan={hideCosts ? 2 : 5}
                 icon={<IconMaterials size={20} />}
                 title={sizeScope === ALL_SIZES ? "Матеріалів ще немає" : `Немає для ${sizeScope}`}
                 description="Додайте рядок знизу — як у картці виробу."
@@ -504,6 +503,21 @@ export function ConfigurationTab({
                             ) : null}
                           </div>
                           <RowBusyMark busy={rowBusy} />
+                          {!locked ? (
+                            <button
+                              type="button"
+                              aria-label={`Прибрати ${row.name}`}
+                              title="Прибрати матеріал"
+                              disabled={rowBusy}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setRemoveTarget({ kind: "material", id: row.id, name: row.name });
+                              }}
+                              className="shrink-0 rounded-[var(--radius-control)] p-1.5 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)] disabled:opacity-50"
+                            >
+                              <IconTrash size={16} />
+                            </button>
+                          ) : null}
                         </div>
                         {showSupplierColor && !hideCosts ? (
                           <OrderMaterialSupplierColorEditor
@@ -593,21 +607,6 @@ export function ConfigurationTab({
                         {formatMoneyUah(displayUnitCost)}
                       </TD>
                     ) : null}
-                    {!locked ? (
-                      <TD align="center" className="py-1.5">
-                        <button
-                          type="button"
-                          aria-label={`Прибрати ${row.name}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setRemoveTarget({ kind: "material", id: row.id, name: row.name });
-                          }}
-                          className="rounded-[var(--radius-control)] p-1.5 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger-text)]"
-                        >
-                          <IconTrash size={16} />
-                        </button>
-                      </TD>
-                    ) : null}
                   </TR>
                 );
               })
@@ -631,7 +630,6 @@ export function ConfigurationTab({
                     </span>
                   </span>
                 </TD>
-                {!locked ? <TD /> : null}
               </tr>
             </TFoot>
           ) : null}

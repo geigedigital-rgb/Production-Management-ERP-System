@@ -72,9 +72,16 @@ export function MaterialDeleteIconButton({
 export function MaterialDuplicateIconButton({
   materialId,
   materialName,
+  appearance = "icon",
+  disabled = false,
+  onDuplicated,
 }: {
   materialId: string;
   materialName: string;
+  /** icon — table row; button — edit panel footer next to Cancel/Save. */
+  appearance?: "icon" | "button";
+  disabled?: boolean;
+  onDuplicated?: (materialId: string) => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -83,6 +90,7 @@ export function MaterialDuplicateIconButton({
   const [pending, startTransition] = useTransition();
 
   function openModal() {
+    if (disabled) return;
     setNameUk(`${materialName} (копія)`);
     setError(null);
     setOpen(true);
@@ -110,21 +118,35 @@ export function MaterialDuplicateIconButton({
         return;
       }
       setOpen(false);
+      onDuplicated?.(result.materialId);
       router.refresh();
     });
   }
 
   return (
     <>
-      <button
-        type="button"
-        className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"
-        aria-label={`Дублювати ${materialName}`}
-        title="Дублювати"
-        onClick={openModal}
-      >
-        <IconCopy size={15} />
-      </button>
+      {appearance === "button" ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={openModal}
+          disabled={disabled || pending}
+        >
+          Дублювати
+        </Button>
+      ) : (
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] disabled:pointer-events-none disabled:opacity-40"
+          aria-label={`Дублювати ${materialName}`}
+          title="Дублювати"
+          disabled={disabled || pending}
+          onClick={openModal}
+        >
+          <IconCopy size={15} />
+        </button>
+      )}
       <Modal
         open={open}
         onClose={() => (pending ? undefined : setOpen(false))}

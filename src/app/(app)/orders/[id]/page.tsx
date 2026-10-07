@@ -42,12 +42,14 @@ import { deliveryRateUsdPerKg } from "@/lib/fabric-delivery-types";
 import {
   accessHas,
   canEditOrderComposition,
+  canManageOrderItems,
   canViewOrderCosts,
   getCurrentUserAccess,
 } from "@/server/auth/access";
 import { SubmitForCalculationButton } from "@/components/orders/SubmitForCalculationButton";
 import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
 import { corridorFor, corridorHref, itemNeed } from "@/lib/order-corridor";
+import { orderArtworkReady } from "@/lib/order-files";
 import {
   approvedProposal,
   buildOrderProposals,
@@ -181,8 +183,10 @@ export default async function OrderDetailPage({
   const canViewCosts = canViewOrderCosts(access);
   const canRunCalc = accessHas(access, "saveVersions");
   const canEditComposition = canEditOrderComposition(access, order.status);
+  const canEditItems = canManageOrderItems(access, order.status);
   const canCreateCatalog = accessHas(access, "createInlineCatalog");
   const compositionLocked = locked || !canEditComposition;
+  const itemsLocked = locked || !canEditItems;
 
   if (!canViewCosts && (activeTab === "calculation" || activeTab === "versions")) {
     redirect(
@@ -509,15 +513,21 @@ export default async function OrderDetailPage({
   ];
 
   const needsArtwork = order.items.some((row) => row.decorations.length > 0);
+  const artworkReady = orderArtworkReady(
+    order.items.map((row) => ({
+      id: row.id,
+      decorationsCount: row.decorations.length,
+    })),
+    order.files.map((file) => ({ orderItemId: file.orderItemId })),
+  );
   if (needsArtwork) {
     readiness.push({
       key: "artwork",
       label: "Додано макет нанесення",
-      done: order.files.length > 0,
-      hint:
-        order.files.length > 0
-          ? `${order.files.length} файл.`
-          : "Завантажте макет у вкладці «Документи»",
+      done: artworkReady,
+      hint: artworkReady
+        ? `${order.files.length} файл.`
+        : "Завантажте макет у вкладці «Документи» для позицій з нанесенням",
     });
   }
 
@@ -552,6 +562,8 @@ export default async function OrderDetailPage({
       label: "Документи",
       href: tabHref("files"),
       icon: <IconFiles size={15} />,
+      count: order.files.length,
+      attention: needsArtwork && !artworkReady && !locked,
     },
   ];
 
@@ -560,6 +572,7 @@ export default async function OrderDetailPage({
     status: order.status,
     deadline: order.deadline,
     filesCount: order.files.length,
+    artworkReady,
     hasCompleteProposal,
     hasApprovedProposal,
     sizesReady: orderSizesReady,
@@ -903,7 +916,7 @@ export default async function OrderDetailPage({
         orderId={order.id}
         activeTab={activeTab}
         selectedId={item.id}
-        locked={compositionLocked}
+        locked={itemsLocked}
         handedOver={order.status === "HANDED_TO_PRODUCTION" || order.status === "CLOSED"}
         rows={itemRows}
         catalog={catalog}
@@ -937,7 +950,8 @@ export default async function OrderDetailPage({
             ) : null}
             {order.status !== "DRAFT" && !canEditComposition ? (
               <Banner tone="info" title="На розрахунку в адміністратора">
-                Комплектацію передано. Зміни складу та калькуляція доступні адміністратору.
+                Склад і калькуляцію змінює адміністратор. Позиції (додати / прибрати виріб) у блоці
+                «Позиції замовлення» можна правити на етапах Чернетка і Розрахунок.
               </Banner>
             ) : null}
             <ConfigurationTab
@@ -1089,14 +1103,25 @@ export default async function OrderDetailPage({
                 specificationLockedAt={item.specification?.lockedAt.toISOString() ?? null}
                 needsArtwork={needsArtwork}
                 locked={locked}
-                files={order.files.map((file) => ({
-                  id: file.id,
-                  fileName: file.fileName,
-                  mimeType: file.mimeType,
-                  sizeBytes: file.sizeBytes,
-                  createdAt: file.createdAt.toISOString(),
-                  url: publicUploadUrl(file.storageKey),
+                artworkItems={order.items.map((row) => ({
+                  id: row.id,
+                  nameUk: row.nameUk,
+                  decorationsCount: row.decorations.length,
+                  decorationNames: row.decorations.map((decoration) => decoration.nameSnapshot),
                 }))}
+                files={order.files.map((file) => {
+                  const linked = order.items.find((row) => row.id === file.orderItemId);
+                  return {
+                    id: file.id,
+                    fileName: file.fileName,
+                    mimeType: file.mimeType,
+                    sizeBytes: file.sizeBytes,
+                    createdAt: file.createdAt.toISOString(),
+                    url: publicUploadUrl(file.storageKey),
+                    orderItemId: file.orderItemId ?? null,
+                    orderItemNameUk: linked?.nameUk ?? null,
+                  };
+                })}
               />
             ) : null}
           </div>

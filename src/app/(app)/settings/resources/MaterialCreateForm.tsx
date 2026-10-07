@@ -41,6 +41,7 @@ import {
   type FabricTierMode,
 } from "@/components/catalog/FabricPurchaseModes";
 import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
+import { MaterialDuplicateIconButton } from "@/components/catalog/MaterialRowActions";
 import { PanelTabs } from "@/components/ui/Tabs";
 import {
   createMaterialAction,
@@ -1855,6 +1856,20 @@ export function MaterialEditPanel({
         width="lg"
         footer={
           <>
+            {loaded ? (
+              <span className="mr-auto">
+                <MaterialDuplicateIconButton
+                  materialId={loaded.id}
+                  materialName={loaded.nameUk}
+                  appearance="button"
+                  disabled={pending || loading}
+                  onDuplicated={() => {
+                    setDirty(false);
+                    setOpen(false);
+                  }}
+                />
+              </span>
+            ) : null}
             <Button variant="ghost" onClick={requestClose} disabled={pending || loading}>
               Скасувати
             </Button>
