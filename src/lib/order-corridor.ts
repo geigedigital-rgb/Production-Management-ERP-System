@@ -161,6 +161,49 @@ export function corridorFor(input: CorridorFacts): CorridorStep {
     };
   }
 
+  if (input.items.length === 0) {
+    if (input.status === "DRAFT") {
+      return {
+        key: "compose",
+        index: 1,
+        of: LIVE_STEPS,
+        label: "Збір",
+        title: "Збір замовлення",
+        detail:
+          "Додайте хоча б один виріб з каталогу. Порожнє замовлення можна лишати лише на чернетці або розрахунку.",
+        tab: "configuration",
+        quotationReady: false,
+        specificationReady: false,
+      };
+    }
+    if (input.status === "CALCULATION") {
+      return {
+        key: "saveVersion",
+        index: 2,
+        of: LIVE_STEPS,
+        label: "Розрахунок",
+        title: "Розрахунок і пропозиція",
+        detail:
+          "Додайте виріб і збережіть пропозицію. Без позицій далі по етапах замовлення не передається.",
+        tab: "configuration",
+        quotationReady: false,
+        specificationReady: false,
+      };
+    }
+    return {
+      key: "compose",
+      index: 1,
+      of: LIVE_STEPS,
+      label: "Збір",
+      title: "Потрібна хоча б одна позиція",
+      detail:
+        "У замовленні немає виробів. Додайте позицію — порожні замовлення не проходять наступні етапи.",
+      tab: "configuration",
+      quotationReady: false,
+      specificationReady: false,
+    };
+  }
+
   const need = blocking ? itemNeed(blocking, orderFlags) : "ready";
 
   if (need === "qty") {

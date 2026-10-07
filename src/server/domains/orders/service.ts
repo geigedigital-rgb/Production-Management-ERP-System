@@ -1196,6 +1196,8 @@ export async function addOrderItemFromProduct(input: {
   return item;
 }
 
+const STAGES_ALLOWING_EMPTY: OrderStatus[] = ["DRAFT", "CALCULATION"];
+
 export async function removeOrderItem(input: { orderItemId: string; userId?: string }) {
   const item = await prisma.orderItem.findUnique({
     where: { id: input.orderItemId },
@@ -1203,11 +1205,18 @@ export async function removeOrderItem(input: { orderItemId: string; userId?: str
       id: true,
       nameUk: true,
       orderId: true,
-      order: { select: { status: true } },
+      order: { select: { status: true, _count: { select: { items: true } } } },
     },
   });
   if (!item) throw new Error("NOT_FOUND");
   assertOrderEditable(item.order.status);
+  // Empty order is allowed only on draft / calculation.
+  if (
+    item.order._count.items <= 1 &&
+    !STAGES_ALLOWING_EMPTY.includes(item.order.status)
+  ) {
+    throw new Error("EMPTY_ORDER_NOT_ALLOWED");
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.quotation.deleteMany({
@@ -2752,7 +2761,34 @@ export async function saveProposal(input: {
   const order = await getOrder(input.orderId);
   if (!order) throw new Error("ORDER_NOT_FOUND");
   assertOrderEditable(order.status);
-  if (order.items.length === 0) throw new Error("NO_ITEM");
+
+  const proposalLabel = input.label?.trim() || null;
+  const comment = input.comment?.trim() || null;
+
+  // Empty orders may be saved only on DRAFT / CALCULATION (no calc versions).
+  if (order.items.length === 0) {
+    if (!STAGES_ALLOWING_EMPTY.includes(order.status)) {
+      throw new Error("EMPTY_ORDER_NOT_ALLOWED");
+    }
+    await prisma.order.updateMany({
+      where: { id: input.orderId, status: "DRAFT" },
+      data: { status: "CALCULATION" },
+    });
+    await recordActivity({
+      entityType: "order",
+      entityId: input.orderId,
+      action: "proposal_saved",
+      userId: input.authorId,
+      payload: {
+        proposalRevision: null,
+        label: proposalLabel,
+        comment,
+        lineCount: 0,
+        empty: true,
+      },
+    });
+    return { proposalRevision: 0, versions: [] };
+  }
 
   const lineMap = new Map(input.lines.map((line) => [line.orderItemId, line]));
   for (const item of order.items) {
@@ -2762,8 +2798,6 @@ export async function saveProposal(input: {
   }
 
   const proposalRevision = await nextProposalRevision(input.orderId);
-  const proposalLabel = input.label?.trim() || null;
-  const comment = input.comment?.trim() || null;
   const pricing = await getPricingForOrder(input.orderId);
   const fixedCosts = await fixedCostOptionsFromDb();
 
@@ -3093,13 +3127,24 @@ export async function handOverToProduction(orderId: string, userId?: string) {
 export async function updateOrderStatus(orderId: string, status: OrderStatus, userId?: string) {
   const before = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { status: true },
+    select: { status: true, _count: { select: { items: true } } },
   });
+  if (!before) throw new Error("ORDER_NOT_FOUND");
+
+  // Empty orders may live on DRAFT / CALCULATION (or be cancelled).
+  if (
+    before._count.items === 0 &&
+    !STAGES_ALLOWING_EMPTY.includes(status) &&
+    status !== "CANCELLED"
+  ) {
+    throw new Error("EMPTY_ORDER_NOT_ALLOWED");
+  }
+
   const updated = await prisma.order.update({
     where: { id: orderId },
     data: { status },
   });
-  if (before && before.status !== status) {
+  if (before.status !== status) {
     await recordActivity({
       entityType: "order",
       entityId: orderId,

@@ -66,6 +66,7 @@ import { ConfigurationTab } from "./ConfigurationTab";
 import { CalculationTab } from "./CalculationTab";
 import { VersionsTab } from "./VersionsTab";
 import { FilesTab } from "./FilesTab";
+import { SaveProposalPanel } from "./SaveProposalPanel";
 import type { ReadinessCheck } from "./HandoverDialog";
 
 export default async function OrderDetailPage({
@@ -83,11 +84,14 @@ export default async function OrderDetailPage({
   const session = await auth();
   let order = await getOrder(id);
   if (!order) notFound();
+  
+  // Handle empty order (all items deleted) - don't 404, render empty state
+  const hasItems = order.items.length > 0;
   let item =
-    (itemParam ? order.items.find((row) => row.id === itemParam) : null) ?? order.items[0];
-  if (!item) notFound();
+    (itemParam ? order.items.find((row) => row.id === itemParam) : null) ?? order.items[0] ?? null;
 
   if (
+    item &&
     item.materials.some(
       (row) => row.material?.type === "FABRIC" && row.fabricDeliveryComputed == null,
     )
@@ -95,12 +99,11 @@ export default async function OrderDetailPage({
     await refreshOrderItemFabricPricing(item.id);
     order = (await getOrder(id))!;
     item =
-      (itemParam ? order.items.find((row) => row.id === itemParam) : null) ?? order.items[0];
-    if (!item) notFound();
+      (itemParam ? order.items.find((row) => row.id === itemParam) : null) ?? order.items[0] ?? null;
   }
 
   const tabHref = (key: string) =>
-    `/orders/${order.id}?tab=${key}${order.items.length > 1 ? `&item=${item.id}` : ""}`;
+    `/orders/${order.id}?tab=${key}${order.items.length > 1 && item ? `&item=${item.id}` : ""}`;
 
   const [
     materials,
@@ -148,15 +151,15 @@ export default async function OrderDetailPage({
   });
   const orderSizesReady = itemSizeFlags.every((row) => row.sizesReady);
   const activeItemNeedsSizeBreakdown =
-    itemSizeFlags.find((row) => row.id === item.id)?.needsSizeBreakdown ?? false;
+    item ? (itemSizeFlags.find((row) => row.id === item.id)?.needsSizeBreakdown ?? false) : false;
 
-  const itemCalcOptions = {
+  const itemCalcOptions = item ? {
     ...calcOptionsFromProduct(item.product),
     fixedCosts,
-  };
-  const calc = buildCalcFromOrderItem(item, pricing, itemCalcOptions);
+  } : { fixedCosts };
+  const calc = item ? buildCalcFromOrderItem(item, pricing, itemCalcOptions) : null;
   const fixedCostAllocation =
-    fixedCosts != null
+    fixedCosts != null && item
       ? resolveFixedCostAllocationForOrderItem(
           item,
           fixedCosts,
@@ -166,7 +169,7 @@ export default async function OrderDetailPage({
       : null;
   const { sewerCount: sewerCountForValidation } = resolveSewerCount({
     companySewerCount: fixedCosts?.companySewerCount ?? 0,
-    orderOverride: item.sewerCountOverride,
+    orderOverride: item?.sewerCountOverride ?? null,
   });
   const fixedCostError: FixedCostValidationError | null = fixedCosts
     ? validateFixedCostParams({
@@ -176,7 +179,7 @@ export default async function OrderDetailPage({
         monthlyTotal: fixedCosts.monthlyTotal,
       })
     : "MONTHLY_TOTAL_ZERO";
-  const totalQuantity = item.totalQuantity;
+  const totalQuantity = item?.totalQuantity ?? 0;
   const orderQuantity = order.items.reduce((sum, row) => sum + row.totalQuantity, 0);
   const locked = order.status === "HANDED_TO_PRODUCTION" || order.status === "CLOSED";
   const canApprove = accessHas(access, "changeOrderStatus");
@@ -195,11 +198,11 @@ export default async function OrderDetailPage({
   }
 
   const fabricGlobals = await getFabricPricingGlobals();
-  const quantitiesBySize = Object.fromEntries(
-    item.sizes.map((size) => [size.sizeCode, size.quantity]),
-  );
+  const quantitiesBySize = item
+    ? Object.fromEntries(item.sizes.map((size) => [size.sizeCode, size.quantity]))
+    : {};
 
-  const materialRows = item.materials.map((row) => {
+  const materialRows = item ? item.materials.map((row) => {
     const consumption = Number(row.consumptionPerUnit);
     const waste = Number(row.wastePercent);
     const price = Number(row.purchasePrice);
@@ -304,11 +307,11 @@ export default async function OrderDetailPage({
         }),
       ),
     };
-  });
+  }) : [];
 
   const itemCalcOptionsForRates = itemCalcOptions;
 
-  const operationRows = item.operations.map((row) => {
+  const operationRows = item ? item.operations.map((row) => {
     const unitCost =
       row.calculationMethod === "SHIFT_OUTPUT"
         ? Number(row.standardOutput ?? 0) > 0
@@ -327,17 +330,17 @@ export default async function OrderDetailPage({
       sizeCode: row.sizeCode ?? null,
       groupKey: row.operationId ?? row.nameSnapshot,
     };
-  });
+  }) : [];
 
-  const decorationRows = item.decorations.map((row) => ({
+  const decorationRows = item ? item.decorations.map((row) => ({
     id: row.id,
     name: row.nameSnapshot,
     setupCost: Number(row.setupCost),
     unitRate: Number(row.unitRate),
     totalCost: Number(row.setupCost) + Number(row.unitRate) * totalQuantity,
-  }));
+  })) : [];
 
-  const fabricDeliveryRows = item.materials
+  const fabricDeliveryRows = item ? item.materials
     .filter((row) => row.material?.type === "FABRIC")
     .map((row) => {
       const meters = fabricMetersNeeded({
@@ -373,11 +376,11 @@ export default async function OrderDetailPage({
           row.usdUahRate != null ? Number(row.usdUahRate) : fabricGlobals.usdUahRate,
         kgNeeded,
       };
-    });
+    }) : [];
 
-  const fabricDeliveryAmount = Number(item.fabricDeliveryAmount ?? 0);
+  const fabricDeliveryAmount = item ? Number(item.fabricDeliveryAmount ?? 0) : 0;
 
-  const versions = item.versions.map((version) => ({
+  const versions = item ? item.versions.map((version) => ({
     id: version.id,
     versionNumber: version.versionNumber,
     label: version.label,
@@ -390,7 +393,7 @@ export default async function OrderDetailPage({
     totalSellingValue: Number(version.totalSellingValue),
     proposalRevision: version.proposalRevision,
     proposalLabel: version.proposalLabel,
-  }));
+  })) : [];
 
   const proposalItems = order.items.map((row) => ({
     id: row.id,
@@ -451,7 +454,7 @@ export default async function OrderDetailPage({
 
   const sizesPendingCount = itemSizeFlags.filter((row) => !row.sizesReady).length;
   const sizesFocusItemId =
-    itemSizeFlags.find((row) => !row.sizesReady)?.id ?? item.id;
+    itemSizeFlags.find((row) => !row.sizesReady)?.id ?? item?.id ?? "";
   const configurationHrefForSizes =
     `/orders/${order.id}?tab=configuration${
       order.items.length > 1 ? `&item=${sizesFocusItemId}` : ""
@@ -595,7 +598,7 @@ export default async function OrderDetailPage({
   });
   const orderFlags = { hasCompleteProposal, hasApprovedProposal };
   const nextHref = corridorHref(order.id, action);
-  const onNextTab = activeTab === action.tab && (!action.focusItemId || action.focusItemId === item.id);
+  const onNextTab = activeTab === action.tab && (!action.focusItemId || action.focusItemId === item?.id);
   const showHeaderCta =
     action.key !== "cancelled" &&
     !(action.key === "compose" && onNextTab) &&
@@ -705,10 +708,10 @@ export default async function OrderDetailPage({
     },
   ];
 
-  const activeDraft = draftLines.find((line) => line.orderItemId === item.id);
-  const clientPricePerUnit = activeDraft?.sellingPricePerUnit ?? Number(calc.sellingPricePerUnit);
-  const clientTotal = activeDraft?.totalSellingValue ?? Number(calc.totalSellingValue);
-  const costPerUnit = activeDraft?.costPerUnit ?? Number(calc.costPerUnit);
+  const activeDraft = item ? draftLines.find((line) => line.orderItemId === item.id) : null;
+  const clientPricePerUnit = activeDraft?.sellingPricePerUnit ?? (calc ? Number(calc.sellingPricePerUnit) : 0);
+  const clientTotal = activeDraft?.totalSellingValue ?? (calc ? Number(calc.totalSellingValue) : 0);
+  const costPerUnit = activeDraft?.costPerUnit ?? (calc ? Number(calc.costPerUnit) : 0);
   const costTotal = costPerUnit * totalQuantity;
   const profitPerUnit = clientPricePerUnit - costPerUnit;
   const profitTotal = clientTotal - costTotal;
@@ -722,7 +725,7 @@ export default async function OrderDetailPage({
         ? "націнка на пошив за тиражем"
         : "немає прайсу — як собівартість";
 
-  const moneyRail = canViewCosts ? (
+  const moneyRail = canViewCosts && calc ? (
     <aside className="space-y-3 xl:sticky xl:top-[72px] xl:h-fit">
       <div className="rounded-[var(--radius-surface)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
         <p className="type-caption">Ціна для клієнта</p>
@@ -805,10 +808,12 @@ export default async function OrderDetailPage({
             badge={<OrderStatusBadge status={order.status} dot />}
             subtitle={
               <>
-                {order.title && order.title !== item.nameUk ? (
+                {!hasItems ? (
+                  <span className="text-[var(--color-text-tertiary)]">Немає позицій</span>
+                ) : order.title && order.title !== item?.nameUk ? (
                   <span>{order.title}</span>
                 ) : (
-                  <span>{item.nameUk}</span>
+                  <span>{item?.nameUk}</span>
                 )}
                 {order.items.length > 1 ? (
                   <span className="text-[var(--color-text-tertiary)]">
@@ -915,7 +920,7 @@ export default async function OrderDetailPage({
       <OrderItemsTable
         orderId={order.id}
         activeTab={activeTab}
-        selectedId={item.id}
+        selectedId={item?.id ?? ""}
         locked={itemsLocked}
         handedOver={order.status === "HANDED_TO_PRODUCTION" || order.status === "CLOSED"}
         rows={itemRows}
@@ -923,6 +928,54 @@ export default async function OrderDetailPage({
         showPrices
       />
 
+      {!hasItems ? (
+        <div className="space-y-4">
+          <Banner
+            tone="info"
+            title="Замовлення без позицій"
+            action={
+              canRunCalc &&
+              (order.status === "DRAFT" || order.status === "CALCULATION") ? (
+                <SaveProposalPanel orderId={order.id} lines={[]} accent={false} />
+              ) : null
+            }
+          >
+            Порожнє замовлення можна лишати на етапах Чернетка і Розрахунок. Додайте виріб з
+            каталогу, коли будете готові.
+          </Banner>
+          <OrderWorkspacePanel
+            tabs={
+              <OrderWorkspaceTabs
+                items={tabs.filter((tab) => tab.key === "files")}
+                active="files"
+                className="border-b-0"
+              />
+            }
+          >
+            <FilesTab
+              orderId={order.id}
+              hasApprovedVersion={false}
+              specificationLockedAt={null}
+              needsArtwork={false}
+              locked={locked}
+              artworkItems={[]}
+              files={order.files.map((file) => ({
+                id: file.id,
+                fileName: file.fileName,
+                mimeType: file.mimeType,
+                sizeBytes: file.sizeBytes,
+                createdAt: file.createdAt.toISOString(),
+                url: publicUploadUrl(file.storageKey),
+                orderItemId: file.orderItemId ?? null,
+                orderItemNameUk: null,
+              }))}
+            />
+          </OrderWorkspacePanel>
+        </div>
+      ) : null}
+
+      {/* Show tabs and configuration only when there are items */}
+      {hasItems && item ? (
       <OrderWorkspacePanel
         tabs={
           <div className="flex flex-wrap items-end justify-between gap-3">
@@ -998,9 +1051,9 @@ export default async function OrderDetailPage({
               label: unit.nameUk,
               code: unit.code,
             }))}
-            materialsSubtotal={Number(calc.materialsSubtotal)}
-            operationsSubtotal={Number(calc.operationsSubtotal)}
-            decorationsSubtotal={Number(calc.decorationsSubtotal)}
+            materialsSubtotal={calc ? Number(calc.materialsSubtotal) : 0}
+            operationsSubtotal={calc ? Number(calc.operationsSubtotal) : 0}
+            decorationsSubtotal={calc ? Number(calc.decorationsSubtotal) : 0}
             companySewerCount={fixedCosts?.companySewerCount ?? 0}
             sewerCountOverride={item.sewerCountOverride}
             fixedCostAllocation={fixedCostAllocation}
@@ -1022,7 +1075,7 @@ export default async function OrderDetailPage({
         ) : (
           <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
             <div className="min-w-0">
-              {activeTab === "calculation" ? (
+              {activeTab === "calculation" && calc ? (
                 <CalculationTab
                 calc={calc}
                 totalQuantity={totalQuantity}
@@ -1129,6 +1182,7 @@ export default async function OrderDetailPage({
         </div>
         )}
       </OrderWorkspacePanel>
+      ) : null}
 
       <ActivityTimeline
         events={mapActivityEvents(activityEvents)}

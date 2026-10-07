@@ -181,6 +181,10 @@ export function SaveProposalPanel({
           setError("Замовлення заблоковано для редагування.");
           return;
         }
+        if (result.error === "EMPTY_ORDER_NOT_ALLOWED") {
+          setError("Порожнє замовлення можна зберігати лише на Чернетці або Розрахунку.");
+          return;
+        }
         setError("Не вдалося зберегти пропозицію. Перевірте склад усіх позицій.");
         return;
       }

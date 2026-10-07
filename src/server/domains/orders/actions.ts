@@ -1076,9 +1076,7 @@ export async function submitOrderForCalculationAction(formData: FormData) {
   if (order.status !== "DRAFT") {
     return { ok: false as const, error: "NOT_DRAFT" as const };
   }
-  if (order.items.length === 0) {
-    return { ok: false as const, error: "NO_ITEMS" as const };
-  }
+  // Empty draft may move to calculation; incomplete lines still block.
   const incomplete = order.items.some(
     (item) =>
       item.totalQuantity <= 0 ||
@@ -1103,7 +1101,18 @@ export async function setOrderStatusAction(formData: FormData) {
 
   const orderId = String(formData.get("orderId") ?? "");
   const status = String(formData.get("status") ?? "") as OrderStatus;
-  await updateOrderStatus(orderId, status, session.user.id);
+  try {
+    await updateOrderStatus(orderId, status, session.user.id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ERROR";
+    if (message === "EMPTY_ORDER_NOT_ALLOWED") {
+      return { ok: false as const, error: "EMPTY_ORDER_NOT_ALLOWED" as const };
+    }
+    if (message === "ORDER_NOT_FOUND") {
+      return { ok: false as const, error: "NOT_FOUND" as const };
+    }
+    throw error;
+  }
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/overview");
   return { ok: true as const };

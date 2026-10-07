@@ -84,6 +84,11 @@ export function OrderItemsTable({
       const result = await removeOrderItemAction(formData);
       if (!result.ok) {
         setBusyItemId(null);
+        window.alert(
+          result.error === "EMPTY_ORDER_NOT_ALLOWED"
+            ? "Порожнє замовлення можна лишати лише на Чернетці або Розрахунку."
+            : "Не вдалося прибрати позицію.",
+        );
         return;
       }
       if (fallback) {
